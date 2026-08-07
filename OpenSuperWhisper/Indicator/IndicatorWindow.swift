@@ -25,6 +25,7 @@ class IndicatorViewModel: ObservableObject {
     @Published var state: RecordingState = .idle
     @Published var isBlinking = false
     @Published var isConfirmingCancel = false
+    @Published private(set) var isFinalizing = false
     @Published var recorder: AudioRecorder = .shared
     
     var recordingStartedAt: Date?
@@ -38,11 +39,14 @@ class IndicatorViewModel: ObservableObject {
     private let recordingStore: RecordingStore
     private let transcriptionService: TranscriptionService
     private let transcriptionQueue: TranscriptionQueue
+    private let cleanupPipeline: TranscriptCleanupPipeline
+    private let latestDictationGate = LatestDictationGate()
     
     init() {
         self.recordingStore = RecordingStore.shared
         self.transcriptionService = TranscriptionService.shared
         self.transcriptionQueue = TranscriptionQueue.shared
+        self.cleanupPipeline = TranscriptCleanupPipeline.shared
         
         recorder.$isConnecting
             .receive(on: RunLoop.main)
@@ -68,7 +72,7 @@ class IndicatorViewModel: ObservableObject {
     }
     
     var isTranscriptionBusy: Bool {
-        transcriptionService.isTranscribing || transcriptionQueue.isProcessing
+        transcriptionService.isTranscribing || transcriptionQueue.isProcessing || isFinalizing
     }
     
     func showBusyMessage() {
@@ -162,17 +166,30 @@ class IndicatorViewModel: ObservableObject {
         
         Task { [weak self] in
             guard let self = self else { return }
+            let generation = self.latestDictationGate.begin()
             
             if let tempURL = await self.recorder.stopRecording() {
                 do {
                     print("start decoding...")
                     let duration = await AudioUtil.audioDuration(url: tempURL)
-                    let text = try await transcriptionService.transcribeAudio(url: tempURL, settings: Settings())
+                    let rawText = try await transcriptionService.transcribeAudio(url: tempURL, settings: Settings())
                     
-                    if text.isEmpty {
+                    if rawText.isEmpty {
                         try? FileManager.default.removeItem(at: tempURL)
                         print("No speech detected, dictation discarded")
                     } else {
+                        self.isFinalizing = true
+                        let cleanup = await self.cleanupPipeline.finalize(rawText)
+                        self.isFinalizing = false
+
+                        let text = cleanup.text
+                        guard !text.isEmpty else {
+                            try? FileManager.default.removeItem(at: tempURL)
+                            print("Cleanup produced an empty dictation; discarded")
+                            self.delegate?.didFinishDecoding()
+                            return
+                        }
+
                         let timestamp = Date()
                         let fileName = "\(Int(timestamp.timeIntervalSince1970)).wav"
                         let recordingId = UUID()
@@ -192,11 +209,24 @@ class IndicatorViewModel: ObservableObject {
                         await MainActor.run {
                             self.recordingStore.addRecording(newRecording)
                         }
+
+                        // begin() and this final decision both run on MainActor, so
+                        // no newer generation can slip between the check and paste.
+                        guard self.latestDictationGate.isCurrent(generation) else {
+                            print("Saved stale dictation generation \(generation) without pasting")
+                            self.delegate?.didFinishDecoding()
+                            return
+                        }
                         
                         insertText(text)
-                        print("Transcription result: \(text)")
+                        print(
+                            "Final transcript source=\(cleanup.source) " +
+                            "inputTokens=\(cleanup.inputTokens.map(String.init) ?? "unknown") " +
+                            "outputTokens=\(cleanup.outputTokens.map(String.init) ?? "unknown")"
+                        )
                     }
                 } catch {
+                    self.isFinalizing = false
                     print("Error transcribing audio: \(error)")
                     try? FileManager.default.removeItem(at: tempURL)
                 }
@@ -381,7 +411,7 @@ struct IndicatorWindow: View {
                         .scaleEffect(0.7)
                         .frame(width: 24)
                     
-                    Text("Transcribing...")
+                    Text(viewModel.isFinalizing ? "Refining..." : "Transcribing...")
                         .font(.system(size: 13, weight: .semibold))
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)

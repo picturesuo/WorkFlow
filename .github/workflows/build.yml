@@ -14,13 +14,23 @@ jobs:
           submodules: recursive
       - name: Install dependencies
         run: brew install cmake libomp rust
-      - name: Set up Ruby (for xcpretty)
-        uses: ruby/setup-ruby@v1
-        with:
-          ruby-version: '3.4'
-      - name: Install xcpretty
-        run: gem install xcpretty
-      - name: Make run.sh executable
-        run: chmod +x ./run.sh
       - name: Build with run.sh
-        run: ./run.sh build 
+        run: ./run.sh build
+      - name: Run deterministic tests
+        run: |
+          xcodebuild test -quiet \
+            -scheme OpenSuperWhisper \
+            -configuration Debug \
+            -derivedDataPath build \
+            -destination 'platform=macOS,arch=arm64' \
+            -skipPackagePluginValidation \
+            -skipMacroValidation \
+            -clonedSourcePackagesDirPath SourcePackages \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGN_IDENTITY='' \
+            CODE_SIGNING_REQUIRED=NO \
+            -only-testing:OpenSuperWhisperTests/BedrockCleanupServiceTests \
+            -only-testing:OpenSuperWhisperTests/TranscriptCleanupPipelineTests \
+            -only-testing:OpenSuperWhisperTests/LatestDictationGateTests \
+            -only-testing:OpenSuperWhisperTests/ClipboardRestoreTests \
+            -only-testing:OpenSuperWhisperTests/EmptyDictationDiscardTests

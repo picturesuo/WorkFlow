@@ -35,7 +35,7 @@ final class AppPreferences {
     }
     
     // Engine settings
-    @UserDefault(key: "selectedEngine", defaultValue: "whisper")
+    @UserDefault(key: "selectedEngine", defaultValue: "fluidaudio")
     var selectedEngine: String
     
     // Model settings
@@ -102,12 +102,12 @@ final class AppPreferences {
     @OptionalUserDefault(key: "selectedMicrophoneData")
     var selectedMicrophoneData: Data?
     
-    @UserDefault(key: "modifierOnlyHotkey", defaultValue: "none")
+    @UserDefault(key: "modifierOnlyHotkey", defaultValue: "fn")
     var modifierOnlyHotkey: String
     
     /// Last non-none modifier key, used to restore the user's choice
     /// when switching back to Single Modifier Key mode.
-    @UserDefault(key: "lastModifierOnlyHotkey", defaultValue: "leftCommand")
+    @UserDefault(key: "lastModifierOnlyHotkey", defaultValue: "fn")
     var lastModifierOnlyHotkey: String
     
     @UserDefault(key: "mouseButtonHotkey", defaultValue: "none")
@@ -130,10 +130,26 @@ final class AppPreferences {
     @UserDefault(key: "autoPasteTranscription", defaultValue: true)
     var autoPasteTranscription: Bool
 
+    // Bedrock cleanup settings. The API key is stored separately in Keychain.
+    @UserDefault(key: "bedrockCleanupEnabled", defaultValue: true)
+    var bedrockCleanupEnabled: Bool
+
+    @UserDefault(key: "bedrockRegion", defaultValue: BedrockCleanupConfiguration.defaultRegion)
+    var bedrockRegion: String
+
+    @UserDefault(key: "bedrockModelID", defaultValue: BedrockCleanupConfiguration.defaultModelID)
+    var bedrockModelID: String
+
+    @UserDefault(key: "bedrockTimeoutSeconds", defaultValue: BedrockCleanupConfiguration.defaultTimeout)
+    var bedrockTimeoutSeconds: Double
+
+    @UserDefault(key: "launchAtLogin", defaultValue: true)
+    var launchAtLogin: Bool
+
     @UserDefault(key: "escCancelWithoutConfirmation", defaultValue: false)
     var escCancelWithoutConfirmation: Bool
 
-    @UserDefault(key: "startHiddenInMenuBar", defaultValue: false)
+    @UserDefault(key: "startHiddenInMenuBar", defaultValue: true)
     var startHiddenInMenuBar: Bool
 
     @UserDefault(key: "autoDeleteRecordingsEnabled", defaultValue: false)

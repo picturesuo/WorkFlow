@@ -202,6 +202,42 @@ class SettingsViewModel: ObservableObject {
         }
     }
 
+    @Published var bedrockCleanupEnabled: Bool {
+        didSet {
+            AppPreferences.shared.bedrockCleanupEnabled = bedrockCleanupEnabled
+        }
+    }
+
+    @Published var bedrockRegion: String {
+        didSet {
+            AppPreferences.shared.bedrockRegion = bedrockRegion
+        }
+    }
+
+    @Published var bedrockModelID: String {
+        didSet {
+            AppPreferences.shared.bedrockModelID = bedrockModelID
+        }
+    }
+
+    @Published var bedrockTimeoutSeconds: Double {
+        didSet {
+            AppPreferences.shared.bedrockTimeoutSeconds = bedrockTimeoutSeconds
+        }
+    }
+
+    @Published var launchAtLogin: Bool {
+        didSet {
+            AppPreferences.shared.launchAtLogin = launchAtLogin
+            LaunchAtLoginManager.reconcile(enabled: launchAtLogin)
+        }
+    }
+
+    @Published var bedrockAPIKeyInput = ""
+    @Published private(set) var hasBedrockAPIKey = false
+    @Published private(set) var bedrockStatus = "Add a Bedrock API key to enable cleanup."
+    @Published private(set) var isTestingBedrock = false
+
     init() {
         let prefs = AppPreferences.shared
         self.selectedEngine = prefs.selectedEngine
@@ -226,6 +262,20 @@ class SettingsViewModel: ObservableObject {
         self.addSpaceAfterSentence = prefs.addSpaceAfterSentence
         self.autoCopyToClipboard = prefs.autoCopyToClipboard
         self.autoPasteTranscription = prefs.autoPasteTranscription
+        self.bedrockCleanupEnabled = prefs.bedrockCleanupEnabled
+        self.bedrockRegion = prefs.bedrockRegion
+        self.bedrockModelID = prefs.bedrockModelID
+        self.bedrockTimeoutSeconds = prefs.bedrockTimeoutSeconds
+        self.launchAtLogin = prefs.launchAtLogin
+
+        do {
+            self.hasBedrockAPIKey = try BedrockCredentialStore.loadAPIKey() != nil
+            if self.hasBedrockAPIKey {
+                self.bedrockStatus = "A Bedrock API key is stored securely in Keychain."
+            }
+        } catch {
+            self.bedrockStatus = error.localizedDescription
+        }
 
         if let savedPath = prefs.selectedWhisperModelPath ?? prefs.selectedModelPath {
             self.selectedModelURL = URL(fileURLWithPath: savedPath)
@@ -239,6 +289,52 @@ class SettingsViewModel: ObservableObject {
             selectedLanguage = fallback
             AppPreferences.shared.whisperLanguage = fallback
             NotificationCenter.default.post(name: .appPreferencesLanguageChanged, object: nil)
+        }
+    }
+
+    @MainActor
+    func saveAndTestBedrock() async {
+        isTestingBedrock = true
+        defer { isTestingBedrock = false }
+
+        do {
+            let enteredKey = bedrockAPIKeyInput.trimmingCharacters(in: .whitespacesAndNewlines)
+            let storedKey = try BedrockCredentialStore.loadAPIKey()
+            guard let token = enteredKey.isEmpty ? storedKey : enteredKey, !token.isEmpty else {
+                hasBedrockAPIKey = false
+                bedrockStatus = "Enter a Bedrock API key first."
+                return
+            }
+
+            let result = try await BedrockCleanupService.shared.clean(
+                transcript: "Um, this is a GlowScribe connection test.",
+                apiKey: token,
+                configuration: BedrockCleanupConfiguration(
+                    region: bedrockRegion,
+                    modelID: bedrockModelID,
+                    timeout: bedrockTimeoutSeconds
+                )
+            )
+            if !enteredKey.isEmpty {
+                try BedrockCredentialStore.saveAPIKey(enteredKey)
+                bedrockAPIKeyInput = ""
+            }
+            hasBedrockAPIKey = true
+            bedrockStatus = "Connected to Bedrock (\(result.inputTokens ?? 0) in / \(result.outputTokens ?? 0) out)."
+        } catch {
+            hasBedrockAPIKey = ((try? BedrockCredentialStore.loadAPIKey()) ?? nil) != nil
+            bedrockStatus = "Connection failed: \(error.localizedDescription)"
+        }
+    }
+
+    func clearBedrockCredential() {
+        do {
+            try BedrockCredentialStore.deleteAPIKey()
+            bedrockAPIKeyInput = ""
+            hasBedrockAPIKey = false
+            bedrockStatus = "Bedrock API key removed from Keychain."
+        } catch {
+            bedrockStatus = error.localizedDescription
         }
     }
     
@@ -688,13 +784,19 @@ struct SettingsView: View {
                     Label("Transcription", systemImage: "text.bubble")
                 }
                 .tag(2)
+
+            bedrockSettings
+                .tabItem {
+                    Label("Bedrock", systemImage: "sparkles")
+                }
+                .tag(3)
             
             // Advanced Settings
             advancedSettings
                 .tabItem {
                     Label("Advanced", systemImage: "gear")
                 }
-                .tag(3)
+                .tag(4)
             }
         .padding()
         .frame(width: sheetSize.width, height: sheetSize.height)
@@ -714,7 +816,7 @@ struct SettingsView: View {
                 
                 Spacer()
                 
-                Link(destination: URL(string: "https://github.com/Starmel/OpenSuperWhisper")!) {
+                Link(destination: URL(string: "https://github.com/picturesuo/glowscribe")!) {
                     HStack(spacing: 4) {
                         Image(systemName: "star")
                             .font(.system(size: 10))
@@ -750,6 +852,100 @@ struct SettingsView: View {
                     TranscriptionService.shared.reloadModel(with: modelPath)
                 }
             }
+        }
+    }
+
+    private var bedrockSettings: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 20) {
+                VStack(alignment: .leading, spacing: 16) {
+                    HStack {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("AI Transcript Cleanup")
+                                .font(.headline)
+                            Text("Local speech recognition stays on your Mac. Only the transcript is sent to Amazon Bedrock.")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                        }
+                        Spacer()
+                        Toggle("", isOn: $viewModel.bedrockCleanupEnabled)
+                            .toggleStyle(SwitchToggleStyle(tint: Color.accentColor))
+                            .labelsHidden()
+                    }
+
+                    SecureField(
+                        viewModel.hasBedrockAPIKey ? "Stored in Keychain (enter to replace)" : "Bedrock API key",
+                        text: $viewModel.bedrockAPIKeyInput
+                    )
+                    .textFieldStyle(.roundedBorder)
+
+                    HStack {
+                        Button {
+                            Task { await viewModel.saveAndTestBedrock() }
+                        } label: {
+                            if viewModel.isTestingBedrock {
+                                ProgressView()
+                                    .controlSize(.small)
+                            } else {
+                                Label("Save & Test", systemImage: "checkmark.shield")
+                            }
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .disabled(viewModel.isTestingBedrock)
+
+                        if viewModel.hasBedrockAPIKey {
+                            Button("Remove Key", role: .destructive) {
+                                viewModel.clearBedrockCredential()
+                            }
+                            .buttonStyle(.bordered)
+                        }
+                    }
+
+                    Text(viewModel.bedrockStatus)
+                        .font(.caption)
+                        .foregroundColor(viewModel.bedrockStatus.hasPrefix("Connection failed") ? .orange : .secondary)
+                        .textSelection(.enabled)
+                }
+                .padding()
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(Color(.controlBackgroundColor).opacity(0.3))
+                .cornerRadius(12)
+
+                VStack(alignment: .leading, spacing: 14) {
+                    Text("Model")
+                        .font(.headline)
+
+                    TextField("AWS Region", text: $viewModel.bedrockRegion)
+                        .textFieldStyle(.roundedBorder)
+                    TextField("Bedrock model ID", text: $viewModel.bedrockModelID)
+                        .textFieldStyle(.roundedBorder)
+
+                    HStack {
+                        Text("Raw fallback after")
+                            .font(.subheadline)
+                        Spacer()
+                        Stepper(
+                            "\(viewModel.bedrockTimeoutSeconds, specifier: "%.1f") seconds",
+                            value: $viewModel.bedrockTimeoutSeconds,
+                            in: 0.5...10,
+                            step: 0.5
+                        )
+                        .frame(width: 180)
+                    }
+
+                    Text("Default: Amazon Nova Micro in us-east-1. If Bedrock is slow or unavailable, GlowScribe pastes the local transcript instead of losing your dictation.")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                }
+                .padding()
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(Color(.controlBackgroundColor).opacity(0.3))
+                .cornerRadius(12)
+
+                Link("Create or manage a Bedrock API key in AWS", destination: URL(string: "https://console.aws.amazon.com/bedrock/home#/api-keys")!)
+                    .font(.caption)
+            }
+            .padding()
         }
     }
     
@@ -1402,18 +1598,34 @@ struct SettingsView: View {
                         .font(.headline)
                         .foregroundColor(.primary)
 
-                    HStack {
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text("Start hidden in menu bar")
-                                .font(.subheadline)
-                            Text("Launch without opening the main window; use the menu bar icon to open it")
-                                .font(.caption)
-                                .foregroundColor(.secondary)
+                    VStack(alignment: .leading, spacing: 12) {
+                        HStack {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text("Launch at login")
+                                    .font(.subheadline)
+                                Text("Keep GlowScribe ready after you sign in")
+                                    .font(.caption)
+                                    .foregroundColor(.secondary)
+                            }
+                            Spacer()
+                            Toggle("", isOn: $viewModel.launchAtLogin)
+                                .toggleStyle(SwitchToggleStyle(tint: Color.accentColor))
+                                .labelsHidden()
                         }
-                        Spacer()
-                        Toggle("", isOn: $viewModel.startHiddenInMenuBar)
-                            .toggleStyle(SwitchToggleStyle(tint: Color.accentColor))
-                            .labelsHidden()
+
+                        HStack {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text("Start hidden in menu bar")
+                                    .font(.subheadline)
+                                Text("Launch without opening the main window; use the menu bar icon to open it")
+                                    .font(.caption)
+                                    .foregroundColor(.secondary)
+                            }
+                            Spacer()
+                            Toggle("", isOn: $viewModel.startHiddenInMenuBar)
+                                .toggleStyle(SwitchToggleStyle(tint: Color.accentColor))
+                                .labelsHidden()
+                        }
                     }
                 }
                 .padding()
@@ -1863,4 +2075,3 @@ struct ModelDownloadItemView: View {
         }
     }
 }
-
