@@ -341,7 +341,7 @@ struct OnboardingView: View {
                         .fontWeight(.medium)
                         .foregroundColor(.secondary)
                     
-                    Text("OpenSuperWhisper")
+                    Text("GlowScribe")
                         .font(.system(size: 32, weight: .bold))
                         .foregroundStyle(
                             .white
@@ -792,4 +792,3 @@ struct OnboardingShortcutCard: View {
 #Preview {
     OnboardingView()
 }
-

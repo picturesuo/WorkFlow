@@ -123,6 +123,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
         )
 
         let prefs = AppPreferences.shared
+        LaunchAtLoginManager.reconcile(enabled: prefs.launchAtLogin)
         if prefs.startHiddenInMenuBar && prefs.hasCompletedOnboarding {
             hideMainWindowAtLaunch = true
             mainWindow?.orderOut(nil)
@@ -219,7 +220,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
                 iconImage.isTemplate = true
                 button.image = iconImage
             } else {
-                button.image = NSImage(systemSymbolName: "waveform", accessibilityDescription: "OpenSuperWhisper")
+                button.image = NSImage(systemSymbolName: "waveform", accessibilityDescription: "GlowScribe")
             }
             
             button.action = #selector(statusBarButtonClicked(_:))
@@ -232,7 +233,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
     private func updateStatusBarMenu() {
         let menu = NSMenu()
         
-        menu.addItem(NSMenuItem(title: "OpenSuperWhisper", action: #selector(openApp), keyEquivalent: "o"))
+        menu.addItem(NSMenuItem(title: "GlowScribe", action: #selector(openApp), keyEquivalent: "o"))
         
         let transcriptionLanguageItem = NSMenuItem(title: "Language", action: nil, keyEquivalent: "")
         languageSubmenu = NSMenu()

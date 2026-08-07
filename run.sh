@@ -1,8 +1,14 @@
 #!/bin/zsh
+set -euo pipefail
 
 JUST_BUILD=false
-if [[ "$1" == "build" ]]; then
+if [[ "${1:-}" == "build" ]]; then
     JUST_BUILD=true
+fi
+build_configuration=${GLOWSCRIBE_BUILD_CONFIGURATION:-Debug}
+
+if [[ -z "${DEVELOPER_DIR:-}" && -d /Applications/Xcode.app/Contents/Developer ]]; then
+    export DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer
 fi
 
 # Configure libwhisper
@@ -20,6 +26,7 @@ CARGO_PROFILE_RELEASE_CODEGEN_UNITS=1 \
 CARGO_PROFILE_RELEASE_STRIP=symbols \
 CARGO_PROFILE_RELEASE_PANIC=abort \
 cargo build -p autocorrect-swift --release --target aarch64-apple-darwin --manifest-path=asian-autocorrect/Cargo.toml
+rm -f ./build/libautocorrect_swift.dylib
 cp ./asian-autocorrect/target/aarch64-apple-darwin/release/libautocorrect_swift.dylib ./build/libautocorrect_swift.dylib
 install_name_tool -id "@rpath/libautocorrect_swift.dylib" ./build/libautocorrect_swift.dylib
 codesign --force --sign - ./build/libautocorrect_swift.dylib
@@ -29,13 +36,17 @@ if [[ $? -ne 0 ]]; then
 fi
 
 echo "Copying libomp.dylib..."
+rm -f ./build/libomp.dylib
 cp /opt/homebrew/opt/libomp/lib/libomp.dylib ./build/libomp.dylib
 install_name_tool -id "@rpath/libomp.dylib" ./build/libomp.dylib
 codesign --force --sign - ./build/libomp.dylib
 
 # Build the app
-echo "Building OpenSuperWhisper..."
-BUILD_OUTPUT=$(xcodebuild -scheme OpenSuperWhisper -configuration Debug -jobs 8 -derivedDataPath build -quiet -destination 'platform=macOS,arch=arm64' -skipPackagePluginValidation -skipMacroValidation -UseModernBuildSystem=YES -clonedSourcePackagesDirPath SourcePackages -skipUnavailableActions CODE_SIGNING_ALLOWED=NO CODE_SIGN_IDENTITY="" CODE_SIGNING_REQUIRED=NO OTHER_CODE_SIGN_FLAGS="--entitlements OpenSuperWhisper/OpenSuperWhisper.entitlements" build 2>&1)
+echo "Building GlowScribe..."
+set +e
+BUILD_OUTPUT=$(xcodebuild -scheme OpenSuperWhisper -configuration "$build_configuration" -jobs 8 -derivedDataPath build -quiet -destination 'platform=macOS,arch=arm64' -skipPackagePluginValidation -skipMacroValidation -UseModernBuildSystem=YES -clonedSourcePackagesDirPath SourcePackages -skipUnavailableActions CODE_SIGNING_ALLOWED=NO CODE_SIGN_IDENTITY="" CODE_SIGNING_REQUIRED=NO OTHER_CODE_SIGN_FLAGS="--entitlements OpenSuperWhisper/OpenSuperWhisper.entitlements" build 2>&1)
+build_exit=$?
+set -e
 
 # sudo gem install xcpretty
 if command -v xcpretty &> /dev/null
@@ -46,17 +57,17 @@ else
 fi
 
 # Check if build output contains BUILD FAILED or if the command failed
-if [[ $? -eq 0 ]] && [[ ! "$BUILD_OUTPUT" =~ "BUILD FAILED" ]]; then
+if [[ $build_exit -eq 0 ]] && [[ ! "$BUILD_OUTPUT" =~ "BUILD FAILED" ]]; then
     echo "Building successful!"
     if $JUST_BUILD; then
         exit 0
     fi
     echo "Starting the app..."
     # Remove quarantine attribute if exists
-    xattr -d com.apple.quarantine ./Build/Build/Products/Debug/OpenSuperWhisper.app 2>/dev/null || true
+    xattr -d com.apple.quarantine "./build/Build/Products/$build_configuration/GlowScribe.app" 2>/dev/null || true
     # Run the app and show logs
-    ./Build/Build/Products/Debug/OpenSuperWhisper.app/Contents/MacOS/OpenSuperWhisper
+    "./build/Build/Products/$build_configuration/GlowScribe.app/Contents/MacOS/GlowScribe"
 else
     echo "Build failed!"
     exit 1
-fi 
+fi
