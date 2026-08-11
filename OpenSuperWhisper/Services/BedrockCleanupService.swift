@@ -2,7 +2,8 @@ import Foundation
 
 struct BedrockCleanupConfiguration: Equatable {
     static let defaultRegion = "us-east-1"
-    static let defaultModelID = "amazon.nova-micro-v1:0"
+    static let legacyOnDemandModelID = "amazon.nova-micro-v1:0"
+    static let defaultModelID = "us.amazon.nova-micro-v1:0"
     static let defaultTimeout: TimeInterval = 3.0
 
     let region: String

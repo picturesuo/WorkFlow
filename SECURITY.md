@@ -8,6 +8,6 @@ Include the affected version, macOS version, reproduction steps, and impact. Do 
 
 ## Credential boundary
 
-GlowScribe stores the Bedrock bearer token in the macOS Keychain and never intentionally writes it to logs, preferences, recordings, or the repository. A report that shows otherwise is high priority.
+Chat stores the Bedrock bearer token in the macOS Keychain and never intentionally writes it to logs, preferences, recordings, or the repository. A report that shows otherwise is high priority.
 
 Rotate the AWS key immediately if you believe it has been exposed. Prefer short-term Bedrock API keys and least-privilege AWS permissions.

@@ -307,7 +307,7 @@ class SettingsViewModel: ObservableObject {
             }
 
             let result = try await BedrockCleanupService.shared.clean(
-                transcript: "Um, this is a GlowScribe connection test.",
+                transcript: "Um, this is a Chat connection test.",
                 apiKey: token,
                 configuration: BedrockCleanupConfiguration(
                     region: bedrockRegion,
@@ -816,7 +816,7 @@ struct SettingsView: View {
                 
                 Spacer()
                 
-                Link(destination: URL(string: "https://github.com/picturesuo/glowscribe")!) {
+                Link(destination: URL(string: "https://github.com/picturesuo/chat")!) {
                     HStack(spacing: 4) {
                         Image(systemName: "star")
                             .font(.system(size: 10))
@@ -933,7 +933,7 @@ struct SettingsView: View {
                         .frame(width: 180)
                     }
 
-                    Text("Default: Amazon Nova Micro in us-east-1. If Bedrock is slow or unavailable, GlowScribe pastes the local transcript instead of losing your dictation.")
+                    Text("Default: Amazon Nova Micro in us-east-1. If Bedrock is slow or unavailable, Chat pastes the local transcript instead of losing your dictation.")
                         .font(.caption)
                         .foregroundColor(.secondary)
                 }
@@ -1603,7 +1603,7 @@ struct SettingsView: View {
                             VStack(alignment: .leading, spacing: 2) {
                                 Text("Launch at login")
                                     .font(.subheadline)
-                                Text("Keep GlowScribe ready after you sign in")
+                                Text("Keep Chat ready after you sign in")
                                     .font(.caption)
                                     .foregroundColor(.secondary)
                             }

@@ -3,9 +3,9 @@ set -euo pipefail
 
 script_dir=${0:A:h}
 repo_root=${script_dir:h}
-source_svg="$repo_root/Resources/GlowScribeIcon.svg"
+source_svg="$repo_root/Resources/ChatIcon.svg"
 destination_icns="$repo_root/OpenSuperWhisper/AppIcon.icns"
-preview_png="$repo_root/docs/glowscribe-icon.png"
+preview_png="$repo_root/docs/chat-icon.png"
 
 for command_name in qlmanage sips iconutil; do
     if ! command -v "$command_name" >/dev/null 2>&1; then
@@ -18,13 +18,13 @@ temporary_dir=$(mktemp -d)
 trap 'rm -rf "$temporary_dir"' EXIT
 
 qlmanage -t -s 1024 -o "$temporary_dir" "$source_svg" >/dev/null 2>&1
-rendered_png="$temporary_dir/GlowScribeIcon.svg.png"
+rendered_png="$temporary_dir/ChatIcon.svg.png"
 if [[ ! -f "$rendered_png" ]]; then
     echo "Quick Look did not render the SVG icon." >&2
     exit 1
 fi
 
-iconset="$temporary_dir/GlowScribe.iconset"
+iconset="$temporary_dir/Chat.iconset"
 mkdir -p "$iconset"
 
 sips -z 16 16 "$rendered_png" --out "$iconset/icon_16x16.png" >/dev/null

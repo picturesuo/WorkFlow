@@ -37,7 +37,7 @@ final class BedrockCleanupServiceTests: XCTestCase {
             XCTAssertEqual(request.httpMethod, "POST")
             XCTAssertEqual(request.value(forHTTPHeaderField: "Authorization"), "Bearer secret-test-key")
             XCTAssertEqual(request.url?.host, "bedrock-runtime.us-east-1.amazonaws.com")
-            XCTAssertTrue(request.url?.path.contains("amazon.nova-micro-v1:0") == true)
+            XCTAssertTrue(request.url?.path.contains("us.amazon.nova-micro-v1:0") == true)
 
             let requestBody = try XCTUnwrap(Self.bodyData(from: request))
             let json = try XCTUnwrap(JSONSerialization.jsonObject(with: requestBody) as? [String: Any])

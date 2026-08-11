@@ -53,6 +53,11 @@ struct OpenSuperWhisperApp: App {
 
     init() {
         guard !Self.isRunningTests else { return }
+        do {
+            try RenamedAppMigration.migrateApplicationSupport()
+        } catch {
+            print("Unable to migrate application data to \(AppIdentity.productName): \(error.localizedDescription)")
+        }
         _ = ShortcutManager.shared
         _ = MicrophoneService.shared
         WhisperModelManager.shared.ensureDefaultModelPresent()
@@ -220,7 +225,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
                 iconImage.isTemplate = true
                 button.image = iconImage
             } else {
-                button.image = NSImage(systemSymbolName: "waveform", accessibilityDescription: "GlowScribe")
+                button.image = NSImage(systemSymbolName: "waveform", accessibilityDescription: "Chat")
             }
             
             button.action = #selector(statusBarButtonClicked(_:))
@@ -233,7 +238,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
     private func updateStatusBarMenu() {
         let menu = NSMenu()
         
-        menu.addItem(NSMenuItem(title: "GlowScribe", action: #selector(openApp), keyEquivalent: "o"))
+        menu.addItem(NSMenuItem(title: "Chat", action: #selector(openApp), keyEquivalent: "o"))
         
         let transcriptionLanguageItem = NSMenuItem(title: "Language", action: nil, keyEquivalent: "")
         languageSubmenu = NSMenu()

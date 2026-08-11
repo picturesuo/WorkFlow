@@ -3,9 +3,9 @@
 <plist version="1.0">
 <dict>
 	<key>CFBundleDisplayName</key>
-	<string>GlowScribe</string>
+	<string>Chat</string>
 	<key>CFBundleName</key>
-	<string>GlowScribe</string>
+	<string>Chat</string>
 	<key>CFBundleIconFile</key>
 	<string>AppIcon.icns</string>
 	<key>CFBundleDocumentTypes</key>
@@ -24,10 +24,10 @@
 	<key>LSMinimumSystemVersion</key>
 	<string>14.0</string>
 	<key>NSMicrophoneUsageDescription</key>
-	<string>GlowScribe needs microphone access to record audio for transcription.</string>
+	<string>Chat needs microphone access to record audio for transcription.</string>
 	<key>NSAccessibilityUsageDescription</key>
-	<string>GlowScribe needs accessibility access to paste dictation into the focused app.</string>
+	<string>Chat needs accessibility access to paste dictation into the focused app.</string>
 	<key>NSAppleEventsUsageDescription</key>
-	<string>GlowScribe needs accessibility access to paste dictation into the focused app.</string>
+	<string>Chat needs accessibility access to paste dictation into the focused app.</string>
 </dict>
 </plist>

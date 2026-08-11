@@ -126,7 +126,7 @@
 /* Begin PBXFileReference section */
 		840156402D79E87600FB5FFE /* libwhisper.xcodeproj */ = {isa = PBXFileReference; lastKnownFileType = "wrapper.pb-project"; name = libwhisper.xcodeproj; path = libwhisper/build/libwhisper.xcodeproj; sourceTree = "<group>"; };
 		840156592D79EA1A00FB5FFE /* Bridge.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = Bridge.h; sourceTree = "<group>"; };
-		CE57B0282D52C7BB00929AF3 /* GlowScribe.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = GlowScribe.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		CE57B0282D52C7BB00929AF3 /* Chat.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Chat.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		CE57B0392D52C7BC00929AF3 /* OpenSuperWhisperTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = OpenSuperWhisperTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		CE57B0432D52C7BC00929AF3 /* OpenSuperWhisperUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = OpenSuperWhisperUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		CE84DF242D550BB400C54EA6 /* Entitlements.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Entitlements.plist; sourceTree = "<group>"; };
@@ -295,7 +295,7 @@
 		CE57B0292D52C7BB00929AF3 /* Products */ = {
 			isa = PBXGroup;
 			children = (
-				CE57B0282D52C7BB00929AF3 /* GlowScribe.app */,
+				CE57B0282D52C7BB00929AF3 /* Chat.app */,
 				CE57B0392D52C7BC00929AF3 /* OpenSuperWhisperTests.xctest */,
 				CE57B0432D52C7BC00929AF3 /* OpenSuperWhisperUITests.xctest */,
 			);
@@ -431,7 +431,7 @@
 				CE84E17E2D56550B00C54EA7 /* FluidAudio */,
 			);
 			productName = OpenSuperWhisper;
-			productReference = CE57B0282D52C7BB00929AF3 /* GlowScribe.app */;
+			productReference = CE57B0282D52C7BB00929AF3 /* Chat.app */;
 			productType = "com.apple.product-type.application";
 		};
 		CE57B0382D52C7BC00929AF3 /* OpenSuperWhisperTests */ = {
@@ -791,8 +791,6 @@
 				DEAD_CODE_STRIPPING = YES;
 				DEFINES_MODULE = YES;
 				DEVELOPMENT_ASSET_PATHS = "\"OpenSuperWhisper/Preview Content\"";
-				DEVELOPMENT_TEAM = 8LLDD7HWZK;
-				"DEVELOPMENT_TEAM[sdk=macosx*]" = 8LLDD7HWZK;
 				ENABLE_HARDENED_RUNTIME = YES;
 				ENABLE_MODULE_VERIFIER = YES;
 				ENABLE_PREVIEWS = YES;
@@ -808,9 +806,9 @@
 				);
 				INFOPLIST_FILE = "OpenSuperWhisper/OpenSuperWhisper-Info.plist";
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.productivity";
-				INFOPLIST_KEY_NSAppleEventsUsageDescription = "GlowScribe needs accessibility access to paste dictation into the focused app.";
+				INFOPLIST_KEY_NSAppleEventsUsageDescription = "Chat needs accessibility access to paste dictation into the focused app.";
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
-				INFOPLIST_KEY_NSMicrophoneUsageDescription = "GlowScribe needs microphone access to record audio for transcription.";
+				INFOPLIST_KEY_NSMicrophoneUsageDescription = "Chat needs microphone access to record audio for transcription.";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/../Frameworks",
@@ -828,9 +826,9 @@
 					"$(inherited)",
 					"-lomp",
 				);
-				PRODUCT_BUNDLE_IDENTIFIER = com.picturesuo.GlowScribe;
+				PRODUCT_BUNDLE_IDENTIFIER = com.picturesuo.Chat;
 				PRODUCT_MODULE_NAME = OpenSuperWhisper;
-				PRODUCT_NAME = GlowScribe;
+				PRODUCT_NAME = Chat;
 				PROVISIONING_PROFILE_SPECIFIER = "";
 				"PROVISIONING_PROFILE_SPECIFIER[sdk=macosx*]" = "";
 				SWIFT_EMIT_LOC_STRINGS = YES;
@@ -856,8 +854,6 @@
 				STRIP_INSTALLED_PRODUCT = YES;
 				STRIP_STYLE = all;
 				DEVELOPMENT_ASSET_PATHS = "\"OpenSuperWhisper/Preview Content\"";
-				DEVELOPMENT_TEAM = 8LLDD7HWZK;
-				"DEVELOPMENT_TEAM[sdk=macosx*]" = 8LLDD7HWZK;
 				ENABLE_HARDENED_RUNTIME = YES;
 				ENABLE_MODULE_VERIFIER = YES;
 				ENABLE_PREVIEWS = YES;
@@ -874,9 +870,9 @@
 				);
 				INFOPLIST_FILE = "OpenSuperWhisper/OpenSuperWhisper-Info.plist";
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.productivity";
-				INFOPLIST_KEY_NSAppleEventsUsageDescription = "GlowScribe needs accessibility access to paste dictation into the focused app.";
+				INFOPLIST_KEY_NSAppleEventsUsageDescription = "Chat needs accessibility access to paste dictation into the focused app.";
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
-				INFOPLIST_KEY_NSMicrophoneUsageDescription = "GlowScribe needs microphone access to record audio for transcription.";
+				INFOPLIST_KEY_NSMicrophoneUsageDescription = "Chat needs microphone access to record audio for transcription.";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/../Frameworks",
@@ -895,9 +891,9 @@
 					"$(inherited)",
 					"-lomp",
 				);
-				PRODUCT_BUNDLE_IDENTIFIER = com.picturesuo.GlowScribe;
+				PRODUCT_BUNDLE_IDENTIFIER = com.picturesuo.Chat;
 				PRODUCT_MODULE_NAME = OpenSuperWhisper;
-				PRODUCT_NAME = GlowScribe;
+				PRODUCT_NAME = Chat;
 				PROVISIONING_PROFILE_SPECIFIER = "";
 				"PROVISIONING_PROFILE_SPECIFIER[sdk=macosx*]" = "";
 				SWIFT_EMIT_LOC_STRINGS = YES;
@@ -914,7 +910,6 @@
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 13;
 				DEAD_CODE_STRIPPING = YES;
-				DEVELOPMENT_TEAM = 8LLDD7HWZK;
 				GENERATE_INFOPLIST_FILE = YES;
 				HEADER_SEARCH_PATHS = (
 					"$(inherited)",
@@ -922,12 +917,12 @@
 				);
 				MACOSX_DEPLOYMENT_TARGET = 15.1;
 				MARKETING_VERSION = 0.1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = com.picturesuo.GlowScribeTests;
+				PRODUCT_BUNDLE_IDENTIFIER = com.picturesuo.ChatTests;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = NO;
 				SWIFT_OBJC_BRIDGING_HEADER = "$(PROJECT_DIR)/Bridge.h";
 				SWIFT_VERSION = 5.0;
-				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/GlowScribe.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/GlowScribe";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Chat.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/Chat";
 			};
 			name = Debug;
 		};
@@ -938,7 +933,6 @@
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 13;
 				DEAD_CODE_STRIPPING = YES;
-				DEVELOPMENT_TEAM = 8LLDD7HWZK;
 				GENERATE_INFOPLIST_FILE = YES;
 				HEADER_SEARCH_PATHS = (
 					"$(inherited)",
@@ -946,12 +940,12 @@
 				);
 				MACOSX_DEPLOYMENT_TARGET = 15.1;
 				MARKETING_VERSION = 0.1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = com.picturesuo.GlowScribeTests;
+				PRODUCT_BUNDLE_IDENTIFIER = com.picturesuo.ChatTests;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = NO;
 				SWIFT_OBJC_BRIDGING_HEADER = "$(PROJECT_DIR)/Bridge.h";
 				SWIFT_VERSION = 5.0;
-				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/GlowScribe.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/GlowScribe";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Chat.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/Chat";
 			};
 			name = Release;
 		};
@@ -961,10 +955,9 @@
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 13;
 				DEAD_CODE_STRIPPING = YES;
-				DEVELOPMENT_TEAM = 8LLDD7HWZK;
 				GENERATE_INFOPLIST_FILE = YES;
 				MARKETING_VERSION = 0.1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = com.picturesuo.GlowScribeUITests;
+				PRODUCT_BUNDLE_IDENTIFIER = com.picturesuo.ChatUITests;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = NO;
 				SWIFT_VERSION = 5.0;
@@ -978,10 +971,9 @@
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 13;
 				DEAD_CODE_STRIPPING = YES;
-				DEVELOPMENT_TEAM = 8LLDD7HWZK;
 				GENERATE_INFOPLIST_FILE = YES;
 				MARKETING_VERSION = 0.1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = com.picturesuo.GlowScribeUITests;
+				PRODUCT_BUNDLE_IDENTIFIER = com.picturesuo.ChatUITests;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = NO;
 				SWIFT_VERSION = 5.0;

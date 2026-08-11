@@ -3,12 +3,13 @@ set -euo pipefail
 
 script_dir=${0:A:h}
 repo_root=${script_dir:h}
-source_app="$repo_root/build/Build/Products/Release/GlowScribe.app"
-destination_app="/Applications/GlowScribe.app"
+source_app="$repo_root/build/Build/Products/Release/Chat.app"
+destination_app="/Applications/Chat.app"
+legacy_app="/Applications/GlowScribe.app"
 entitlements_file="$repo_root/OpenSuperWhisper/OpenSuperWhisper.entitlements"
 macos_major=${$(sw_vers -productVersion)%%.*}
 
-signing_identity=${GLOWSCRIBE_SIGNING_IDENTITY:-}
+signing_identity=${CHAT_SIGNING_IDENTITY:-}
 identities=$(security find-identity -v -p codesigning 2>/dev/null || true)
 if [[ -z "$signing_identity" ]]; then
     signing_identity=$(print -r -- "$identities" \
@@ -24,24 +25,23 @@ if (( macos_major >= 26 )); then
     identity_line=$(print -r -- "$identities" | grep -F "$signing_identity" || true)
     if [[ -z "$signing_identity" \
         || ! "$identity_line" =~ '"(Apple Development|Developer ID Application|Apple Distribution|Mac Developer):' ]]; then
-        echo "GlowScribe needs an Apple-issued code-signing identity on macOS 26 or later." >&2
+        echo "Chat needs an Apple-issued code-signing identity on macOS 26 or later." >&2
         echo "Open Xcode > Settings > Accounts, add your Apple Account, and create an Apple Development certificate." >&2
-        echo "Then rerun this installer (or set GLOWSCRIBE_SIGNING_IDENTITY explicitly)." >&2
+        echo "Then rerun this installer (or set CHAT_SIGNING_IDENTITY explicitly)." >&2
         exit 1
     fi
 fi
 
 cd "$repo_root"
-GLOWSCRIBE_BUILD_CONFIGURATION=Release ./run.sh build
+CHAT_BUILD_CONFIGURATION=Release ./run.sh build
 
 if [[ ! -d "$source_app" ]]; then
-    echo "Build succeeded but GlowScribe.app was not found." >&2
+    echo "Build succeeded but Chat.app was not found." >&2
     exit 1
 fi
 
-if pgrep -x GlowScribe >/dev/null 2>&1; then
-    pkill -x GlowScribe
-fi
+pkill -f -x "$destination_app/Contents/MacOS/Chat" 2>/dev/null || true
+pkill -f -x "$legacy_app/Contents/MacOS/GlowScribe" 2>/dev/null || true
 
 ditto "$source_app" "$destination_app"
 xattr -cr "$destination_app"
@@ -57,5 +57,11 @@ codesign --force --deep --sign "$signing_identity" --timestamp=none --options ru
 codesign --force --sign "$signing_identity" --timestamp=none --options runtime \
     --entitlements "$entitlements_file" "$destination_app"
 codesign --verify --deep --strict "$destination_app"
+
+if [[ -d "$legacy_app" ]]; then
+    legacy_archive="$HOME/.Trash/GlowScribe-$(date +%Y%m%d-%H%M%S).app"
+    mv "$legacy_app" "$legacy_archive"
+    echo "Moved the previous app to $legacy_archive"
+fi
 
 echo "Installed $destination_app (signing identity: $signing_identity)"

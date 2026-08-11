@@ -24,6 +24,92 @@ final class DiskSpaceUtilTests: XCTestCase {
     }
 }
 
+final class RenamedAppMigrationTests: XCTestCase {
+
+    func testPreferencesMigrationCopiesLegacyValuesWithoutOverwritingChatValues() throws {
+        let suiteName = "chat-migration-test-\(UUID().uuidString)"
+        let target = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        defer { target.removePersistentDomain(forName: suiteName) }
+
+        target.set("eu-west-1", forKey: "bedrockRegion")
+        RenamedAppMigration.migratePreferences(
+            target: target,
+            legacyDomain: [
+                "bedrockRegion": "us-east-1",
+                "launchAtLogin": true
+            ]
+        )
+
+        XCTAssertEqual(target.string(forKey: "bedrockRegion"), "eu-west-1")
+        XCTAssertTrue(target.bool(forKey: "launchAtLogin"))
+
+        target.set(false, forKey: "launchAtLogin")
+        RenamedAppMigration.migratePreferences(
+            target: target,
+            legacyDomain: ["launchAtLogin": true]
+        )
+        XCTAssertFalse(target.bool(forKey: "launchAtLogin"))
+    }
+
+    func testApplicationSupportMigrationCopiesMissingDataWithoutDeletingLegacyData() throws {
+        let fileManager = FileManager.default
+        let root = fileManager.temporaryDirectory
+            .appendingPathComponent("chat-migration-test-\(UUID().uuidString)")
+        let legacyDirectory = root.appendingPathComponent(AppIdentity.legacyBundleIdentifier)
+        let currentDirectory = root.appendingPathComponent(AppIdentity.bundleIdentifier)
+        defer { try? fileManager.removeItem(at: root) }
+
+        try fileManager.createDirectory(at: legacyDirectory, withIntermediateDirectories: true)
+        try Data("legacy recordings".utf8).write(
+            to: legacyDirectory.appendingPathComponent("recordings.sqlite")
+        )
+
+        try RenamedAppMigration.migrateApplicationSupport(
+            fileManager: fileManager,
+            applicationSupportDirectory: root
+        )
+
+        let migratedURL = currentDirectory.appendingPathComponent("recordings.sqlite")
+        XCTAssertEqual(try Data(contentsOf: migratedURL), Data("legacy recordings".utf8))
+        XCTAssertTrue(fileManager.fileExists(atPath: legacyDirectory.path))
+
+        try Data("chat recordings".utf8).write(to: migratedURL)
+        try RenamedAppMigration.migrateApplicationSupport(
+            fileManager: fileManager,
+            applicationSupportDirectory: root
+        )
+        XCTAssertEqual(try Data(contentsOf: migratedURL), Data("chat recordings".utf8))
+    }
+}
+
+final class AppPreferencesMigrationTests: XCTestCase {
+
+    func testLegacyNovaMicroModelMigratesToWorkingInferenceProfile() throws {
+        let suiteName = "chat-preferences-test-\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        defaults.set(BedrockCleanupConfiguration.legacyOnDemandModelID, forKey: "bedrockModelID")
+        AppPreferences.migrateOldPreferences(in: defaults)
+
+        XCTAssertEqual(
+            defaults.string(forKey: "bedrockModelID"),
+            BedrockCleanupConfiguration.defaultModelID
+        )
+    }
+
+    func testCustomBedrockModelIsPreserved() throws {
+        let suiteName = "chat-preferences-test-\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        defaults.set("custom.model-profile", forKey: "bedrockModelID")
+        AppPreferences.migrateOldPreferences(in: defaults)
+
+        XCTAssertEqual(defaults.string(forKey: "bedrockModelID"), "custom.model-profile")
+    }
+}
+
 final class RecordingRetentionTests: XCTestCase {
 
     func testRetentionCutoffDate_subtractsDays() throws {

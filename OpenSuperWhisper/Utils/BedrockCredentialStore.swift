@@ -16,10 +16,22 @@ enum BedrockCredentialStoreError: LocalizedError {
 }
 
 enum BedrockCredentialStore {
-    private static let service = "com.picturesuo.GlowScribe.bedrock"
+    private static let service = "\(AppIdentity.bundleIdentifier).bedrock"
+    private static let legacyService = "\(AppIdentity.legacyBundleIdentifier).bedrock"
     private static let account = "AWS_BEARER_TOKEN_BEDROCK"
 
     static func loadAPIKey() throws -> String? {
+        if let currentValue = try loadAPIKey(service: service) {
+            return currentValue
+        }
+
+        guard let legacyValue = try loadAPIKey(service: legacyService) else { return nil }
+        try saveAPIKey(legacyValue)
+        try? deleteAPIKey(service: legacyService)
+        return legacyValue
+    }
+
+    private static func loadAPIKey(service: String) throws -> String? {
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,
@@ -73,6 +85,11 @@ enum BedrockCredentialStore {
     }
 
     static func deleteAPIKey() throws {
+        try deleteAPIKey(service: service)
+        try deleteAPIKey(service: legacyService)
+    }
+
+    private static func deleteAPIKey(service: String) throws {
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,

@@ -28,6 +28,7 @@
   <path d="M181 853C390 679 600 601 879 614" fill="none" stroke="#32D6EE" stroke-width="30" stroke-linecap="round" opacity="0.08"/>
 
   <g filter="url(#shadow)">
+    <path d="M285 748L234 881L397 782Z" fill="url(#key)" stroke="#5A7794" stroke-opacity="0.42" stroke-width="7" stroke-linejoin="round"/>
     <rect x="176" y="205" width="672" height="614" rx="156" fill="url(#key)" stroke="#5A7794" stroke-opacity="0.42" stroke-width="7"/>
     <rect x="205" y="234" width="614" height="556" rx="130" fill="none" stroke="#CBEAFF" stroke-opacity="0.09" stroke-width="5"/>
   </g>

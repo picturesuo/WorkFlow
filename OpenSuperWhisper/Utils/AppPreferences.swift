@@ -24,13 +24,18 @@ struct OptionalUserDefault<T> {
 final class AppPreferences {
     static let shared = AppPreferences()
     private init() {
-        migrateOldPreferences()
+        RenamedAppMigration.migratePreferences()
+        Self.migrateOldPreferences()
     }
     
-    private func migrateOldPreferences() {
-        if let oldPath = UserDefaults.standard.string(forKey: "selectedModelPath"),
-           UserDefaults.standard.string(forKey: "selectedWhisperModelPath") == nil {
-            UserDefaults.standard.set(oldPath, forKey: "selectedWhisperModelPath")
+    static func migrateOldPreferences(in defaults: UserDefaults = .standard) {
+        if let oldPath = defaults.string(forKey: "selectedModelPath"),
+           defaults.string(forKey: "selectedWhisperModelPath") == nil {
+            defaults.set(oldPath, forKey: "selectedWhisperModelPath")
+        }
+
+        if defaults.string(forKey: "bedrockModelID") == BedrockCleanupConfiguration.legacyOnDemandModelID {
+            defaults.set(BedrockCleanupConfiguration.defaultModelID, forKey: "bedrockModelID")
         }
     }
     

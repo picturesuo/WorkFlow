@@ -1,7 +1,7 @@
-GlowScribe
-Copyright (c) 2026 GlowScribe contributors
+Chat
+Copyright (c) 2026 Chat contributors
 
-GlowScribe is derived from OpenSuperWhisper:
+Chat is derived from OpenSuperWhisper:
 https://github.com/Starmel/OpenSuperWhisper
 Copyright (c) 2024 OpenSuperWhisper
 Licensed under the MIT License included in LICENSE.
@@ -12,5 +12,5 @@ Copyright (c) 2026 Zach Latta
 Licensed under the MIT License.
 
 Amazon, AWS, Amazon Bedrock, and Amazon Nova are trademarks of Amazon.com,
-Inc. or its affiliates. GlowScribe is not affiliated with or endorsed by AWS,
+Inc. or its affiliates. Chat is not affiliated with or endorsed by AWS,
 Wispr Flow, Superwhisper, OpenSuperWhisper, or FreeFlow.

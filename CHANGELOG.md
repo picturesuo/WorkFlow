@@ -2,7 +2,7 @@
 
 ## Unreleased
 
-- Rename the app to GlowScribe with a new icon and bundle identity.
+- Rename the app to Chat with a new icon and bundle identity, including a bounded migration from the previous GlowScribe install.
 - Add optional Amazon Bedrock transcript cleanup using Nova Micro and the Converse API.
 - Store Bedrock API keys in the macOS Keychain with an in-app connection test.
 - Add a bounded raw-transcript fallback and reject assistant-style model output.

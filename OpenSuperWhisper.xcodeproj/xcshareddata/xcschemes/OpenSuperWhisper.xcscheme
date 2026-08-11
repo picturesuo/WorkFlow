@@ -16,7 +16,7 @@
             <BuildableReference
                BuildableIdentifier = "primary"
                BlueprintIdentifier = "CE57B0272D52C7BB00929AF3"
-               BuildableName = "GlowScribe.app"
+               BuildableName = "Chat.app"
                BlueprintName = "OpenSuperWhisper"
                ReferencedContainer = "container:OpenSuperWhisper.xcodeproj">
             </BuildableReference>
@@ -80,7 +80,7 @@
          <BuildableReference
             BuildableIdentifier = "primary"
             BlueprintIdentifier = "CE57B0272D52C7BB00929AF3"
-            BuildableName = "GlowScribe.app"
+            BuildableName = "Chat.app"
             BlueprintName = "OpenSuperWhisper"
             ReferencedContainer = "container:OpenSuperWhisper.xcodeproj">
          </BuildableReference>
@@ -97,7 +97,7 @@
          <BuildableReference
             BuildableIdentifier = "primary"
             BlueprintIdentifier = "CE57B0272D52C7BB00929AF3"
-            BuildableName = "GlowScribe.app"
+            BuildableName = "Chat.app"
             BlueprintName = "OpenSuperWhisper"
             ReferencedContainer = "container:OpenSuperWhisper.xcodeproj">
          </BuildableReference>
