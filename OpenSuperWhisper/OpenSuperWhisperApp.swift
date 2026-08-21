@@ -32,6 +32,7 @@ struct OpenSuperWhisperApp: App {
             .frame(width: 450)
             .frame(minHeight: 400, maxHeight: 900)
             .environmentObject(appState)
+            .tint(BrandPalette.violet)
         }
         .windowStyle(.hiddenTitleBar)
         .defaultSize(width: 450, height: 650)

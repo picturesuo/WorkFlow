@@ -1306,14 +1306,14 @@ enum ThemePalette {
 
     static func panelSurface(_ scheme: ColorScheme) -> Color {
         scheme == .dark
-            ? Color.gray.opacity(0.1)
-            : Color(red: 0.95, green: 0.96, blue: 0.98)
+            ? BrandPalette.deepViolet.opacity(0.12)
+            : BrandPalette.lavender.opacity(0.10)
     }
 
     static func panelBorder(_ scheme: ColorScheme) -> Color {
         scheme == .dark
-            ? Color.gray.opacity(0.2)
-            : Color(red: 0.86, green: 0.88, blue: 0.92)
+            ? BrandPalette.violet.opacity(0.24)
+            : BrandPalette.violet.opacity(0.18)
     }
 
     static func cardBackground(_ scheme: ColorScheme) -> Color {
@@ -1329,17 +1329,15 @@ enum ThemePalette {
     }
 
     static func recordButtonBase(_ scheme: ColorScheme) -> Color {
-        scheme == .dark
-            ? .white
-            : Color(red: 0.35, green: 0.60, blue: 0.92)
+        BrandPalette.violet
     }
 
     static func iconAccent(_ scheme: ColorScheme) -> Color {
-        scheme == .dark ? .accentColor : .primary
+        BrandPalette.violet
     }
 
     static func linkText(_ scheme: ColorScheme) -> Color {
-        scheme == .dark ? .blue : .primary
+        BrandPalette.violet
     }
 }
 

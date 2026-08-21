@@ -3,11 +3,11 @@ set -euo pipefail
 
 script_dir=${0:A:h}
 repo_root=${script_dir:h}
-source_svg="$repo_root/Resources/ChatIcon.svg"
+source_png="$repo_root/Resources/ChatIcon.png"
 destination_icns="$repo_root/OpenSuperWhisper/AppIcon.icns"
 preview_png="$repo_root/docs/chat-icon.png"
 
-for command_name in qlmanage sips iconutil; do
+for command_name in sips iconutil; do
     if ! command -v "$command_name" >/dev/null 2>&1; then
         echo "Missing required macOS tool: $command_name" >&2
         exit 1
@@ -17,10 +17,10 @@ done
 temporary_dir=$(mktemp -d)
 trap 'rm -rf "$temporary_dir"' EXIT
 
-qlmanage -t -s 1024 -o "$temporary_dir" "$source_svg" >/dev/null 2>&1
-rendered_png="$temporary_dir/ChatIcon.svg.png"
+rendered_png="$temporary_dir/ChatIcon.png"
+sips -z 1024 1024 "$source_png" --out "$rendered_png" >/dev/null
 if [[ ! -f "$rendered_png" ]]; then
-    echo "Quick Look did not render the SVG icon." >&2
+    echo "Unable to prepare the PNG icon." >&2
     exit 1
 fi
 

@@ -19,15 +19,15 @@ class ClipboardUtil {
     }
 
     /// Pastes text and keeps it in clipboard (does not restore original clipboard)
-    static func insertTextAndKeepInClipboard(_ text: String) {
+    static func insertTextAndKeepInClipboard(_ text: String, targetPID: pid_t? = nil) {
         let pasteboard = NSPasteboard.general
         pasteboard.declareTypes([.string], owner: nil)
         pasteboard.setString(text, forType: .string)
-        simulatePaste()
+        simulatePaste(targetPID: targetPID)
     }
 
     /// Pastes text and restores original clipboard (legacy behavior)
-    static func insertText(_ text: String) {
+    static func insertText(_ text: String, targetPID: pid_t? = nil) {
         let pasteboard = NSPasteboard.general
 
         // Save current pasteboard contents
@@ -39,7 +39,7 @@ class ClipboardUtil {
         let changeCountAfterCopy = pasteboard.changeCount
 
         // Simulate Cmd+V using layout-aware keycode resolution
-        simulatePaste()
+        simulatePaste(targetPID: targetPID)
 
         // Restore original contents only after the target app had a chance to
         // process the paste, and only if the pasteboard still holds our text:
@@ -61,11 +61,11 @@ class ClipboardUtil {
         return true
     }
     
-    private static func simulatePaste() {
-        sendCmdV()
+    private static func simulatePaste(targetPID: pid_t?) {
+        sendCmdV(targetPID: targetPID)
     }
     
-    private static func sendCmdV() {
+    private static func sendCmdV(targetPID: pid_t?) {
         // QWERTY keycode for V
         let qwertyKeyCodeV: CGKeyCode = 9
         
@@ -91,8 +91,13 @@ class ClipboardUtil {
         keyDown.flags = .maskCommand
         keyUp.flags = .maskCommand
         
-        keyDown.post(tap: .cghidEventTap)
-        keyUp.post(tap: .cghidEventTap)
+        if let targetPID, NSRunningApplication(processIdentifier: targetPID) != nil {
+            keyDown.postToPid(targetPID)
+            keyUp.postToPid(targetPID)
+        } else {
+            keyDown.post(tap: .cghidEventTap)
+            keyUp.post(tap: .cghidEventTap)
+        }
     }
     
     static func isQwertyCommandLayout() -> Bool {

@@ -41,12 +41,14 @@ class IndicatorViewModel: ObservableObject {
     private let transcriptionQueue: TranscriptionQueue
     private let cleanupPipeline: TranscriptCleanupPipeline
     private let latestDictationGate = LatestDictationGate()
+    private let pasteTargetPID: pid_t?
     
-    init() {
+    init(pasteTargetPID: pid_t? = nil) {
         self.recordingStore = RecordingStore.shared
         self.transcriptionService = TranscriptionService.shared
         self.transcriptionQueue = TranscriptionQueue.shared
         self.cleanupPipeline = TranscriptCleanupPipeline.shared
+        self.pasteTargetPID = pasteTargetPID
         
         recorder.$isConnecting
             .receive(on: RunLoop.main)
@@ -252,10 +254,10 @@ class IndicatorViewModel: ObservableObject {
         if prefs.autoPasteTranscription {
             if prefs.autoCopyToClipboard {
                 // Paste and keep in clipboard
-                ClipboardUtil.insertTextAndKeepInClipboard(finalText)
+                ClipboardUtil.insertTextAndKeepInClipboard(finalText, targetPID: pasteTargetPID)
             } else {
                 // Paste but restore original clipboard (legacy behavior)
-                ClipboardUtil.insertText(finalText)
+                ClipboardUtil.insertText(finalText, targetPID: pasteTargetPID)
             }
         } else if prefs.autoCopyToClipboard {
             // Only copy to clipboard, don't paste
@@ -314,16 +316,17 @@ struct RecordingIndicator: View {
         Circle()
             .fill(
                 LinearGradient(
-                    colors: [
-                        Color.red.opacity(0.8),
-                        Color.red
-                    ],
+                    colors: [Color.red.opacity(0.8), Color.red],
                     startPoint: .topLeading,
                     endPoint: .bottomTrailing
                 )
             )
             .frame(width: 8, height: 8)
-            .shadow(color: .red.opacity(0.5), radius: 4)
+            .overlay {
+                Circle()
+                    .stroke(BrandPalette.lavender.opacity(0.65), lineWidth: 1)
+            }
+            .shadow(color: BrandPalette.violet.opacity(0.75), radius: 5)
             .opacity(isBlinking ? 0.3 : 1.0)
             .animation(.easeInOut(duration: 0.4), value: isBlinking)
     }
@@ -364,9 +367,7 @@ struct IndicatorWindow: View {
     @Environment(\.colorScheme) private var colorScheme
     
     private var backgroundColor: Color {
-        colorScheme == .dark
-            ? Color.black.opacity(0.24)
-            : Color.white.opacity(0.24)
+        BrandPalette.midnight.opacity(colorScheme == .dark ? 0.78 : 0.88)
     }
     
     var body: some View {
@@ -378,11 +379,13 @@ struct IndicatorWindow: View {
             case .connecting:
                 HStack(spacing: 8) {
                     ProgressView()
+                        .tint(BrandPalette.lavender)
                         .scaleEffect(0.7)
                         .frame(width: 24)
                     
                     Text("Connecting...")
                         .font(.system(size: 13, weight: .semibold))
+                        .foregroundColor(.white)
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
                 
@@ -399,6 +402,7 @@ struct IndicatorWindow: View {
                     } else {
                         Text("Recording...")
                             .font(.system(size: 13, weight: .semibold))
+                            .foregroundColor(.white)
                             .transition(.opacity)
                     }
                 }
@@ -408,11 +412,13 @@ struct IndicatorWindow: View {
             case .decoding:
                 HStack(spacing: 8) {
                     ProgressView()
+                        .tint(BrandPalette.lavender)
                         .scaleEffect(0.7)
                         .frame(width: 24)
                     
                     Text(viewModel.isFinalizing ? "Refining..." : "Transcribing...")
                         .font(.system(size: 13, weight: .semibold))
+                        .foregroundColor(.white)
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
                 

@@ -143,13 +143,16 @@ class ShortcutManager {
 
         let holdToRecordEnabled = AppPreferences.shared.holdToRecord
         let isStartingRecording = activeVm == nil
+        let pasteTargetPID = isStartingRecording
+            ? NSWorkspace.shared.frontmostApplication?.processIdentifier
+            : nil
 
         Task { @MainActor in
             if self.activeVm == nil {
                 // Start recording immediately: resolving the caret position talks to
                 // the focused app via AX IPC and can hang for seconds if that app
                 // is busy — the first words must not be lost because of it.
-                let vm = IndicatorWindowManager.shared.prepare()
+                let vm = IndicatorWindowManager.shared.prepare(pasteTargetPID: pasteTargetPID)
                 vm.startRecording()
                 self.activeVm = vm
                 

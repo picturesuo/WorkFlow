@@ -482,9 +482,9 @@ struct OnboardingView: View {
                 // Subtle gradient overlay
                 LinearGradient(
                     colors: [
-                        Color.blue.opacity(0.02),
+                        BrandPalette.deepViolet.opacity(0.08),
                         Color.clear,
-                        Color.purple.opacity(0.02)
+                        BrandPalette.violet.opacity(0.08)
                     ],
                     startPoint: .topLeading,
                     endPoint: .bottomTrailing

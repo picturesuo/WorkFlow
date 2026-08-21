@@ -14,11 +14,11 @@ class IndicatorWindowManager: IndicatorViewDelegate {
     
     /// Creates the view model without presenting the window, so recording can
     /// start immediately while the caret position is being resolved.
-    func prepare() -> IndicatorViewModel {
+    func prepare(pasteTargetPID: pid_t? = nil) -> IndicatorViewModel {
         NotificationCenter.default.post(name: .indicatorWindowWillShow, object: nil)
         KeyboardShortcuts.enable(.escape)
         
-        let newViewModel = IndicatorViewModel()
+        let newViewModel = IndicatorViewModel(pasteTargetPID: pasteTargetPID)
         newViewModel.delegate = self
         viewModel = newViewModel
         
