@@ -33,6 +33,12 @@ if [[ ! -d "$source_app" ]]; then
     exit 1
 fi
 
+app_version=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$source_app/Contents/Info.plist")
+if [[ "$app_version" != "$version" ]]; then
+    echo "Requested release $version does not match app version $app_version." >&2
+    exit 1
+fi
+
 release_stage=$(mktemp -d /tmp/chat-release.XXXXXX)
 cleanup() {
     if [[ "$release_stage" == /tmp/chat-release.* && -d "$release_stage" ]]; then

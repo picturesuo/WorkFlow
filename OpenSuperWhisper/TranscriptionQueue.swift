@@ -10,6 +10,7 @@ class TranscriptionQueue: ObservableObject {
 
     private let transcriptionService: TranscriptionService
     private let recordingStore: RecordingStore
+    private let cleanupPipeline: TranscriptCleanupPipeline
     private var processingTask: Task<Void, Never>?
     private var currentTranscriptionTask: Task<Void, Never>?
     private var cancelledRecordingIds: Set<UUID> = []
@@ -18,6 +19,7 @@ class TranscriptionQueue: ObservableObject {
     private init() {
         self.transcriptionService = TranscriptionService.shared
         self.recordingStore = RecordingStore.shared
+        self.cleanupPipeline = TranscriptCleanupPipeline.shared
         setupProgressObserver()
     }
     
@@ -93,7 +95,13 @@ class TranscriptionQueue: ObservableObject {
         }
     }
 
-    func addFileToQueue(url: URL) async {
+    func addFileToQueue(
+        url: URL,
+        title: String? = nil,
+        mode: RecordingMode = .dictation,
+        cleanupRequested: Bool = false,
+        targetBundleID: String? = nil
+    ) async {
         do {
             let durationInSeconds = await AudioUtil.audioDuration(url: url)
 
@@ -109,7 +117,11 @@ class TranscriptionQueue: ObservableObject {
                 duration: durationInSeconds,
                 status: .pending,
                 progress: 0.0,
-                sourceFileURL: url.path
+                sourceFileURL: url.path,
+                title: title,
+                mode: mode,
+                cleanupRequested: cleanupRequested,
+                targetBundleID: targetBundleID
             )
 
             try await recordingStore.addRecordingSync(recording)
@@ -142,7 +154,9 @@ class TranscriptionQueue: ObservableObject {
             return
         }
 
-        await recordingStore.clearCleanupMetadata(recording.id)
+        let shouldCleanup = recording.cleanupRequested
+            || (recording.cleanupSource != nil && recording.cleanupSource != .disabled)
+        await recordingStore.updateCleanupRequested(recording.id, cleanupRequested: shouldCleanup)
         await recordingStore.updateRecordingStatusOnly(
             recording.id,
             progress: 0.0,
@@ -159,8 +173,14 @@ class TranscriptionQueue: ObservableObject {
         startProcessingQueue()
     }
 
-    nonisolated static func shouldDiscardEmptyDictation(text: String, sourceURL: URL) -> Bool {
-        text.isEmpty && sourceURL.path.hasPrefix(AudioRecorder.temporaryRecordingsDirectory.path)
+    nonisolated static func shouldDiscardEmptyDictation(
+        text: String,
+        sourceURL: URL,
+        mode: RecordingMode
+    ) -> Bool {
+        mode == .dictation
+            && text.isEmpty
+            && sourceURL.path.hasPrefix(AudioRecorder.temporaryRecordingsDirectory.path)
     }
 
     private func processQueue() async {
@@ -240,7 +260,11 @@ class TranscriptionQueue: ObservableObject {
                     return
                 }
 
-                if Self.shouldDiscardEmptyDictation(text: text, sourceURL: sourceURL) {
+                if Self.shouldDiscardEmptyDictation(
+                    text: text,
+                    sourceURL: sourceURL,
+                    mode: recording.mode
+                ) {
                     await Task.detached(priority: .utility) {
                         try? FileManager.default.removeItem(at: sourceURL)
                     }.value
@@ -269,13 +293,44 @@ class TranscriptionQueue: ObservableObject {
                     }
                 }.value
 
-                await recordingStore.updateRecordingProgressOnlySync(
-                    recording.id,
-                    transcription: text,
-                    progress: 1.0,
-                    status: .completed,
-                    isRegeneration: false
-                )
+                if recording.mode == .meeting,
+                   text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    await recordingStore.updateRecordingProgressOnlySync(
+                        recording.id,
+                        transcription: "No speech was detected. The meeting audio was saved for playback or retry.",
+                        progress: 0,
+                        status: .failed,
+                        isRegeneration: false
+                    )
+                    return
+                }
+
+                if recording.cleanupRequested {
+                    let cleanup = await cleanupPipeline.finalize(
+                        text,
+                        targetBundleID: recording.targetBundleID,
+                        cleanupOverride: true
+                    )
+                    await recordingStore.completeRecording(
+                        recording.id,
+                        transcription: cleanup.text,
+                        cleanup: cleanup
+                    )
+                } else {
+                    let localText = VocabularyRewriter.apply(text, entries: VocabularyStore.load())
+                    let localOutcome = TranscriptCleanupOutcome(
+                        text: localText,
+                        source: .disabled,
+                        inputTokens: nil,
+                        outputTokens: nil,
+                        modelID: nil
+                    )
+                    await recordingStore.completeRecording(
+                        recording.id,
+                        transcription: localText,
+                        cleanup: localOutcome
+                    )
+                }
 
             } catch {
                 if !isRecordingCancelled(recording.id) && !Task.isCancelled {

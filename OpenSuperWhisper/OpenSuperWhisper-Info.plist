@@ -23,6 +23,11 @@
 	</array>
 	<key>LSMinimumSystemVersion</key>
 	<string>14.0</string>
+	<key>NSAppTransportSecurity</key>
+	<dict>
+		<key>NSAllowsLocalNetworking</key>
+		<true/>
+	</dict>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>Chat needs microphone access to record audio for transcription.</string>
 	<key>NSAccessibilityUsageDescription</key>

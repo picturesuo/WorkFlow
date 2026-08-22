@@ -91,12 +91,15 @@ class AppState: ObservableObject {
     }
 }
 
+@MainActor
 class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
     private var statusItem: NSStatusItem?
     private var mainWindow: NSWindow?
     private var languageSubmenu: NSMenu?
     private var microphoneService = MicrophoneService.shared
     private var microphoneObserver: AnyCancellable?
+    private var meetingObserver: AnyCancellable?
+    private var meetingErrorObserver: AnyCancellable?
     private var recordingRetentionTimer: Timer?
     private var hideMainWindowAtLaunch = false
     
@@ -138,6 +141,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
 
         OpenSuperWhisperApp.startTranscriptionQueue()
         observeMicrophoneChanges()
+        observeMeetingChanges()
         
         IndicatorWindowManager.shared.warmUp()
         
@@ -216,6 +220,17 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
                 self?.updateStatusBarMenu()
             }
     }
+
+    private func observeMeetingChanges() {
+        meetingObserver = MeetingSessionController.shared.$state
+            .sink { [weak self] _ in
+                self?.updateStatusBarMenu()
+            }
+        meetingErrorObserver = MeetingSessionController.shared.$errorMessage
+            .sink { [weak self] _ in
+                self?.updateStatusBarMenu()
+            }
+    }
     
     private func setupStatusBarItem() {
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
@@ -238,8 +253,19 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
     
     private func updateStatusBarMenu() {
         let menu = NSMenu()
+        menu.autoenablesItems = false
         
         menu.addItem(NSMenuItem(title: "Chat", action: #selector(openApp), keyEquivalent: "o"))
+
+        let meeting = MeetingSessionController.shared
+        let meetingItem = NSMenuItem(
+            title: meeting.statusLabel,
+            action: #selector(toggleMeeting),
+            keyEquivalent: ""
+        )
+        meetingItem.target = self
+        meetingItem.isEnabled = !meeting.isSaving
+        menu.addItem(meetingItem)
         
         let transcriptionLanguageItem = NSMenuItem(title: "Language", action: nil, keyEquivalent: "")
         languageSubmenu = NSMenu()
@@ -333,6 +359,15 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
     
     @objc private func openApp() {
         showMainWindow()
+    }
+
+    @objc private func toggleMeeting() {
+        let meeting = MeetingSessionController.shared
+        if meeting.isRecording {
+            Task { await meeting.stop() }
+        } else if !meeting.isBusy {
+            _ = meeting.start(title: MeetingSessionController.defaultTitle())
+        }
     }
     
     @objc private func quitApp() {

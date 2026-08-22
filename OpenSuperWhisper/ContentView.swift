@@ -25,6 +25,7 @@ class ContentViewModel: ObservableObject {
     @Published var recordingDuration: TimeInterval = 0
     @Published var microphoneService = MicrophoneService.shared
     @Published var shouldClearSearch = false
+    @Published var recordingError: String?
     
     private var currentPage = 0
     private let pageSize = 100
@@ -157,6 +158,7 @@ class ContentViewModel: ObservableObject {
     }
     
     func startRecording() {
+        guard !MeetingSessionController.shared.isRecording else { return }
         guard microphoneService.getActiveMicrophone() != nil else { return }
 
         if microphoneService.isActiveMicrophoneRequiresConnection() {
@@ -172,7 +174,23 @@ class ContentViewModel: ObservableObject {
             startDurationTimerIfNeeded()
         }
         
-        recorder.startRecording()
+        guard recorder.startRecording(completion: { [weak self] startError in
+            guard let startError else { return }
+            Task { @MainActor in
+                guard let self else { return }
+                self.state = .idle
+                self.stopBlinking()
+                self.stopDurationTimer()
+                self.recordingDuration = 0
+                self.recordingError = startError
+            }
+        }) else {
+            state = .idle
+            stopBlinking()
+            stopDurationTimer()
+            recordingDuration = 0
+            return
+        }
     }
 
     func startDecoding() {
@@ -212,7 +230,8 @@ class ContentViewModel: ObservableObject {
                             cleanupSource: cleanup.source,
                             cleanupInputTokens: cleanup.inputTokens,
                             cleanupOutputTokens: cleanup.outputTokens,
-                            cleanupModelID: cleanup.modelID
+                            cleanupModelID: cleanup.modelID,
+                            cleanupRequested: cleanup.source != .disabled
                         )
 
                         try recorder.moveTemporaryRecording(from: tempURL, to: newRecording.url)
@@ -291,11 +310,14 @@ class ContentViewModel: ObservableObject {
 struct ContentView: View {
     @StateObject private var viewModel = ContentViewModel()
     @StateObject private var permissionsManager = PermissionsManager()
+    @StateObject private var meetingController = MeetingSessionController.shared
     @Environment(\.colorScheme) private var colorScheme
     @State private var isSettingsPresented = false
     @State private var searchText = ""
     @State private var debouncedSearchText = ""
     @State private var showDeleteConfirmation = false
+    @State private var showMeetingNamePrompt = false
+    @State private var meetingTitle = MeetingSessionController.defaultTitle()
     @State private var searchTask: Task<Void, Never>? = nil
 
     private var currentShortcutDescription: String {
@@ -510,7 +532,7 @@ struct ContentView: View {
                             }
                         }
                         .buttonStyle(.plain)
-                        .disabled(viewModel.transcriptionService.isLoading || viewModel.transcriptionService.isTranscribing || viewModel.transcriptionQueue.isProcessing || viewModel.state == .decoding || viewModel.microphoneService.availableMicrophones.isEmpty)
+                        .disabled(viewModel.transcriptionService.isLoading || viewModel.transcriptionService.isTranscribing || viewModel.transcriptionQueue.isProcessing || viewModel.state == .decoding || viewModel.microphoneService.availableMicrophones.isEmpty || meetingController.isBusy)
                         .padding(.top, 24)
                         .padding(.bottom, 16)
                         .animation(.spring(response: 0.3, dampingFraction: 0.7), value: viewModel.isRecording)
@@ -545,6 +567,28 @@ struct ContentView: View {
                             Spacer()
 
                             HStack(spacing: 12) {
+                                Button {
+                                    if meetingController.isRecording {
+                                        Task { await meetingController.stop() }
+                                    } else {
+                                        meetingTitle = MeetingSessionController.defaultTitle()
+                                        showMeetingNamePrompt = true
+                                    }
+                                } label: {
+                                    Image(systemName: meetingController.isRecording ? "stop.fill" : "person.2.wave.2.fill")
+                                        .font(.title3)
+                                        .foregroundColor(meetingController.isRecording ? .red : .secondary)
+                                        .frame(width: 32, height: 32)
+                                        .background(ThemePalette.panelSurface(colorScheme))
+                                        .overlay(
+                                            RoundedRectangle(cornerRadius: 8)
+                                                .stroke(ThemePalette.panelBorder(colorScheme), lineWidth: 1)
+                                        )
+                                        .cornerRadius(8)
+                                }
+                                .buttonStyle(.plain)
+                                .help(meetingController.statusLabel)
+
                                 MicrophonePickerIconView(microphoneService: viewModel.microphoneService)
                                 
                                 if !viewModel.recordings.isEmpty {
@@ -648,6 +692,37 @@ struct ContentView: View {
         .fileDropHandler()
         .sheet(isPresented: $isSettingsPresented) {
             SettingsView()
+        }
+        .alert("Start meeting recording", isPresented: $showMeetingNamePrompt) {
+            TextField("Meeting name", text: $meetingTitle)
+            Button("Cancel", role: .cancel) {}
+            Button("Start") {
+                _ = meetingController.start(title: meetingTitle)
+            }
+        } message: {
+            Text("Chat records locally until you stop it. Meeting mode never pastes into another app.")
+        }
+        .alert(
+            "Meeting recording failed",
+            isPresented: Binding(
+                get: { meetingController.errorMessage != nil },
+                set: { if !$0 { meetingController.clearError() } }
+            )
+        ) {
+            Button("OK") { meetingController.clearError() }
+        } message: {
+            Text(meetingController.errorMessage ?? "The recording could not be saved.")
+        }
+        .alert(
+            "Recording failed",
+            isPresented: Binding(
+                get: { viewModel.recordingError != nil },
+                set: { if !$0 { viewModel.recordingError = nil } }
+            )
+        ) {
+            Button("OK") { viewModel.recordingError = nil }
+        } message: {
+            Text(viewModel.recordingError ?? "The microphone could not start.")
         }
         .onReceive(NotificationCenter.default.publisher(for: .openSettings)) { _ in
             isSettingsPresented = true
@@ -775,6 +850,7 @@ struct RecordingRow: View {
     }
 
     private var cleanupBadgeLabel: String? {
+        guard recording.status == .completed else { return nil }
         guard let source = recording.cleanupSource else { return nil }
         switch source {
         case .bedrock:
@@ -788,6 +864,11 @@ struct RecordingRow: View {
             }
             let tokenCount = (recording.cleanupInputTokens ?? 0) + (recording.cleanupOutputTokens ?? 0)
             return tokenCount > 0 ? "Bedrock · \(tokenCount) tokens" : "Bedrock"
+        case .ollama:
+            return "Ollama · free"
+        case .openAICompatible:
+            let tokenCount = (recording.cleanupInputTokens ?? 0) + (recording.cleanupOutputTokens ?? 0)
+            return tokenCount > 0 ? "Custom API · \(tokenCount) tokens" : "Custom API"
         case .rawFallback:
             return "Local fallback"
         case .disabled:
@@ -801,8 +882,12 @@ struct RecordingRow: View {
             let input = recording.cleanupInputTokens.map(String.init) ?? "unknown"
             let output = recording.cleanupOutputTokens.map(String.init) ?? "unknown"
             return "Transcript cleaned by Bedrock (\(input) input / \(output) output tokens). Audio stayed on this Mac."
+        case .ollama:
+            return "Transcript cleaned locally by Ollama. No transcript or audio left this Mac."
+        case .openAICompatible:
+            return "Transcript cleaned by the configured OpenAI-compatible API. Audio stayed on this Mac."
         case .rawFallback:
-            return "Bedrock was unavailable, so Chat preserved the local transcript."
+            return "The cleanup provider was unavailable, so Chat preserved the local transcript."
         case .disabled:
             return "This transcript was processed entirely on this Mac."
         case nil:
@@ -812,7 +897,7 @@ struct RecordingRow: View {
 
     private var cleanupBadgeColor: Color {
         switch recording.cleanupSource {
-        case .bedrock:
+        case .bedrock, .ollama, .openAICompatible:
             return ThemePalette.iconAccent(colorScheme)
         case .rawFallback:
             return .orange
@@ -823,6 +908,22 @@ struct RecordingRow: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
+            if recording.mode == .meeting, let title = recording.title, !title.isEmpty {
+                HStack(spacing: 7) {
+                    Image(systemName: "person.2.wave.2.fill")
+                        .foregroundColor(ThemePalette.iconAccent(colorScheme))
+                    Text(title)
+                        .font(.subheadline.weight(.semibold))
+                        .lineLimit(1)
+                    Spacer()
+                    Text("Meeting")
+                        .font(.caption2.weight(.medium))
+                        .foregroundColor(.secondary)
+                }
+                .padding(.horizontal, 12)
+                .padding(.top, 10)
+            }
+
             if isPending && !isRegenerating {
                 VStack(alignment: .leading, spacing: 4) {
                     if let sourceFileName = recording.sourceFileName {

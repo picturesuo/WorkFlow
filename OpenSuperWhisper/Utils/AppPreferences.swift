@@ -148,6 +148,36 @@ final class AppPreferences {
     @UserDefault(key: "bedrockTimeoutSeconds", defaultValue: BedrockCleanupConfiguration.defaultTimeout)
     var bedrockTimeoutSeconds: Double
 
+    @UserDefault(key: "cleanupProviderID", defaultValue: CleanupProviderID.bedrock.rawValue)
+    var cleanupProviderID: String
+
+    @UserDefault(key: "ollamaBaseURL", defaultValue: "http://localhost:11434")
+    var ollamaBaseURL: String
+
+    @UserDefault(key: "ollamaModelID", defaultValue: "llama3.2:3b")
+    var ollamaModelID: String
+
+    @UserDefault(key: "ollamaTimeoutSeconds", defaultValue: 15.0)
+    var ollamaTimeoutSeconds: Double
+
+    @UserDefault(key: "openAICompatibleBaseURL", defaultValue: "https://api.openai.com/v1")
+    var openAICompatibleBaseURL: String
+
+    @UserDefault(key: "openAICompatibleModelID", defaultValue: "gpt-4.1-nano")
+    var openAICompatibleModelID: String
+
+    @UserDefault(key: "openAICompatibleTimeoutSeconds", defaultValue: 10.0)
+    var openAICompatibleTimeoutSeconds: Double
+
+    @OptionalUserDefault(key: "personalVocabularyData")
+    var personalVocabularyData: Data?
+
+    @OptionalUserDefault(key: "targetAppRulesData")
+    var targetAppRulesData: Data?
+
+    @UserDefault(key: "meetingCleanupEnabled", defaultValue: false)
+    var meetingCleanupEnabled: Bool
+
     @OptionalUserDefault(key: "bedrockLastErrorMessage")
     var bedrockLastErrorMessage: String?
 

@@ -796,8 +796,8 @@ struct SettingsView: View {
     
     private var sheetSize: CGSize {
         let visibleFrame = NSScreen.main?.visibleFrame.size ?? CGSize(width: 1280, height: 800)
-        let width = min(550, visibleFrame.width - 40)
-        let height = min(500, visibleFrame.height - 60)
+        let width = min(700, visibleFrame.width - 40)
+        let height = min(620, visibleFrame.height - 60)
         return CGSize(width: width, height: height)
     }
     
@@ -824,18 +824,24 @@ struct SettingsView: View {
                 }
                 .tag(2)
 
-            bedrockSettings
+            CleanupSettingsView(viewModel: viewModel)
                 .tabItem {
-                    Label("Bedrock", systemImage: "sparkles")
+                    Label("Cleanup", systemImage: "sparkles")
                 }
                 .tag(3)
+
+            PersonalizationSettingsView()
+                .tabItem {
+                    Label("Personalize", systemImage: "slider.horizontal.3")
+                }
+                .tag(4)
             
             // Advanced Settings
             advancedSettings
                 .tabItem {
                     Label("Advanced", systemImage: "gear")
                 }
-                .tag(4)
+                .tag(5)
             }
         .padding()
         .frame(width: sheetSize.width, height: sheetSize.height)
@@ -894,179 +900,6 @@ struct SettingsView: View {
         }
     }
 
-    private var bedrockSettings: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 20) {
-                VStack(alignment: .leading, spacing: 16) {
-                    HStack {
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text("AI Transcript Cleanup")
-                                .font(.headline)
-                            Text("Local speech recognition stays on your Mac. Only the transcript is sent to Amazon Bedrock.")
-                                .font(.caption)
-                                .foregroundColor(.secondary)
-                        }
-                        Spacer()
-                        Toggle("", isOn: $viewModel.bedrockCleanupEnabled)
-                            .toggleStyle(SwitchToggleStyle(tint: Color.accentColor))
-                            .labelsHidden()
-                    }
-
-                    VStack(alignment: .leading, spacing: 10) {
-                        Link(destination: URL(string: "https://console.aws.amazon.com/bedrock/home#/api-keys")!) {
-                            Label("1  Create a Bedrock API key", systemImage: "arrow.up.right.square")
-                        }
-                        .font(.subheadline.weight(.medium))
-
-                        Text("For the easiest personal setup, create a long-term key with an expiration. AWS designates long-term keys for exploration; its production recommendation is an automatically refreshed short-term key, which lasts up to 12 hours.")
-                            .font(.caption)
-                            .foregroundColor(.secondary)
-                    }
-
-                    SecureField(
-                        viewModel.hasBedrockAPIKey ? "2  Stored in Keychain (enter to replace)" : "2  Paste the Bedrock API key",
-                        text: $viewModel.bedrockAPIKeyInput
-                    )
-                    .textFieldStyle(.roundedBorder)
-
-                    HStack {
-                        Button {
-                            Task { await viewModel.saveAndTestBedrock() }
-                        } label: {
-                            if viewModel.isTestingBedrock {
-                                ProgressView()
-                                    .controlSize(.small)
-                            } else {
-                                Label("3  Save & Test", systemImage: "checkmark.shield")
-                            }
-                        }
-                        .buttonStyle(.borderedProminent)
-                        .disabled(viewModel.isTestingBedrock)
-
-                        if viewModel.hasBedrockAPIKey {
-                            Button("Remove Key", role: .destructive) {
-                                viewModel.clearBedrockCredential()
-                            }
-                            .buttonStyle(.bordered)
-                        }
-                    }
-
-                    Text(viewModel.bedrockStatus)
-                        .font(.caption)
-                        .foregroundColor(viewModel.bedrockStatus.hasPrefix("Connection failed") ? .orange : .secondary)
-                        .textSelection(.enabled)
-                }
-                .padding()
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .background(Color(.controlBackgroundColor).opacity(0.3))
-                .cornerRadius(12)
-
-                VStack(alignment: .leading, spacing: 10) {
-                    HStack(alignment: .firstTextBaseline) {
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text("This month")
-                                .font(.headline)
-                            Text("Actual Converse API usage recorded by Chat")
-                                .font(.caption)
-                                .foregroundColor(.secondary)
-                        }
-                        Spacer()
-                        Text(BedrockPricing.formatUSD(viewModel.bedrockUsageSummary.estimatedCostUSD))
-                            .font(.title2.weight(.semibold).monospacedDigit())
-                    }
-
-                    Text("\(viewModel.bedrockUsageSummary.cleanedDictations) cleaned · \(viewModel.bedrockUsageSummary.fallbackDictations) local fallbacks · \(viewModel.bedrockUsageSummary.inputTokens) input / \(viewModel.bedrockUsageSummary.outputTokens) output tokens")
-                        .font(.caption)
-                        .foregroundColor(.secondary)
-
-                    if viewModel.bedrockUsageSummary.unpricedDictations > 0 {
-                        Text("\(viewModel.bedrockUsageSummary.unpricedDictations) dictation(s) used a custom or unknown-price model and are excluded from the dollar estimate.")
-                            .font(.caption)
-                            .foregroundColor(.orange)
-                    }
-
-                    Text("At current Nova Micro prices, 100 short dictations per day (about 200 input + 40 output tokens each) is roughly $0.04/month. AWS bills actual usage; taxes and pricing changes are not included.")
-                        .font(.caption)
-                        .foregroundColor(.secondary)
-
-                    Link("AWS on-demand pricing · checked \(BedrockPricing.asOfDate)", destination: BedrockPricing.pricingURL)
-                        .font(.caption)
-                }
-                .padding()
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .background(Color(.controlBackgroundColor).opacity(0.3))
-                .cornerRadius(12)
-
-                if viewModel.bedrockCleanupEnabled,
-                   let lastError = viewModel.bedrockLastErrorMessage {
-                    VStack(alignment: .leading, spacing: 6) {
-                        Label("Last cleanup used the local fallback", systemImage: "exclamationmark.triangle.fill")
-                            .font(.subheadline.weight(.medium))
-                            .foregroundColor(.orange)
-                        Text(lastError)
-                            .font(.caption)
-                            .textSelection(.enabled)
-                        if let errorDate = viewModel.bedrockLastErrorDate {
-                            Text(errorDate, style: .relative)
-                                .font(.caption2)
-                                .foregroundColor(.secondary)
-                        }
-                    }
-                    .padding()
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .background(Color.orange.opacity(0.08))
-                    .cornerRadius(12)
-                }
-
-                VStack(alignment: .leading, spacing: 14) {
-                    HStack {
-                        Text("Model")
-                            .font(.headline)
-                        Spacer()
-                        Button("Use recommended defaults") {
-                            viewModel.useRecommendedBedrockDefaults()
-                        }
-                        .buttonStyle(.link)
-                        .font(.caption)
-                    }
-
-                    TextField("AWS Region", text: $viewModel.bedrockRegion)
-                        .textFieldStyle(.roundedBorder)
-                    TextField("Bedrock model ID", text: $viewModel.bedrockModelID)
-                        .textFieldStyle(.roundedBorder)
-
-                    HStack {
-                        Text("Raw fallback after")
-                            .font(.subheadline)
-                        Spacer()
-                        Stepper(
-                            "\(viewModel.bedrockTimeoutSeconds, specifier: "%.1f") seconds",
-                            value: $viewModel.bedrockTimeoutSeconds,
-                            in: 0.5...10,
-                            step: 0.5
-                        )
-                        .frame(width: 180)
-                    }
-
-                    Text("Recommended: Amazon Nova Micro in us-east-1. It is faster and substantially cheaper than newer general-purpose Nova models for literal cleanup. If Bedrock is slow or unavailable, Chat pastes the local transcript instead of losing your dictation.")
-                        .font(.caption)
-                        .foregroundColor(.secondary)
-                }
-                .padding()
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .background(Color(.controlBackgroundColor).opacity(0.3))
-                .cornerRadius(12)
-            }
-            .padding()
-        }
-        .task {
-            await viewModel.refreshBedrockUsage()
-        }
-        .onReceive(NotificationCenter.default.publisher(for: RecordingStore.recordingsDidUpdateNotification)) { _ in
-            Task { await viewModel.refreshBedrockUsage() }
-        }
-    }
-    
     private var modelSettings: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {

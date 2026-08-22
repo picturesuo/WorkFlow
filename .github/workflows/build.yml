@@ -32,6 +32,9 @@ jobs:
             -only-testing:OpenSuperWhisperTests/BedrockCleanupServiceTests \
             -only-testing:OpenSuperWhisperTests/TranscriptCleanupPipelineTests \
             -only-testing:OpenSuperWhisperTests/BedrockPricingTests \
+            -only-testing:OpenSuperWhisperTests/VocabularyAndRulesTests \
+            -only-testing:OpenSuperWhisperTests/OpenAIChatCleanupServiceTests \
+            -only-testing:OpenSuperWhisperTests/ProviderPipelineTests \
             -only-testing:OpenSuperWhisperTests/LatestDictationGateTests \
             -only-testing:OpenSuperWhisperTests/ClipboardRestoreTests \
             -only-testing:OpenSuperWhisperTests/EmptyDictationDiscardTests

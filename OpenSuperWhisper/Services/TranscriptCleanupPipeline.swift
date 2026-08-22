@@ -3,6 +3,8 @@ import Foundation
 struct TranscriptCleanupOutcome: Equatable {
     enum Source: String, Codable, Equatable {
         case bedrock
+        case ollama
+        case openAICompatible = "openai_compatible"
         case rawFallback
         case disabled
     }
@@ -17,13 +19,27 @@ struct TranscriptCleanupOutcome: Equatable {
 final class TranscriptCleanupPipeline {
     static let shared = TranscriptCleanupPipeline()
 
-    private let service: BedrockCleanupService
     private let isEnabled: () -> Bool
-    private let credentialProvider: () throws -> String?
-    private let configurationProvider: () -> BedrockCleanupConfiguration
+    private let providerResolver: () throws -> any TranscriptCleanupProviding
+    private let vocabularyProvider: () -> [VocabularyEntry]
+    private let appRuleProvider: (String?) -> TargetAppRule?
 
     init(
-        service: BedrockCleanupService = .shared,
+        isEnabled: @escaping () -> Bool = { AppPreferences.shared.bedrockCleanupEnabled },
+        providerResolver: @escaping () throws -> any TranscriptCleanupProviding = {
+            try CleanupProviderFactory.makeSelected()
+        },
+        vocabularyProvider: @escaping () -> [VocabularyEntry] = { VocabularyStore.load() },
+        appRuleProvider: @escaping (String?) -> TargetAppRule? = { TargetAppRuleStore.rule(for: $0) }
+    ) {
+        self.isEnabled = isEnabled
+        self.providerResolver = providerResolver
+        self.vocabularyProvider = vocabularyProvider
+        self.appRuleProvider = appRuleProvider
+    }
+
+    convenience init(
+        service: BedrockCleanupService,
         isEnabled: @escaping () -> Bool = { AppPreferences.shared.bedrockCleanupEnabled },
         credentialProvider: @escaping () throws -> String? = { try BedrockCredentialStore.loadAPIKey() },
         configurationProvider: @escaping () -> BedrockCleanupConfiguration = {
@@ -35,16 +51,44 @@ final class TranscriptCleanupPipeline {
             )
         }
     ) {
-        self.service = service
-        self.isEnabled = isEnabled
-        self.credentialProvider = credentialProvider
-        self.configurationProvider = configurationProvider
+        self.init(
+            isEnabled: isEnabled,
+            providerResolver: {
+                guard let token = try credentialProvider(), !token.isEmpty else {
+                    throw CleanupProviderError.missingCredential("Bedrock")
+                }
+                return BedrockCleanupProvider(
+                    service: service,
+                    apiKey: token,
+                    configuration: configurationProvider()
+                )
+            },
+            vocabularyProvider: { [] },
+            appRuleProvider: { _ in nil }
+        )
     }
 
-    func finalize(_ rawTranscript: String) async -> TranscriptCleanupOutcome {
-        guard isEnabled() else {
+    func finalize(
+        _ rawTranscript: String,
+        targetBundleID: String? = nil,
+        cleanupOverride: Bool? = nil
+    ) async -> TranscriptCleanupOutcome {
+        let vocabulary = vocabularyProvider()
+        let localTranscript = VocabularyRewriter.apply(rawTranscript, entries: vocabulary)
+        let appRule = appRuleProvider(targetBundleID)
+        let cleanupEnabled: Bool
+        if let cleanupOverride {
+            cleanupEnabled = cleanupOverride
+        } else {
+            cleanupEnabled = TargetAppRuleStore.cleanupEnabled(
+                rule: appRule,
+                globalDefault: isEnabled()
+            )
+        }
+
+        guard cleanupEnabled else {
             return TranscriptCleanupOutcome(
-                text: rawTranscript,
+                text: localTranscript,
                 source: .disabled,
                 inputTokens: nil,
                 outputTokens: nil,
@@ -52,43 +96,49 @@ final class TranscriptCleanupPipeline {
             )
         }
 
-        let storedToken = try? credentialProvider()
-        guard let token = storedToken ?? nil, !token.isEmpty else {
-            recordFailure("No Bedrock API key is stored.")
-            return TranscriptCleanupOutcome(
-                text: rawTranscript,
-                source: .rawFallback,
-                inputTokens: nil,
-                outputTokens: nil,
-                modelID: nil
-            )
-        }
-
-        let configuration = configurationProvider()
+        var inputTokens = 0
+        var outputTokens = 0
+        var hasInputTokens = false
+        var hasOutputTokens = false
+        var modelID: String?
 
         do {
-            let result = try await service.clean(
-                transcript: rawTranscript,
-                apiKey: token,
-                configuration: configuration
+            let provider = try providerResolver()
+            let systemPrompt = CleanupPromptBuilder.systemPrompt(
+                instruction: appRule?.cleanupInstruction
             )
+            let chunks = TranscriptChunker.chunks(localTranscript)
+            var cleanedTranscript = ""
+            for chunk in chunks {
+                let result = try await provider.clean(transcript: chunk.text, systemPrompt: systemPrompt)
+                cleanedTranscript += result.text + chunk.separatorAfter
+                if let value = result.inputTokens {
+                    inputTokens += value
+                    hasInputTokens = true
+                }
+                if let value = result.outputTokens {
+                    outputTokens += value
+                    hasOutputTokens = true
+                }
+                modelID = result.modelID
+            }
             clearFailure()
             return TranscriptCleanupOutcome(
-                text: result.text,
-                source: .bedrock,
-                inputTokens: result.inputTokens,
-                outputTokens: result.outputTokens,
-                modelID: configuration.modelID
+                text: cleanedTranscript.trimmingCharacters(in: .whitespacesAndNewlines),
+                source: provider.providerID.outcomeSource,
+                inputTokens: hasInputTokens ? inputTokens : nil,
+                outputTokens: hasOutputTokens ? outputTokens : nil,
+                modelID: modelID
             )
         } catch {
-            print("Bedrock cleanup unavailable; using raw transcript: \(error.localizedDescription)")
+            print("Transcript cleanup unavailable; using local transcript: \(error.localizedDescription)")
             recordFailure(error.localizedDescription)
             return TranscriptCleanupOutcome(
-                text: rawTranscript,
+                text: localTranscript,
                 source: .rawFallback,
-                inputTokens: nil,
-                outputTokens: nil,
-                modelID: nil
+                inputTokens: hasInputTokens ? inputTokens : nil,
+                outputTokens: hasOutputTokens ? outputTokens : nil,
+                modelID: modelID
             )
         }
     }

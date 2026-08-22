@@ -20,6 +20,8 @@ class AudioRecorder: NSObject, ObservableObject {
     // Serializes all recording state mutations (start/stop/cancel/connection monitoring)
     // so a stop arriving right after a start can never overtake it.
     private let workQueue = DispatchQueue(label: "com.opensuperwhisper.audiorecorder")
+    private let sessionLock = NSLock()
+    private var sessionReserved = false
     
     private var audioRecorder: AVAudioRecorder?
     private var audioPlayer: AVAudioPlayer?
@@ -140,7 +142,16 @@ class AudioRecorder: NSObject, ObservableObject {
         notificationSound = sound
     }
     
-    func startRecording() {
+    @discardableResult
+    func startRecording(completion: ((String?) -> Void)? = nil) -> Bool {
+        sessionLock.lock()
+        guard !sessionReserved else {
+            sessionLock.unlock()
+            return false
+        }
+        sessionReserved = true
+        sessionLock.unlock()
+
         // Everything below costs CoreAudio HAL round-trips (device queries,
         // AudioQueue start for the notification sound) — 20-35 ms that used to
         // block the main thread right when the indicator appear animation
@@ -149,6 +160,10 @@ class AudioRecorder: NSObject, ObservableObject {
         workQueue.async {
             guard let activeMic = MicrophoneService.shared.getActiveMicrophone() else {
                 print("Cannot start recording - no audio input available")
+                self.releaseSessionReservation()
+                DispatchQueue.main.async {
+                    completion?("The selected microphone is no longer available.")
+                }
                 return
             }
             
@@ -158,16 +173,15 @@ class AudioRecorder: NSObject, ObservableObject {
             
             let requiresConnection = MicrophoneService.shared.isActiveMicrophoneRequiresConnection()
             self.updateRecordingState(isRecording: false, isConnecting: requiresConnection)
-            self.performStart(activeMic: activeMic, monitorConnection: requiresConnection)
+            let failure = self.performStart(activeMic: activeMic, monitorConnection: requiresConnection)
+            DispatchQueue.main.async {
+                completion?(failure)
+            }
         }
+        return true
     }
     
-    private func performStart(activeMic: MicrophoneService.AudioDevice?, monitorConnection: Bool) {
-        if audioRecorder != nil {
-            print("stop recording while recording")
-            _ = performStop(discard: true)
-        }
-        
+    private func performStart(activeMic: MicrophoneService.AudioDevice?, monitorConnection: Bool) -> String? {
         let timestamp = Int(Date().timeIntervalSince1970)
         let fileURL = temporaryDirectory.appendingPathComponent("\(timestamp).wav")
         currentRecordingURL = fileURL
@@ -197,18 +211,30 @@ class AudioRecorder: NSObject, ObservableObject {
             audioRecorder = try AVAudioRecorder(url: fileURL, settings: settings)
             audioRecorder?.delegate = self
             audioRecorder?.isMeteringEnabled = monitorConnection
-            audioRecorder?.record()
+            guard audioRecorder?.record() == true else {
+                print("Failed to start recording: AVAudioRecorder declined the request")
+                audioRecorder = nil
+                currentRecordingURL = nil
+                try? FileManager.default.removeItem(at: fileURL)
+                restoreSystemDefaultInputIfNeeded()
+                releaseSessionReservation()
+                updateRecordingState(isRecording: false, isConnecting: false)
+                return "The microphone declined the recording request."
+            }
             if monitorConnection {
                 startConnectionMonitoring()
             } else {
                 updateRecordingState(isRecording: true, isConnecting: false)
             }
             print("Recording started successfully")
+            return nil
         } catch {
             print("Failed to start recording: \(error)")
             currentRecordingURL = nil
             restoreSystemDefaultInputIfNeeded()
+            releaseSessionReservation()
             updateRecordingState(isRecording: false, isConnecting: false)
+            return error.localizedDescription
         }
     }
     
@@ -225,6 +251,7 @@ class AudioRecorder: NSObject, ObservableObject {
                 // end of the last word released together with the hotkey survives.
                 self.audioRecorder = nil
                 self.currentRecordingURL = nil
+                self.releaseSessionReservation()
                 self.stopConnectionMonitoring()
                 self.updateRecordingState(isRecording: false, isConnecting: false)
                 
@@ -258,6 +285,7 @@ class AudioRecorder: NSObject, ObservableObject {
         let recordedDuration = audioRecorder?.currentTime ?? 0
         audioRecorder?.stop()
         audioRecorder = nil
+        releaseSessionReservation()
         stopConnectionMonitoring()
         restoreSystemDefaultInputIfNeeded()
         updateRecordingState(isRecording: false, isConnecting: false)
@@ -270,6 +298,12 @@ class AudioRecorder: NSObject, ObservableObject {
             return nil
         }
         return url
+    }
+
+    private func releaseSessionReservation() {
+        sessionLock.lock()
+        sessionReserved = false
+        sessionLock.unlock()
     }
     
     #if os(macOS)
@@ -383,7 +417,7 @@ extension AudioRecorder: AVAudioRecorderDelegate {
         guard !flag else { return }
         workQueue.async {
             guard recorder === self.audioRecorder else { return }
-            self.currentRecordingURL = nil
+            _ = self.performStop(discard: true)
         }
     }
 }

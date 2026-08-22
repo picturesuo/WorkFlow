@@ -12,18 +12,22 @@ final class EmptyDictationDiscardTests: XCTestCase {
     }
 
     func testEmptyTextFromDictation_isDiscarded() {
-        XCTAssertTrue(TranscriptionQueue.shouldDiscardEmptyDictation(text: "", sourceURL: dictationURL))
+        XCTAssertTrue(TranscriptionQueue.shouldDiscardEmptyDictation(text: "", sourceURL: dictationURL, mode: .dictation))
     }
 
     func testEmptyTextFromImportedFile_isKept() {
-        XCTAssertFalse(TranscriptionQueue.shouldDiscardEmptyDictation(text: "", sourceURL: importedFileURL))
+        XCTAssertFalse(TranscriptionQueue.shouldDiscardEmptyDictation(text: "", sourceURL: importedFileURL, mode: .dictation))
     }
 
     func testNonEmptyTextFromDictation_isKept() {
-        XCTAssertFalse(TranscriptionQueue.shouldDiscardEmptyDictation(text: "hello world", sourceURL: dictationURL))
+        XCTAssertFalse(TranscriptionQueue.shouldDiscardEmptyDictation(text: "hello world", sourceURL: dictationURL, mode: .dictation))
     }
 
     func testNonEmptyTextFromImportedFile_isKept() {
-        XCTAssertFalse(TranscriptionQueue.shouldDiscardEmptyDictation(text: "hello world", sourceURL: importedFileURL))
+        XCTAssertFalse(TranscriptionQueue.shouldDiscardEmptyDictation(text: "hello world", sourceURL: importedFileURL, mode: .dictation))
+    }
+
+    func testEmptyTextFromMeeting_isKept() {
+        XCTAssertFalse(TranscriptionQueue.shouldDiscardEmptyDictation(text: "", sourceURL: dictationURL, mode: .meeting))
     }
 }

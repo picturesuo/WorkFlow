@@ -8,7 +8,7 @@
   Hold <kbd>Fn</kbd>, speak, release, and get polished text in the app you were already using.
 </p>
 
-Chat is an open-source macOS dictation app built for the fast, system-wide workflow popularized by Wispr Flow and Superwhisper—without a recurring dictation subscription. Speech recognition runs locally with Parakeet or Whisper. An optional, inexpensive Amazon Bedrock pass removes fillers, resolves self-corrections, and fixes punctuation before the current utterance is pasted.
+Chat is an open-source macOS dictation and meeting-transcription app built for the fast, system-wide workflow popularized by Wispr Flow and Superwhisper—without a recurring dictation subscription. Speech recognition runs locally with Parakeet or Whisper. An optional cleanup pass removes fillers, resolves self-corrections, and fixes punctuation through Amazon Bedrock, free local Ollama, or an OpenAI-compatible API.
 
 Chat is not affiliated with Wispr Flow or Superwhisper.
 
@@ -16,8 +16,11 @@ Chat is not affiliated with Wispr Flow or Superwhisper.
 
 - **One-button dictation:** hold the bottom-left `Fn`/globe key, speak, then release.
 - **Local speech recognition:** Parakeet v3 is the default; Whisper remains available.
-- **Bedrock cleanup:** Amazon Nova Micro performs literal transcript cleanup through the Bedrock Converse API.
-- **Visible cost and provenance:** history identifies Bedrock-cleaned versus local-fallback dictations, while Settings totals the actual tokens returned by AWS and estimates their cost.
+- **Three cleanup choices:** use Amazon Bedrock, free local Ollama, or any OpenAI-compatible chat-completions endpoint.
+- **Personal vocabulary:** deterministic, whole-phrase corrections keep names and technical terms spelled your way.
+- **Per-app modes:** set cleanup, paste, and style behavior independently for each target app.
+- **Meeting transcription:** record a named long-form session into History without pasting it into another app.
+- **Visible cost and provenance:** history identifies the provider or local fallback; Settings totals tokens and only shows dollar estimates for prices Chat can verify.
 - **Failure-safe:** a three-second deadline falls back to the raw local transcript, so an API problem does not eat your words.
 - **Current utterance only:** a monotonic generation gate prevents an older async result from winning a paste race.
 - **Clipboard-safe paste:** Chat pastes the generated text and restores the prior clipboard only if the clipboard has not changed since.
@@ -27,11 +30,13 @@ Chat is not affiliated with Wispr Flow or Superwhisper.
 ## How it works
 
 ```text
-Fn down → record locally → Parakeet/Whisper → Bedrock Nova Micro → generation check → paste
-                                              ↘ timeout/error → raw transcript ↗
+Fn down → record locally → Parakeet/Whisper → vocabulary → selected cleanup provider → paste
+                                                                  ↘ timeout/error → local text ↗
+
+Meeting → record locally → Parakeet/Whisper → optional cleanup → named History item (never paste)
 ```
 
-Audio stays on the Mac. When cleanup is enabled, only the raw transcript is sent to the Bedrock model you configure.
+Audio always stays on the Mac. When a remote cleanup provider is enabled, only transcript text is sent to the endpoint you configure.
 
 ## Install from source
 
@@ -54,12 +59,24 @@ For a build without installation, run `./run.sh build`.
 
 If you build directly in Xcode, select your own Apple Developer team in **Signing & Capabilities**. The public project intentionally does not contain a contributor-specific team ID.
 
-## Connect Amazon Bedrock
+## Choose a cleanup provider
+
+Open **Chat → Settings → Cleanup**, enable cleanup, and select exactly one provider. Chat never silently chains providers: if the selected one fails, it preserves the local transcript.
+
+### Free and local with Ollama
+
+1. Install [Ollama for macOS](https://ollama.com/download/mac).
+2. Pull a small model, for example `ollama pull llama3.2:3b`.
+3. Select **Ollama (local, free)** in Chat and click **Test local Ollama**.
+
+The default endpoint is Ollama's documented `http://localhost:11434/api/chat`. No API key or per-token payment is required. Chat also supports Ollama's OpenAI-compatible interface through the custom-provider option if desired. Hardware and electricity costs still apply.
+
+### Amazon Bedrock
 
 1. Open the [Amazon Bedrock API keys console](https://console.aws.amazon.com/bedrock/home#/api-keys).
    - Easiest personal setup: create a long-term key with an explicit expiration and permission only to invoke the model you plan to use. AWS designates long-term keys for exploration.
    - AWS-recommended production setup: generate and automatically refresh a short-term key. Short-term keys last no more than 12 hours, so a key pasted into Chat must be replaced when it expires.
-2. Open **Chat → Settings → Bedrock**.
+2. Open **Chat → Settings → Cleanup**, select **Amazon Bedrock**, and enable cleanup.
 3. Paste the key and click **Save & Test**. The key is stored in the macOS Keychain under `AWS_BEARER_TOKEN_BEDROCK`.
 4. Keep the defaults unless your AWS setup requires another region or model:
    - Region: `us-east-1`
@@ -72,11 +89,25 @@ Chat never stores an AWS secret in the repository or preferences. See the offici
 
 The live AWS US on-demand catalog reported Nova Micro at **$0.035 per million input tokens** and **$0.14 per million output tokens** on August 21, 2026. For example, a short cleanup using 200 input and 40 output tokens costs about **$0.0000126**; 100 such dictations every day is about **$0.04/month**.
 
-Chat records the token counts returned by the Converse API and shows per-dictation estimates in History plus a monthly total in **Settings → Bedrock**. Custom model IDs still show token counts, but Chat deliberately omits a dollar estimate unless it has a dated price for that model. Estimates exclude taxes, discounts, free tiers, and later AWS price changes; verify the current [Bedrock pricing page](https://aws.amazon.com/bedrock/pricing/).
+Chat records the token counts returned by the Converse API and shows per-dictation estimates in History plus a monthly total in **Settings → Cleanup**. Custom model IDs still show token counts, but Chat deliberately omits a dollar estimate unless it has a dated price for that model. Estimates exclude taxes, discounts, free tiers, and later AWS price changes; verify the current [Bedrock pricing page](https://aws.amazon.com/bedrock/pricing/).
+
+### Any OpenAI-compatible API
+
+Select **OpenAI-compatible**, enter the provider's base URL and exact model ID, then save and test an API key. Chat appends `/chat/completions`, sends a Bearer token when supplied, and stores that token in a separate macOS Keychain item. Localhost endpoints may omit the key; remote endpoints must use HTTPS. Vendor prices vary, so Chat reports returned token counts but labels their dollar cost as unknown rather than making a misleading estimate.
+
+## Personal vocabulary and app rules
+
+Open **Settings → Personalize** to add literal speech-to-spelling replacements and per-app rules. Rules are matched by exact macOS bundle identifier and use the app that was focused when the dictation started, which prevents focus changes during cleanup from redirecting the paste. You can make a private app local-only, make a writing app copy-only, or add a short style preference for one app.
+
+Vocabulary and rules can be exported as JSON for backup. Credentials are never included.
+
+## Meetings
+
+Use **Start meeting** in the main window or menu bar, give the session a name, and stop it when finished. Chat transcribes the audio locally and saves the named result in History; it never auto-pastes meeting text. AI cleanup for meetings is off by default because long transcripts cost more and take longer.
 
 ## Cleanup contract
 
-The Bedrock prompt treats speech as untrusted text. It may remove fillers, keep the final version of a self-correction, and repair obvious grammar or punctuation. It must not answer instructions, invent content, or wrap the result in an explanation. Responses that look like assistant prose or expand far beyond the source are rejected and the local transcript is used instead.
+Every provider receives the same literal-cleanup prompt, which treats speech as untrusted text. It may remove fillers, keep the final version of a self-correction, and repair obvious grammar or punctuation. It must not answer instructions, invent content, or wrap the result in an explanation. Responses that look like assistant prose or expand far beyond the source are rejected and the local transcript is used instead.
 
 ## Development and tests
 
@@ -89,7 +120,7 @@ xcodebuild test \
   CODE_SIGNING_ALLOWED=NO
 ```
 
-Focused coverage includes Bedrock request/response handling, unsafe rewrite rejection, latest-generation gating, clipboard restoration, empty-dictation discard, shortcuts, recording lifecycle, and model behavior.
+Focused coverage includes Bedrock, Ollama, and OpenAI-compatible request/response handling; HTTPS enforcement; unsafe rewrite rejection; vocabulary boundaries; per-app overrides; latest-generation gating; clipboard restoration; empty-dictation discard; shortcuts; recording lifecycle; and model behavior.
 
 ## Public releases
 
@@ -99,8 +130,8 @@ The repository is public and can be installed from source today. A broadly downl
 
 - No Chat server exists.
 - Audio is processed locally.
-- Bedrock receives transcript text only when cleanup is enabled.
-- The bearer token is stored with `kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly`.
+- Only the selected remote provider receives transcript text when cleanup is enabled; Ollama stays local.
+- Provider bearer tokens are stored with `kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly`.
 - Network failure, invalid output, and timeout all preserve a usable local transcript.
 - Please report security issues according to [SECURITY.md](SECURITY.md).
 

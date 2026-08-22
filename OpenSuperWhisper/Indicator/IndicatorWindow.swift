@@ -9,6 +9,7 @@ enum RecordingState {
     case decoding
     case busy
     case noMicrophone
+    case recordingFailed
 }
 
 @MainActor
@@ -41,14 +42,14 @@ class IndicatorViewModel: ObservableObject {
     private let transcriptionQueue: TranscriptionQueue
     private let cleanupPipeline: TranscriptCleanupPipeline
     private let latestDictationGate = LatestDictationGate()
-    private let pasteTargetPID: pid_t?
+    private let pasteTarget: PasteTarget?
     
-    init(pasteTargetPID: pid_t? = nil) {
+    init(pasteTarget: PasteTarget? = nil) {
         self.recordingStore = RecordingStore.shared
         self.transcriptionService = TranscriptionService.shared
         self.transcriptionQueue = TranscriptionQueue.shared
         self.cleanupPipeline = TranscriptCleanupPipeline.shared
-        self.pasteTargetPID = pasteTargetPID
+        self.pasteTarget = pasteTarget
         
         recorder.$isConnecting
             .receive(on: RunLoop.main)
@@ -93,6 +94,11 @@ class IndicatorViewModel: ObservableObject {
     }
 
     func startRecording() {
+        if MeetingSessionController.shared.isRecording {
+            showBusyMessage()
+            return
+        }
+
         if isTranscriptionBusy {
             showBusyMessage()
             return
@@ -110,11 +116,20 @@ class IndicatorViewModel: ObservableObject {
         // animation. The recorder resolves the real state on its own queue and
         // publishes isConnecting/isRecording, which the sinks above translate
         // into .connecting/.recording.
+        guard recorder.startRecording(completion: { [weak self] startError in
+            guard startError != nil else { return }
+            Task { @MainActor in
+                self?.stopBlinking()
+                self?.showAutoDismissingMessage(.recordingFailed)
+            }
+        }) else {
+            showBusyMessage()
+            return
+        }
+
         state = .recording
         startBlinking()
         recordingStartedAt = Date()
-        
-        recorder.startRecording()
     }
     
     func handleCancelRequest() -> Bool {
@@ -157,7 +172,15 @@ class IndicatorViewModel: ObservableObject {
             Task { [weak self] in
                 guard let self = self else { return }
                 if let tempURL = await self.recorder.stopRecording() {
-                    await self.transcriptionQueue.addFileToQueue(url: tempURL)
+                    let rule = TargetAppRuleStore.rule(for: self.pasteTarget?.bundleID)
+                    await self.transcriptionQueue.addFileToQueue(
+                        url: tempURL,
+                        cleanupRequested: TargetAppRuleStore.cleanupEnabled(
+                            rule: rule,
+                            globalDefault: AppPreferences.shared.bedrockCleanupEnabled
+                        ),
+                        targetBundleID: self.pasteTarget?.bundleID
+                    )
                 }
             }
             showBusyMessage()
@@ -181,7 +204,10 @@ class IndicatorViewModel: ObservableObject {
                         print("No speech detected, dictation discarded")
                     } else {
                         self.isFinalizing = true
-                        let cleanup = await self.cleanupPipeline.finalize(rawText)
+                        let cleanup = await self.cleanupPipeline.finalize(
+                            rawText,
+                            targetBundleID: self.pasteTarget?.bundleID
+                        )
                         self.isFinalizing = false
 
                         let text = cleanup.text
@@ -207,7 +233,9 @@ class IndicatorViewModel: ObservableObject {
                             cleanupSource: cleanup.source,
                             cleanupInputTokens: cleanup.inputTokens,
                             cleanupOutputTokens: cleanup.outputTokens,
-                            cleanupModelID: cleanup.modelID
+                            cleanupModelID: cleanup.modelID,
+                            cleanupRequested: cleanup.source != .disabled,
+                            targetBundleID: self.pasteTarget?.bundleID
                         )
                         
                         try recorder.moveTemporaryRecording(from: tempURL, to: newRecording.url)
@@ -254,14 +282,25 @@ class IndicatorViewModel: ObservableObject {
         guard !text.isEmpty else { return }
         let finalText = Self.applyPostProcessing(text)
         let prefs = AppPreferences.shared
+        let appRule = TargetAppRuleStore.rule(for: pasteTarget?.bundleID)
+
+        switch appRule?.pasteBehavior ?? .appDefault {
+        case .never:
+            return
+        case .copyOnly:
+            ClipboardUtil.copyToClipboard(finalText)
+            return
+        case .appDefault:
+            break
+        }
 
         if prefs.autoPasteTranscription {
             if prefs.autoCopyToClipboard {
                 // Paste and keep in clipboard
-                ClipboardUtil.insertTextAndKeepInClipboard(finalText, targetPID: pasteTargetPID)
+                ClipboardUtil.insertTextAndKeepInClipboard(finalText, targetPID: pasteTarget?.pid)
             } else {
                 // Paste but restore original clipboard (legacy behavior)
-                ClipboardUtil.insertText(finalText, targetPID: pasteTargetPID)
+                ClipboardUtil.insertText(finalText, targetPID: pasteTarget?.pid)
             }
         } else if prefs.autoCopyToClipboard {
             // Only copy to clipboard, don't paste
@@ -445,6 +484,18 @@ struct IndicatorWindow: View {
                         .frame(width: 24)
 
                     Text("No microphone")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundColor(.orange)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+
+            case .recordingFailed:
+                HStack(spacing: 8) {
+                    Image(systemName: "exclamationmark.triangle")
+                        .foregroundColor(.orange)
+                        .frame(width: 24)
+
+                    Text("Recording failed")
                         .font(.system(size: 13, weight: .semibold))
                         .foregroundColor(.orange)
                 }

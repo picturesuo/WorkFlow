@@ -9,6 +9,11 @@ enum RecordingStatus: String, Codable {
     case failed
 }
 
+enum RecordingMode: String, Codable {
+    case dictation
+    case meeting
+}
+
 struct Recording: Identifiable, Codable, FetchableRecord, PersistableRecord, Equatable {
     let id: UUID
     let timestamp: Date
@@ -22,12 +27,17 @@ struct Recording: Identifiable, Codable, FetchableRecord, PersistableRecord, Equ
     var cleanupInputTokens: Int? = nil
     var cleanupOutputTokens: Int? = nil
     var cleanupModelID: String? = nil
+    var title: String? = nil
+    var mode: RecordingMode = .dictation
+    var cleanupRequested: Bool = false
+    var targetBundleID: String? = nil
     
     var isRegeneration: Bool = false
     
     enum CodingKeys: String, CodingKey {
         case id, timestamp, fileName, transcription, duration, status, progress, sourceFileURL
         case cleanupSource, cleanupInputTokens, cleanupOutputTokens, cleanupModelID
+        case title, mode, cleanupRequested, targetBundleID
     }
 
     static func == (lhs: Recording, rhs: Recording) -> Bool {
@@ -39,6 +49,10 @@ struct Recording: Identifiable, Codable, FetchableRecord, PersistableRecord, Equ
                lhs.cleanupInputTokens == rhs.cleanupInputTokens &&
                lhs.cleanupOutputTokens == rhs.cleanupOutputTokens &&
                lhs.cleanupModelID == rhs.cleanupModelID &&
+               lhs.title == rhs.title &&
+               lhs.mode == rhs.mode &&
+               lhs.cleanupRequested == rhs.cleanupRequested &&
+               lhs.targetBundleID == rhs.targetBundleID &&
                lhs.isRegeneration == rhs.isRegeneration
     }
 
@@ -78,6 +92,10 @@ struct Recording: Identifiable, Codable, FetchableRecord, PersistableRecord, Equ
         static let cleanupInputTokens = Column(CodingKeys.cleanupInputTokens)
         static let cleanupOutputTokens = Column(CodingKeys.cleanupOutputTokens)
         static let cleanupModelID = Column(CodingKeys.cleanupModelID)
+        static let title = Column(CodingKeys.title)
+        static let mode = Column(CodingKeys.mode)
+        static let cleanupRequested = Column(CodingKeys.cleanupRequested)
+        static let targetBundleID = Column(CodingKeys.targetBundleID)
     }
 }
 
@@ -88,6 +106,7 @@ struct BedrockUsageSummary: Equatable {
     var outputTokens = 0
     var estimatedCostUSD = 0.0
     var unpricedDictations = 0
+    var localCleanedDictations = 0
 }
 
 @MainActor
@@ -173,6 +192,34 @@ class RecordingStore: ObservableObject {
                 }
             }
         }
+
+        migrator.registerMigration("v4_add_recording_context") { db in
+            let columnNames = try db.columns(in: Recording.databaseTableName).map(\.name)
+            if !columnNames.contains("title") {
+                try db.alter(table: Recording.databaseTableName) { t in
+                    t.add(column: "title", .text)
+                }
+            }
+            if !columnNames.contains("mode") {
+                try db.alter(table: Recording.databaseTableName) { t in
+                    t.add(column: "mode", .text).notNull().defaults(to: RecordingMode.dictation.rawValue)
+                }
+            }
+            if !columnNames.contains("cleanupRequested") {
+                try db.alter(table: Recording.databaseTableName) { t in
+                    t.add(column: "cleanupRequested", .boolean).notNull().defaults(to: false)
+                }
+            }
+        }
+
+        migrator.registerMigration("v5_add_target_app") { db in
+            let columnNames = try db.columns(in: Recording.databaseTableName).map(\.name)
+            if !columnNames.contains("targetBundleID") {
+                try db.alter(table: Recording.databaseTableName) { t in
+                    t.add(column: "targetBundleID", .text)
+                }
+            }
+        }
         
         try migrator.migrate(dbQueue)
     }
@@ -217,8 +264,28 @@ class RecordingStore: ObservableObject {
                 } else {
                     summary.unpricedDictations += 1
                 }
+            case .ollama:
+                summary.cleanedDictations += 1
+                summary.localCleanedDictations += 1
+                summary.inputTokens += recording.cleanupInputTokens ?? 0
+                summary.outputTokens += recording.cleanupOutputTokens ?? 0
+            case .openAICompatible:
+                summary.cleanedDictations += 1
+                summary.unpricedDictations += 1
+                summary.inputTokens += recording.cleanupInputTokens ?? 0
+                summary.outputTokens += recording.cleanupOutputTokens ?? 0
             case .rawFallback:
                 summary.fallbackDictations += 1
+                summary.inputTokens += recording.cleanupInputTokens ?? 0
+                summary.outputTokens += recording.cleanupOutputTokens ?? 0
+                if let modelID = recording.cleanupModelID,
+                   let estimate = BedrockPricing.estimateUSD(
+                       modelID: modelID,
+                       inputTokens: recording.cleanupInputTokens,
+                       outputTokens: recording.cleanupOutputTokens
+                   ) {
+                    summary.estimatedCostUSD += estimate
+                }
             case .disabled, nil:
                 break
             }
@@ -311,7 +378,14 @@ class RecordingStore: ObservableObject {
     static let recordingProgressDidUpdateNotification = Notification.Name("RecordingStore.recordingProgressDidUpdate")
     
     /// Updates the in-memory copy and notifies observers without touching the database.
-    private func applyLocalProgressUpdate(_ id: UUID, transcription: String? = nil, progress: Float, status: RecordingStatus, isRegeneration: Bool? = nil) {
+    private func applyLocalProgressUpdate(
+        _ id: UUID,
+        transcription: String? = nil,
+        progress: Float,
+        status: RecordingStatus,
+        isRegeneration: Bool? = nil,
+        cleanup: TranscriptCleanupOutcome? = nil
+    ) {
         if let index = recordings.firstIndex(where: { $0.id == id }) {
             var updated = recordings[index]
             if let transcription = transcription {
@@ -321,6 +395,12 @@ class RecordingStore: ObservableObject {
             updated.status = status
             if let isRegeneration = isRegeneration {
                 updated.isRegeneration = isRegeneration
+            }
+            if let cleanup = cleanup {
+                updated.cleanupSource = cleanup.source
+                updated.cleanupInputTokens = cleanup.inputTokens
+                updated.cleanupOutputTokens = cleanup.outputTokens
+                updated.cleanupModelID = cleanup.modelID
             }
             recordings[index] = updated
         }
@@ -364,6 +444,35 @@ class RecordingStore: ObservableObject {
         }
     }
 
+    func completeRecording(_ id: UUID, transcription: String, cleanup: TranscriptCleanupOutcome) async {
+        do {
+            _ = try await dbQueue.write { db -> Int in
+                try Recording
+                    .filter(Recording.Columns.id == id)
+                    .updateAll(db, [
+                        Recording.Columns.transcription.set(to: transcription),
+                        Recording.Columns.progress.set(to: 1.0),
+                        Recording.Columns.status.set(to: RecordingStatus.completed.rawValue),
+                        Recording.Columns.cleanupSource.set(to: cleanup.source.rawValue),
+                        Recording.Columns.cleanupInputTokens.set(to: cleanup.inputTokens),
+                        Recording.Columns.cleanupOutputTokens.set(to: cleanup.outputTokens),
+                        Recording.Columns.cleanupModelID.set(to: cleanup.modelID)
+                    ])
+            }
+            applyLocalProgressUpdate(
+                id,
+                transcription: transcription,
+                progress: 1,
+                status: .completed,
+                isRegeneration: false,
+                cleanup: cleanup
+            )
+            NotificationCenter.default.post(name: Self.recordingsDidUpdateNotification, object: nil)
+        } catch {
+            print("Failed to complete recording: \(error)")
+        }
+    }
+
     nonisolated func updateSourceFileURL(_ id: UUID, sourceURL: String) async throws {
         try await dbQueue.write { db in
             try Recording
@@ -374,30 +483,18 @@ class RecordingStore: ObservableObject {
         }
     }
 
-    func clearCleanupMetadata(_ id: UUID) async {
+    func updateCleanupRequested(_ id: UUID, cleanupRequested: Bool) async {
         do {
-            try await dbQueue.write { db in
-                try db.execute(
-                    sql: """
-                        UPDATE recordings
-                        SET cleanupSource = NULL,
-                            cleanupInputTokens = NULL,
-                            cleanupOutputTokens = NULL,
-                            cleanupModelID = NULL
-                        WHERE id = ?
-                        """,
-                    arguments: [id]
-                )
+            _ = try await dbQueue.write { db -> Int in
+                try Recording
+                    .filter(Recording.Columns.id == id)
+                    .updateAll(db, [Recording.Columns.cleanupRequested.set(to: cleanupRequested)])
             }
             if let index = recordings.firstIndex(where: { $0.id == id }) {
-                recordings[index].cleanupSource = nil
-                recordings[index].cleanupInputTokens = nil
-                recordings[index].cleanupOutputTokens = nil
-                recordings[index].cleanupModelID = nil
+                recordings[index].cleanupRequested = cleanupRequested
             }
-            NotificationCenter.default.post(name: Self.recordingsDidUpdateNotification, object: nil)
         } catch {
-            print("Failed to clear cleanup metadata: \(error)")
+            print("Failed to update cleanup preference: \(error)")
         }
     }
 
