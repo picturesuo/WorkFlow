@@ -1,7 +1,7 @@
 import Foundation
 
 struct TranscriptCleanupOutcome: Equatable {
-    enum Source: Equatable {
+    enum Source: String, Codable, Equatable {
         case bedrock
         case rawFallback
         case disabled
@@ -11,6 +11,7 @@ struct TranscriptCleanupOutcome: Equatable {
     let source: Source
     let inputTokens: Int?
     let outputTokens: Int?
+    let modelID: String?
 }
 
 final class TranscriptCleanupPipeline {
@@ -46,17 +47,20 @@ final class TranscriptCleanupPipeline {
                 text: rawTranscript,
                 source: .disabled,
                 inputTokens: nil,
-                outputTokens: nil
+                outputTokens: nil,
+                modelID: nil
             )
         }
 
         let storedToken = try? credentialProvider()
         guard let token = storedToken ?? nil, !token.isEmpty else {
+            recordFailure("No Bedrock API key is stored.")
             return TranscriptCleanupOutcome(
                 text: rawTranscript,
                 source: .rawFallback,
                 inputTokens: nil,
-                outputTokens: nil
+                outputTokens: nil,
+                modelID: nil
             )
         }
 
@@ -68,20 +72,34 @@ final class TranscriptCleanupPipeline {
                 apiKey: token,
                 configuration: configuration
             )
+            clearFailure()
             return TranscriptCleanupOutcome(
                 text: result.text,
                 source: .bedrock,
                 inputTokens: result.inputTokens,
-                outputTokens: result.outputTokens
+                outputTokens: result.outputTokens,
+                modelID: configuration.modelID
             )
         } catch {
             print("Bedrock cleanup unavailable; using raw transcript: \(error.localizedDescription)")
+            recordFailure(error.localizedDescription)
             return TranscriptCleanupOutcome(
                 text: rawTranscript,
                 source: .rawFallback,
                 inputTokens: nil,
-                outputTokens: nil
+                outputTokens: nil,
+                modelID: nil
             )
         }
+    }
+
+    private func recordFailure(_ message: String) {
+        AppPreferences.shared.bedrockLastErrorMessage = message
+        AppPreferences.shared.bedrockLastErrorDate = Date()
+    }
+
+    private func clearFailure() {
+        AppPreferences.shared.bedrockLastErrorMessage = nil
+        AppPreferences.shared.bedrockLastErrorDate = nil
     }
 }

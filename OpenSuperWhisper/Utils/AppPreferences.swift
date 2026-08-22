@@ -148,6 +148,12 @@ final class AppPreferences {
     @UserDefault(key: "bedrockTimeoutSeconds", defaultValue: BedrockCleanupConfiguration.defaultTimeout)
     var bedrockTimeoutSeconds: Double
 
+    @OptionalUserDefault(key: "bedrockLastErrorMessage")
+    var bedrockLastErrorMessage: String?
+
+    @OptionalUserDefault(key: "bedrockLastErrorDate")
+    var bedrockLastErrorDate: Date?
+
     @UserDefault(key: "launchAtLogin", defaultValue: true)
     var launchAtLogin: Bool
 

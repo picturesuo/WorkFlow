@@ -18,11 +18,16 @@ struct Recording: Identifiable, Codable, FetchableRecord, PersistableRecord, Equ
     var status: RecordingStatus
     var progress: Float
     var sourceFileURL: String?
+    var cleanupSource: TranscriptCleanupOutcome.Source? = nil
+    var cleanupInputTokens: Int? = nil
+    var cleanupOutputTokens: Int? = nil
+    var cleanupModelID: String? = nil
     
     var isRegeneration: Bool = false
     
     enum CodingKeys: String, CodingKey {
         case id, timestamp, fileName, transcription, duration, status, progress, sourceFileURL
+        case cleanupSource, cleanupInputTokens, cleanupOutputTokens, cleanupModelID
     }
 
     static func == (lhs: Recording, rhs: Recording) -> Bool {
@@ -30,6 +35,10 @@ struct Recording: Identifiable, Codable, FetchableRecord, PersistableRecord, Equ
                lhs.status == rhs.status &&
                lhs.progress == rhs.progress &&
                lhs.transcription == rhs.transcription &&
+               lhs.cleanupSource == rhs.cleanupSource &&
+               lhs.cleanupInputTokens == rhs.cleanupInputTokens &&
+               lhs.cleanupOutputTokens == rhs.cleanupOutputTokens &&
+               lhs.cleanupModelID == rhs.cleanupModelID &&
                lhs.isRegeneration == rhs.isRegeneration
     }
 
@@ -65,7 +74,20 @@ struct Recording: Identifiable, Codable, FetchableRecord, PersistableRecord, Equ
         static let status = Column(CodingKeys.status)
         static let progress = Column(CodingKeys.progress)
         static let sourceFileURL = Column(CodingKeys.sourceFileURL)
+        static let cleanupSource = Column(CodingKeys.cleanupSource)
+        static let cleanupInputTokens = Column(CodingKeys.cleanupInputTokens)
+        static let cleanupOutputTokens = Column(CodingKeys.cleanupOutputTokens)
+        static let cleanupModelID = Column(CodingKeys.cleanupModelID)
     }
+}
+
+struct BedrockUsageSummary: Equatable {
+    var cleanedDictations = 0
+    var fallbackDictations = 0
+    var inputTokens = 0
+    var outputTokens = 0
+    var estimatedCostUSD = 0.0
+    var unpricedDictations = 0
 }
 
 @MainActor
@@ -127,6 +149,30 @@ class RecordingStore: ObservableObject {
                 }
             }
         }
+
+        migrator.registerMigration("v3_add_cleanup_metadata") { db in
+            let columnNames = try db.columns(in: Recording.databaseTableName).map(\.name)
+            if !columnNames.contains("cleanupSource") {
+                try db.alter(table: Recording.databaseTableName) { t in
+                    t.add(column: "cleanupSource", .text)
+                }
+            }
+            if !columnNames.contains("cleanupInputTokens") {
+                try db.alter(table: Recording.databaseTableName) { t in
+                    t.add(column: "cleanupInputTokens", .integer)
+                }
+            }
+            if !columnNames.contains("cleanupOutputTokens") {
+                try db.alter(table: Recording.databaseTableName) { t in
+                    t.add(column: "cleanupOutputTokens", .integer)
+                }
+            }
+            if !columnNames.contains("cleanupModelID") {
+                try db.alter(table: Recording.databaseTableName) { t in
+                    t.add(column: "cleanupModelID", .text)
+                }
+            }
+        }
         
         try migrator.migrate(dbQueue)
     }
@@ -145,6 +191,37 @@ class RecordingStore: ObservableObject {
                 .order(Recording.Columns.timestamp.desc)
                 .limit(limit, offset: offset)
                 .fetchAll(db)
+        }
+    }
+
+    nonisolated func bedrockUsage(since startDate: Date) async throws -> BedrockUsageSummary {
+        let recentRecordings = try await dbQueue.read { db in
+            try Recording
+                .filter(Recording.Columns.timestamp >= startDate)
+                .fetchAll(db)
+        }
+
+        return recentRecordings.reduce(into: BedrockUsageSummary()) { summary, recording in
+            switch recording.cleanupSource {
+            case .bedrock:
+                summary.cleanedDictations += 1
+                summary.inputTokens += recording.cleanupInputTokens ?? 0
+                summary.outputTokens += recording.cleanupOutputTokens ?? 0
+                if let modelID = recording.cleanupModelID,
+                   let estimate = BedrockPricing.estimateUSD(
+                       modelID: modelID,
+                       inputTokens: recording.cleanupInputTokens,
+                       outputTokens: recording.cleanupOutputTokens
+                   ) {
+                    summary.estimatedCostUSD += estimate
+                } else {
+                    summary.unpricedDictations += 1
+                }
+            case .rawFallback:
+                summary.fallbackDictations += 1
+            case .disabled, nil:
+                break
+            }
         }
     }
 
@@ -294,6 +371,33 @@ class RecordingStore: ObservableObject {
                 .updateAll(db, [
                     Recording.Columns.sourceFileURL.set(to: sourceURL)
                 ])
+        }
+    }
+
+    func clearCleanupMetadata(_ id: UUID) async {
+        do {
+            try await dbQueue.write { db in
+                try db.execute(
+                    sql: """
+                        UPDATE recordings
+                        SET cleanupSource = NULL,
+                            cleanupInputTokens = NULL,
+                            cleanupOutputTokens = NULL,
+                            cleanupModelID = NULL
+                        WHERE id = ?
+                        """,
+                    arguments: [id]
+                )
+            }
+            if let index = recordings.firstIndex(where: { $0.id == id }) {
+                recordings[index].cleanupSource = nil
+                recordings[index].cleanupInputTokens = nil
+                recordings[index].cleanupOutputTokens = nil
+                recordings[index].cleanupModelID = nil
+            }
+            NotificationCenter.default.post(name: Self.recordingsDidUpdateNotification, object: nil)
+        } catch {
+            print("Failed to clear cleanup metadata: \(error)")
         }
     }
 

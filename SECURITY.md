@@ -10,4 +10,6 @@ Include the affected version, macOS version, reproduction steps, and impact. Do 
 
 Chat stores the Bedrock bearer token in the macOS Keychain and never intentionally writes it to logs, preferences, recordings, or the repository. A report that shows otherwise is high priority.
 
-Rotate the AWS key immediately if you believe it has been exposed. Prefer short-term Bedrock API keys and least-privilege AWS permissions.
+Rotate the AWS key immediately if you believe it has been exposed. AWS recommends automatically refreshed short-term Bedrock API keys for production; they expire within 12 hours. If you use a long-term key for personal exploration, set an explicit expiration and grant only the model-invocation permissions Chat needs.
+
+Chat is distributed directly rather than through the Mac App Store because global shortcuts and targeted paste require Accessibility and event-monitoring capabilities. Public binaries must be signed with Developer ID, use the hardened runtime, and be notarized. The app disables library validation only to load its bundled speech-runtime libraries; report any build that loads code from outside its signed bundle.

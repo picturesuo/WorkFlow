@@ -203,7 +203,11 @@ class IndicatorViewModel: ObservableObject {
                             duration: duration,
                             status: .completed,
                             progress: 1.0,
-                            sourceFileURL: nil
+                            sourceFileURL: nil,
+                            cleanupSource: cleanup.source,
+                            cleanupInputTokens: cleanup.inputTokens,
+                            cleanupOutputTokens: cleanup.outputTokens,
+                            cleanupModelID: cleanup.modelID
                         )
                         
                         try recorder.moveTemporaryRecording(from: tempURL, to: newRecording.url)

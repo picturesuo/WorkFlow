@@ -17,6 +17,7 @@ Chat is not affiliated with Wispr Flow or Superwhisper.
 - **One-button dictation:** hold the bottom-left `Fn`/globe key, speak, then release.
 - **Local speech recognition:** Parakeet v3 is the default; Whisper remains available.
 - **Bedrock cleanup:** Amazon Nova Micro performs literal transcript cleanup through the Bedrock Converse API.
+- **Visible cost and provenance:** history identifies Bedrock-cleaned versus local-fallback dictations, while Settings totals the actual tokens returned by AWS and estimates their cost.
 - **Failure-safe:** a three-second deadline falls back to the raw local transcript, so an API problem does not eat your words.
 - **Current utterance only:** a monotonic generation gate prevents an older async result from winning a paste race.
 - **Clipboard-safe paste:** Chat pastes the generated text and restores the prior clipboard only if the clipboard has not changed since.
@@ -55,7 +56,9 @@ If you build directly in Xcode, select your own Apple Developer team in **Signin
 
 ## Connect Amazon Bedrock
 
-1. In the [Amazon Bedrock console](https://console.aws.amazon.com/bedrock/home#/api-keys), create a short-term Bedrock API key with permission to invoke Amazon Nova Micro in your chosen region.
+1. Open the [Amazon Bedrock API keys console](https://console.aws.amazon.com/bedrock/home#/api-keys).
+   - Easiest personal setup: create a long-term key with an explicit expiration and permission only to invoke the model you plan to use. AWS designates long-term keys for exploration.
+   - AWS-recommended production setup: generate and automatically refresh a short-term key. Short-term keys last no more than 12 hours, so a key pasted into Chat must be replaced when it expires.
 2. Open **Chat → Settings → Bedrock**.
 3. Paste the key and click **Save & Test**. The key is stored in the macOS Keychain under `AWS_BEARER_TOKEN_BEDROCK`.
 4. Keep the defaults unless your AWS setup requires another region or model:
@@ -63,11 +66,13 @@ If you build directly in Xcode, select your own Apple Developer team in **Signin
    - Model: `us.amazon.nova-micro-v1:0` (the US cross-Region inference profile)
    - Raw fallback: `3.0` seconds
 
-AWS recommends short-term keys for production use; long-term keys are intended for exploration. See the official [Bedrock API keys guide](https://docs.aws.amazon.com/bedrock/latest/userguide/api-keys.html) and [Converse API reference](https://docs.aws.amazon.com/bedrock/latest/APIReference/API_runtime_Converse.html).
+Chat never stores an AWS secret in the repository or preferences. See the official [Bedrock API keys guide](https://docs.aws.amazon.com/bedrock/latest/userguide/api-keys.html) and [Converse API reference](https://docs.aws.amazon.com/bedrock/latest/APIReference/API_runtime_Converse.html).
 
 ### Cost
 
-Nova Micro was the lowest-priced current Bedrock text model found for this cleanup workload when checked against AWS's US pricing catalog on August 4, 2026: approximately **$0.035 per million input tokens** and **$0.14 per million output tokens**. A short dictation normally costs far below one cent. AWS prices and regional availability can change, so verify the current [Bedrock pricing page](https://aws.amazon.com/bedrock/pricing/).
+The live AWS US on-demand catalog reported Nova Micro at **$0.035 per million input tokens** and **$0.14 per million output tokens** on August 21, 2026. For example, a short cleanup using 200 input and 40 output tokens costs about **$0.0000126**; 100 such dictations every day is about **$0.04/month**.
+
+Chat records the token counts returned by the Converse API and shows per-dictation estimates in History plus a monthly total in **Settings → Bedrock**. Custom model IDs still show token counts, but Chat deliberately omits a dollar estimate unless it has a dated price for that model. Estimates exclude taxes, discounts, free tiers, and later AWS price changes; verify the current [Bedrock pricing page](https://aws.amazon.com/bedrock/pricing/).
 
 ## Cleanup contract
 
@@ -85,6 +90,10 @@ xcodebuild test \
 ```
 
 Focused coverage includes Bedrock request/response handling, unsafe rewrite rejection, latest-generation gating, clipboard restoration, empty-dictation discard, shortcuts, recording lifecycle, and model behavior.
+
+## Public releases
+
+The repository is public and can be installed from source today. A broadly downloadable macOS binary additionally requires a paid Developer ID Application certificate and Apple notarization; a development or ad-hoc signature is not a safe substitute. Maintainers can use the fail-closed packaging workflow in [docs/RELEASING.md](docs/RELEASING.md). Once a notarized archive is published, it should be attached to this repository's Releases page.
 
 ## Privacy and security
 

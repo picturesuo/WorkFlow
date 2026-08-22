@@ -189,7 +189,9 @@ class ContentViewModel: ObservableObject {
                 do {
                     print("start decoding...")
                     let duration = await AudioUtil.audioDuration(url: tempURL)
-                    let text = try await transcriptionService.transcribeAudio(url: tempURL, settings: Settings())
+                    let rawText = try await transcriptionService.transcribeAudio(url: tempURL, settings: Settings())
+                    let cleanup = await TranscriptCleanupPipeline.shared.finalize(rawText)
+                    let text = cleanup.text
 
                     if text.isEmpty {
                         try? FileManager.default.removeItem(at: tempURL)
@@ -206,7 +208,11 @@ class ContentViewModel: ObservableObject {
                             duration: duration,
                             status: .completed,
                             progress: 1.0,
-                            sourceFileURL: nil
+                            sourceFileURL: nil,
+                            cleanupSource: cleanup.source,
+                            cleanupInputTokens: cleanup.inputTokens,
+                            cleanupOutputTokens: cleanup.outputTokens,
+                            cleanupModelID: cleanup.modelID
                         )
 
                         try recorder.moveTemporaryRecording(from: tempURL, to: newRecording.url)
@@ -768,6 +774,53 @@ struct RecordingRow: View {
         return recording.transcription
     }
 
+    private var cleanupBadgeLabel: String? {
+        guard let source = recording.cleanupSource else { return nil }
+        switch source {
+        case .bedrock:
+            if let modelID = recording.cleanupModelID,
+               let estimate = BedrockPricing.estimateUSD(
+                   modelID: modelID,
+                   inputTokens: recording.cleanupInputTokens,
+                   outputTokens: recording.cleanupOutputTokens
+               ) {
+                return "Bedrock · \(BedrockPricing.formatUSD(estimate))"
+            }
+            let tokenCount = (recording.cleanupInputTokens ?? 0) + (recording.cleanupOutputTokens ?? 0)
+            return tokenCount > 0 ? "Bedrock · \(tokenCount) tokens" : "Bedrock"
+        case .rawFallback:
+            return "Local fallback"
+        case .disabled:
+            return "Local only"
+        }
+    }
+
+    private var cleanupBadgeHelp: String {
+        switch recording.cleanupSource {
+        case .bedrock:
+            let input = recording.cleanupInputTokens.map(String.init) ?? "unknown"
+            let output = recording.cleanupOutputTokens.map(String.init) ?? "unknown"
+            return "Transcript cleaned by Bedrock (\(input) input / \(output) output tokens). Audio stayed on this Mac."
+        case .rawFallback:
+            return "Bedrock was unavailable, so Chat preserved the local transcript."
+        case .disabled:
+            return "This transcript was processed entirely on this Mac."
+        case nil:
+            return "Cleanup source was not recorded for this older transcription."
+        }
+    }
+
+    private var cleanupBadgeColor: Color {
+        switch recording.cleanupSource {
+        case .bedrock:
+            return ThemePalette.iconAccent(colorScheme)
+        case .rawFallback:
+            return .orange
+        case .disabled, nil:
+            return .secondary
+        }
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             if isPending && !isRegenerating {
@@ -879,6 +932,18 @@ struct RecordingRow: View {
                     }
                     .font(.caption)
                     .foregroundColor(.secondary)
+                }
+
+                if let cleanupBadgeLabel {
+                    Text(cleanupBadgeLabel)
+                        .font(.caption2.weight(.medium).monospacedDigit())
+                        .foregroundColor(cleanupBadgeColor)
+                        .padding(.horizontal, 7)
+                        .padding(.vertical, 3)
+                        .background(cleanupBadgeColor.opacity(0.1))
+                        .clipShape(Capsule())
+                        .lineLimit(1)
+                        .help(cleanupBadgeHelp)
                 }
                 
                 if isRegenerating {

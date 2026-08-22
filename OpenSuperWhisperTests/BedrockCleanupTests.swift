@@ -193,6 +193,45 @@ final class TranscriptCleanupPipelineTests: XCTestCase {
     }
 }
 
+final class BedrockPricingTests: XCTestCase {
+    func testNovaMicroEstimateUsesPublishedInputAndOutputRates() throws {
+        let estimate = try XCTUnwrap(BedrockPricing.estimateUSD(
+            modelID: "us.amazon.nova-micro-v1:0",
+            inputTokens: 200,
+            outputTokens: 40
+        ))
+
+        XCTAssertEqual(estimate, 0.0000126, accuracy: 0.0000000001)
+        XCTAssertEqual(BedrockPricing.formatUSD(estimate), "$0.000013")
+    }
+
+    func testRegionalNovaMicroModelUsesSamePublishedRate() {
+        XCTAssertNotNil(BedrockPricing.estimateUSD(
+            modelID: "amazon.nova-micro-v1:0",
+            inputTokens: 100,
+            outputTokens: 10
+        ))
+    }
+
+    func testUnknownModelDoesNotProduceMisleadingDollarEstimate() {
+        XCTAssertNil(BedrockPricing.estimateUSD(
+            modelID: "custom.model-v1",
+            inputTokens: 100,
+            outputTokens: 10
+        ))
+    }
+
+    func testNonUSInferenceProfilesDoNotUseUSPricing() {
+        for modelID in ["eu.amazon.nova-micro-v1:0", "apac.amazon.nova-micro-v1:0"] {
+            XCTAssertNil(BedrockPricing.estimateUSD(
+                modelID: modelID,
+                inputTokens: 100,
+                outputTokens: 10
+            ))
+        }
+    }
+}
+
 private final class BedrockURLProtocol: URLProtocol {
     static var handler: ((URLRequest) throws -> (HTTPURLResponse, Data))?
 

@@ -237,6 +237,9 @@ class SettingsViewModel: ObservableObject {
     @Published private(set) var hasBedrockAPIKey = false
     @Published private(set) var bedrockStatus = "Add a Bedrock API key to enable cleanup."
     @Published private(set) var isTestingBedrock = false
+    @Published private(set) var bedrockUsageSummary = BedrockUsageSummary()
+    @Published private(set) var bedrockLastErrorMessage: String?
+    @Published private(set) var bedrockLastErrorDate: Date?
 
     init() {
         let prefs = AppPreferences.shared
@@ -267,6 +270,8 @@ class SettingsViewModel: ObservableObject {
         self.bedrockModelID = prefs.bedrockModelID
         self.bedrockTimeoutSeconds = prefs.bedrockTimeoutSeconds
         self.launchAtLogin = prefs.launchAtLogin
+        self.bedrockLastErrorMessage = prefs.bedrockLastErrorMessage
+        self.bedrockLastErrorDate = prefs.bedrockLastErrorDate
 
         do {
             self.hasBedrockAPIKey = try BedrockCredentialStore.loadAPIKey() != nil
@@ -320,11 +325,41 @@ class SettingsViewModel: ObservableObject {
                 bedrockAPIKeyInput = ""
             }
             hasBedrockAPIKey = true
-            bedrockStatus = "Connected to Bedrock (\(result.inputTokens ?? 0) in / \(result.outputTokens ?? 0) out)."
+            AppPreferences.shared.bedrockLastErrorMessage = nil
+            AppPreferences.shared.bedrockLastErrorDate = nil
+            bedrockLastErrorMessage = nil
+            bedrockLastErrorDate = nil
+            let estimate = BedrockPricing.estimateUSD(
+                modelID: bedrockModelID,
+                inputTokens: result.inputTokens,
+                outputTokens: result.outputTokens
+            ).map { " · ~\(BedrockPricing.formatUSD($0))" } ?? ""
+            bedrockStatus = "Connected · \(result.inputTokens ?? 0) in / \(result.outputTokens ?? 0) out\(estimate) for this test."
         } catch {
             hasBedrockAPIKey = ((try? BedrockCredentialStore.loadAPIKey()) ?? nil) != nil
             bedrockStatus = "Connection failed: \(error.localizedDescription)"
+            AppPreferences.shared.bedrockLastErrorMessage = error.localizedDescription
+            AppPreferences.shared.bedrockLastErrorDate = Date()
+            bedrockLastErrorMessage = error.localizedDescription
+            bedrockLastErrorDate = AppPreferences.shared.bedrockLastErrorDate
         }
+    }
+
+    @MainActor
+    func refreshBedrockUsage() async {
+        let now = Date()
+        let components = Calendar.current.dateComponents([.year, .month], from: now)
+        let monthStart = Calendar.current.date(from: components) ?? now
+        bedrockUsageSummary = (try? await RecordingStore.shared.bedrockUsage(since: monthStart))
+            ?? BedrockUsageSummary()
+        bedrockLastErrorMessage = AppPreferences.shared.bedrockLastErrorMessage
+        bedrockLastErrorDate = AppPreferences.shared.bedrockLastErrorDate
+    }
+
+    func useRecommendedBedrockDefaults() {
+        bedrockRegion = BedrockCleanupConfiguration.defaultRegion
+        bedrockModelID = BedrockCleanupConfiguration.defaultModelID
+        bedrockTimeoutSeconds = BedrockCleanupConfiguration.defaultTimeout
     }
 
     func clearBedrockCredential() {
@@ -333,6 +368,10 @@ class SettingsViewModel: ObservableObject {
             bedrockAPIKeyInput = ""
             hasBedrockAPIKey = false
             bedrockStatus = "Bedrock API key removed from Keychain."
+            AppPreferences.shared.bedrockLastErrorMessage = nil
+            AppPreferences.shared.bedrockLastErrorDate = nil
+            bedrockLastErrorMessage = nil
+            bedrockLastErrorDate = nil
         } catch {
             bedrockStatus = error.localizedDescription
         }
@@ -873,8 +912,19 @@ struct SettingsView: View {
                             .labelsHidden()
                     }
 
+                    VStack(alignment: .leading, spacing: 10) {
+                        Link(destination: URL(string: "https://console.aws.amazon.com/bedrock/home#/api-keys")!) {
+                            Label("1  Create a Bedrock API key", systemImage: "arrow.up.right.square")
+                        }
+                        .font(.subheadline.weight(.medium))
+
+                        Text("For the easiest personal setup, create a long-term key with an expiration. AWS designates long-term keys for exploration; its production recommendation is an automatically refreshed short-term key, which lasts up to 12 hours.")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    }
+
                     SecureField(
-                        viewModel.hasBedrockAPIKey ? "Stored in Keychain (enter to replace)" : "Bedrock API key",
+                        viewModel.hasBedrockAPIKey ? "2  Stored in Keychain (enter to replace)" : "2  Paste the Bedrock API key",
                         text: $viewModel.bedrockAPIKeyInput
                     )
                     .textFieldStyle(.roundedBorder)
@@ -887,7 +937,7 @@ struct SettingsView: View {
                                 ProgressView()
                                     .controlSize(.small)
                             } else {
-                                Label("Save & Test", systemImage: "checkmark.shield")
+                                Label("3  Save & Test", systemImage: "checkmark.shield")
                             }
                         }
                         .buttonStyle(.borderedProminent)
@@ -911,9 +961,74 @@ struct SettingsView: View {
                 .background(Color(.controlBackgroundColor).opacity(0.3))
                 .cornerRadius(12)
 
+                VStack(alignment: .leading, spacing: 10) {
+                    HStack(alignment: .firstTextBaseline) {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("This month")
+                                .font(.headline)
+                            Text("Actual Converse API usage recorded by Chat")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                        }
+                        Spacer()
+                        Text(BedrockPricing.formatUSD(viewModel.bedrockUsageSummary.estimatedCostUSD))
+                            .font(.title2.weight(.semibold).monospacedDigit())
+                    }
+
+                    Text("\(viewModel.bedrockUsageSummary.cleanedDictations) cleaned · \(viewModel.bedrockUsageSummary.fallbackDictations) local fallbacks · \(viewModel.bedrockUsageSummary.inputTokens) input / \(viewModel.bedrockUsageSummary.outputTokens) output tokens")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+
+                    if viewModel.bedrockUsageSummary.unpricedDictations > 0 {
+                        Text("\(viewModel.bedrockUsageSummary.unpricedDictations) dictation(s) used a custom or unknown-price model and are excluded from the dollar estimate.")
+                            .font(.caption)
+                            .foregroundColor(.orange)
+                    }
+
+                    Text("At current Nova Micro prices, 100 short dictations per day (about 200 input + 40 output tokens each) is roughly $0.04/month. AWS bills actual usage; taxes and pricing changes are not included.")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+
+                    Link("AWS on-demand pricing · checked \(BedrockPricing.asOfDate)", destination: BedrockPricing.pricingURL)
+                        .font(.caption)
+                }
+                .padding()
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(Color(.controlBackgroundColor).opacity(0.3))
+                .cornerRadius(12)
+
+                if viewModel.bedrockCleanupEnabled,
+                   let lastError = viewModel.bedrockLastErrorMessage {
+                    VStack(alignment: .leading, spacing: 6) {
+                        Label("Last cleanup used the local fallback", systemImage: "exclamationmark.triangle.fill")
+                            .font(.subheadline.weight(.medium))
+                            .foregroundColor(.orange)
+                        Text(lastError)
+                            .font(.caption)
+                            .textSelection(.enabled)
+                        if let errorDate = viewModel.bedrockLastErrorDate {
+                            Text(errorDate, style: .relative)
+                                .font(.caption2)
+                                .foregroundColor(.secondary)
+                        }
+                    }
+                    .padding()
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(Color.orange.opacity(0.08))
+                    .cornerRadius(12)
+                }
+
                 VStack(alignment: .leading, spacing: 14) {
-                    Text("Model")
-                        .font(.headline)
+                    HStack {
+                        Text("Model")
+                            .font(.headline)
+                        Spacer()
+                        Button("Use recommended defaults") {
+                            viewModel.useRecommendedBedrockDefaults()
+                        }
+                        .buttonStyle(.link)
+                        .font(.caption)
+                    }
 
                     TextField("AWS Region", text: $viewModel.bedrockRegion)
                         .textFieldStyle(.roundedBorder)
@@ -933,7 +1048,7 @@ struct SettingsView: View {
                         .frame(width: 180)
                     }
 
-                    Text("Default: Amazon Nova Micro in us-east-1. If Bedrock is slow or unavailable, Chat pastes the local transcript instead of losing your dictation.")
+                    Text("Recommended: Amazon Nova Micro in us-east-1. It is faster and substantially cheaper than newer general-purpose Nova models for literal cleanup. If Bedrock is slow or unavailable, Chat pastes the local transcript instead of losing your dictation.")
                         .font(.caption)
                         .foregroundColor(.secondary)
                 }
@@ -941,11 +1056,14 @@ struct SettingsView: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .background(Color(.controlBackgroundColor).opacity(0.3))
                 .cornerRadius(12)
-
-                Link("Create or manage a Bedrock API key in AWS", destination: URL(string: "https://console.aws.amazon.com/bedrock/home#/api-keys")!)
-                    .font(.caption)
             }
             .padding()
+        }
+        .task {
+            await viewModel.refreshBedrockUsage()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: RecordingStore.recordingsDidUpdateNotification)) { _ in
+            Task { await viewModel.refreshBedrockUsage() }
         }
     }
     

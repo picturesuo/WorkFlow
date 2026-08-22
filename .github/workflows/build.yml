@@ -31,6 +31,7 @@ jobs:
             CODE_SIGNING_REQUIRED=NO \
             -only-testing:OpenSuperWhisperTests/BedrockCleanupServiceTests \
             -only-testing:OpenSuperWhisperTests/TranscriptCleanupPipelineTests \
+            -only-testing:OpenSuperWhisperTests/BedrockPricingTests \
             -only-testing:OpenSuperWhisperTests/LatestDictationGateTests \
             -only-testing:OpenSuperWhisperTests/ClipboardRestoreTests \
             -only-testing:OpenSuperWhisperTests/EmptyDictationDiscardTests

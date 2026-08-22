@@ -142,6 +142,7 @@ class TranscriptionQueue: ObservableObject {
             return
         }
 
+        await recordingStore.clearCleanupMetadata(recording.id)
         await recordingStore.updateRecordingStatusOnly(
             recording.id,
             progress: 0.0,
