@@ -1630,20 +1630,29 @@ final class NoMicrophoneGuardTests: XCTestCase {
 @MainActor
 final class EscapeCancelConfirmationTests: XCTestCase {
 
-    private let prefsKey = "escCancelWithoutConfirmation"
-    private var savedPrefValue: Any?
+    private let confirmationPrefKey = "escCancelWithoutConfirmation"
+    private let protectionPrefKey = "ignoreEscWhileRecording"
+    private var savedConfirmationPrefValue: Any?
+    private var savedProtectionPrefValue: Any?
 
     override func setUp() {
         super.setUp()
-        savedPrefValue = UserDefaults.standard.object(forKey: prefsKey)
-        UserDefaults.standard.removeObject(forKey: prefsKey)
+        savedConfirmationPrefValue = UserDefaults.standard.object(forKey: confirmationPrefKey)
+        savedProtectionPrefValue = UserDefaults.standard.object(forKey: protectionPrefKey)
+        UserDefaults.standard.removeObject(forKey: confirmationPrefKey)
+        UserDefaults.standard.removeObject(forKey: protectionPrefKey)
     }
 
     override func tearDown() {
-        if let savedPrefValue {
-            UserDefaults.standard.set(savedPrefValue, forKey: prefsKey)
+        if let savedConfirmationPrefValue {
+            UserDefaults.standard.set(savedConfirmationPrefValue, forKey: confirmationPrefKey)
         } else {
-            UserDefaults.standard.removeObject(forKey: prefsKey)
+            UserDefaults.standard.removeObject(forKey: confirmationPrefKey)
+        }
+        if let savedProtectionPrefValue {
+            UserDefaults.standard.set(savedProtectionPrefValue, forKey: protectionPrefKey)
+        } else {
+            UserDefaults.standard.removeObject(forKey: protectionPrefKey)
         }
         super.tearDown()
     }
@@ -1679,7 +1688,7 @@ final class EscapeCancelConfirmationTests: XCTestCase {
     }
 
     func testLongRecording_withToggleEnabled_cancelsImmediately() {
-        UserDefaults.standard.set(true, forKey: prefsKey)
+        UserDefaults.standard.set(true, forKey: confirmationPrefKey)
         let viewModel = makeRecordingViewModel(elapsed: 15)
 
         XCTAssertTrue(viewModel.handleCancelRequest(),
@@ -1689,7 +1698,55 @@ final class EscapeCancelConfirmationTests: XCTestCase {
         viewModel.cleanup()
     }
 
+    func testProtectionOn_recordingState_ignoresEsc() {
+        UserDefaults.standard.set(true, forKey: protectionPrefKey)
+        let viewModel = makeRecordingViewModel(elapsed: 3)
+
+        XCTAssertFalse(viewModel.handleCancelRequest())
+        XCTAssertFalse(viewModel.isConfirmingCancel)
+
+        viewModel.cleanup()
+    }
+
+    func testProtectionOn_longRecording_ignoresRepeatedEscEvenWithConfirmationBypass() {
+        UserDefaults.standard.set(true, forKey: protectionPrefKey)
+        UserDefaults.standard.set(true, forKey: confirmationPrefKey)
+        let viewModel = makeRecordingViewModel(elapsed: 15)
+
+        XCTAssertFalse(viewModel.handleCancelRequest())
+        XCTAssertFalse(viewModel.handleCancelRequest())
+        XCTAssertFalse(viewModel.handleCancelRequest())
+        XCTAssertFalse(viewModel.isConfirmingCancel)
+
+        viewModel.cleanup()
+    }
+
+    func testProtectionOn_connectingState_ignoresEsc() {
+        UserDefaults.standard.set(true, forKey: protectionPrefKey)
+        let viewModel = IndicatorViewModel()
+        viewModel.state = .connecting
+
+        XCTAssertFalse(viewModel.handleCancelRequest())
+        XCTAssertFalse(viewModel.isConfirmingCancel)
+
+        viewModel.cleanup()
+    }
+
+    func testProtectionEnabledMidConfirmation_resetsAndIgnores() {
+        let viewModel = makeRecordingViewModel(elapsed: 15)
+        XCTAssertFalse(viewModel.handleCancelRequest())
+        XCTAssertTrue(viewModel.isConfirmingCancel)
+
+        UserDefaults.standard.set(true, forKey: protectionPrefKey)
+
+        XCTAssertFalse(viewModel.handleCancelRequest())
+        XCTAssertFalse(viewModel.isConfirmingCancel)
+
+        viewModel.cleanup()
+    }
+
     func testDecodingState_cancelsImmediately() {
+        UserDefaults.standard.set(true, forKey: protectionPrefKey)
         let viewModel = IndicatorViewModel()
         viewModel.state = .decoding
         viewModel.recordingStartedAt = Date().addingTimeInterval(-15)

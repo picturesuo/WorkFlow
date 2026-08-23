@@ -178,6 +178,12 @@ class SettingsViewModel: ObservableObject {
         }
     }
 
+    @Published var ignoreEscWhileRecording: Bool {
+        didSet {
+            AppPreferences.shared.ignoreEscWhileRecording = ignoreEscWhileRecording
+        }
+    }
+
     @Published var startHiddenInMenuBar: Bool {
         didSet {
             AppPreferences.shared.startHiddenInMenuBar = startHiddenInMenuBar
@@ -276,6 +282,7 @@ class SettingsViewModel: ObservableObject {
         self.holdToRecord = prefs.holdToRecord
         self.doublePressToTrigger = prefs.doublePressToTrigger
         self.escCancelWithoutConfirmation = prefs.escCancelWithoutConfirmation
+        self.ignoreEscWhileRecording = prefs.ignoreEscWhileRecording
         self.startHiddenInMenuBar = prefs.startHiddenInMenuBar
         self.addSpaceAfterSentence = prefs.addSpaceAfterSentence
         self.autoCopyToClipboard = prefs.autoCopyToClipboard
@@ -1555,6 +1562,22 @@ struct SettingsView: View {
                         
                         HStack {
                             VStack(alignment: .leading, spacing: 2) {
+                                Text("Ignore Esc while recording")
+                                    .font(.subheadline)
+                                Text("Keep the current dictation recording; use your recording shortcut to finish")
+                                    .font(.caption)
+                                    .foregroundColor(.secondary)
+                            }
+                            Spacer()
+                            Toggle("", isOn: $viewModel.ignoreEscWhileRecording)
+                                .toggleStyle(SwitchToggleStyle(tint: Color.accentColor))
+                                .labelsHidden()
+                                .accessibilityLabel("Ignore Escape while recording")
+                                .accessibilityHint("Prevents Escape from deleting a dictation that is still recording")
+                        }
+
+                        HStack {
+                            VStack(alignment: .leading, spacing: 2) {
                                 Text("Cancel without confirmation")
                                     .font(.subheadline)
                                 Text("Skip the double-Esc confirmation for recordings longer than 10 seconds")
@@ -1567,6 +1590,8 @@ struct SettingsView: View {
                                 .labelsHidden()
                                 .accessibilityLabel("Cancel long recordings without confirmation")
                         }
+                        .disabled(viewModel.ignoreEscWhileRecording)
+                        .opacity(viewModel.ignoreEscWhileRecording ? 0.5 : 1)
                     }
                 }
                 .padding()

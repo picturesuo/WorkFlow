@@ -141,6 +141,12 @@ class IndicatorViewModel: ObservableObject {
     }
     
     func handleCancelRequest() -> Bool {
+        if AppPreferences.shared.ignoreEscWhileRecording,
+           state == .recording || state == .connecting {
+            resetCancelConfirmation()
+            return false
+        }
+
         guard state == .recording,
               !AppPreferences.shared.escCancelWithoutConfirmation,
               !isConfirmingCancel,

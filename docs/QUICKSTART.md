@@ -50,6 +50,8 @@ Use Homework for developed prose, Technical for compact commands sent to compute
 
 WorkFlow launches at login and stays available in the menu bar by default. Dictation works entirely locally before any API is configured.
 
+If you sometimes press Escape accidentally, enable **Settings → Shortcuts → Ignore Esc while recording**. Escape will then leave active dictations recording; use the configured recording shortcut to finish normally.
+
 ## Optional Bedrock cleanup
 
 1. Create a scoped key in the [Bedrock API keys console](https://console.aws.amazon.com/bedrock/home#/api-keys).

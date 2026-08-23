@@ -199,6 +199,9 @@ final class AppPreferences {
     @UserDefault(key: "escCancelWithoutConfirmation", defaultValue: false)
     var escCancelWithoutConfirmation: Bool
 
+    @UserDefault(key: "ignoreEscWhileRecording", defaultValue: false)
+    var ignoreEscWhileRecording: Bool
+
     @UserDefault(key: "startHiddenInMenuBar", defaultValue: true)
     var startHiddenInMenuBar: Bool
 

@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+## 0.5.1 — 2026-08-23
+
+- Add an accessible **Ignore Esc while recording** setting so accidental Escape presses cannot discard an active dictation.
+
 ## 0.5.0 — 2026-08-22
 
 - Add Homework, Technical, and Everyday cleanup modes with distinct grounded rewriting contracts.
