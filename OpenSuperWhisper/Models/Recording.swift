@@ -31,6 +31,10 @@ struct Recording: Identifiable, Codable, FetchableRecord, PersistableRecord, Equ
     var mode: RecordingMode = .dictation
     var cleanupRequested: Bool = false
     var targetBundleID: String? = nil
+    var cleanupMode: CleanupMode? = nil
+    var rawTokenEstimate: Int? = nil
+    var finalTokenEstimate: Int? = nil
+    var tokenEstimatorID: String? = nil
     
     var isRegeneration: Bool = false
     
@@ -38,6 +42,7 @@ struct Recording: Identifiable, Codable, FetchableRecord, PersistableRecord, Equ
         case id, timestamp, fileName, transcription, duration, status, progress, sourceFileURL
         case cleanupSource, cleanupInputTokens, cleanupOutputTokens, cleanupModelID
         case title, mode, cleanupRequested, targetBundleID
+        case cleanupMode, rawTokenEstimate, finalTokenEstimate, tokenEstimatorID
     }
 
     static func == (lhs: Recording, rhs: Recording) -> Bool {
@@ -53,6 +58,10 @@ struct Recording: Identifiable, Codable, FetchableRecord, PersistableRecord, Equ
                lhs.mode == rhs.mode &&
                lhs.cleanupRequested == rhs.cleanupRequested &&
                lhs.targetBundleID == rhs.targetBundleID &&
+               lhs.cleanupMode == rhs.cleanupMode &&
+               lhs.rawTokenEstimate == rhs.rawTokenEstimate &&
+               lhs.finalTokenEstimate == rhs.finalTokenEstimate &&
+               lhs.tokenEstimatorID == rhs.tokenEstimatorID &&
                lhs.isRegeneration == rhs.isRegeneration
     }
 
@@ -96,6 +105,10 @@ struct Recording: Identifiable, Codable, FetchableRecord, PersistableRecord, Equ
         static let mode = Column(CodingKeys.mode)
         static let cleanupRequested = Column(CodingKeys.cleanupRequested)
         static let targetBundleID = Column(CodingKeys.targetBundleID)
+        static let cleanupMode = Column(CodingKeys.cleanupMode)
+        static let rawTokenEstimate = Column(CodingKeys.rawTokenEstimate)
+        static let finalTokenEstimate = Column(CodingKeys.finalTokenEstimate)
+        static let tokenEstimatorID = Column(CodingKeys.tokenEstimatorID)
     }
 }
 
@@ -220,6 +233,42 @@ class RecordingStore: ObservableObject {
                 }
             }
         }
+
+        migrator.registerMigration("v6_add_cleanup_efficiency") { db in
+            let columnNames = try db.columns(in: Recording.databaseTableName).map(\.name)
+            if !columnNames.contains("cleanupMode") {
+                try db.alter(table: Recording.databaseTableName) { t in
+                    t.add(column: "cleanupMode", .text)
+                }
+            }
+            if !columnNames.contains("rawTokenEstimate") {
+                try db.alter(table: Recording.databaseTableName) { t in
+                    t.add(column: "rawTokenEstimate", .integer)
+                }
+            }
+            if !columnNames.contains("finalTokenEstimate") {
+                try db.alter(table: Recording.databaseTableName) { t in
+                    t.add(column: "finalTokenEstimate", .integer)
+                }
+            }
+            if !columnNames.contains("tokenEstimatorID") {
+                try db.alter(table: Recording.databaseTableName) { t in
+                    t.add(column: "tokenEstimatorID", .text)
+                }
+            }
+        }
+
+        // A prerelease 0.5 build briefly stored a duplicate raw transcript.
+        // The efficiency feature needs only counts, so remove that private
+        // preview column for anyone who ran the prerelease build.
+        migrator.registerMigration("v7_remove_preview_raw_transcription") { db in
+            let columnNames = try db.columns(in: Recording.databaseTableName).map(\.name)
+            if columnNames.contains("rawTranscription") {
+                try db.alter(table: Recording.databaseTableName) { t in
+                    t.drop(column: "rawTranscription")
+                }
+            }
+        }
         
         try migrator.migrate(dbQueue)
     }
@@ -292,6 +341,31 @@ class RecordingStore: ObservableObject {
                 break
             }
         }
+    }
+
+    nonisolated func tokenEfficiency(since startDate: Date) async throws -> TokenEfficiencySummary {
+        let recentRecordings = try await dbQueue.read { db in
+            try Recording
+                .filter(Recording.Columns.timestamp >= startDate)
+                .fetchAll(db)
+        }
+        let samples = recentRecordings.compactMap { recording -> TokenEfficiencySample? in
+            guard recording.tokenEstimatorID == LocalTokenEstimator.identifier,
+                  let mode = recording.cleanupMode,
+                  let sourceTokens = recording.rawTokenEstimate,
+                  let finalTokens = recording.finalTokenEstimate else { return nil }
+            switch recording.cleanupSource {
+            case .bedrock, .ollama, .openAICompatible:
+                return TokenEfficiencySample(
+                    mode: mode,
+                    sourceTokens: sourceTokens,
+                    finalTokens: finalTokens
+                )
+            case .rawFallback, .budgetLimited, .disabled, nil:
+                return nil
+            }
+        }
+        return TokenEfficiencyCalculator.summarize(samples)
     }
 
     func getPendingRecordings() -> [Recording] {
@@ -403,6 +477,10 @@ class RecordingStore: ObservableObject {
                 updated.cleanupInputTokens = cleanup.inputTokens
                 updated.cleanupOutputTokens = cleanup.outputTokens
                 updated.cleanupModelID = cleanup.modelID
+                updated.cleanupMode = cleanup.cleanupMode
+                updated.rawTokenEstimate = cleanup.rawTokenEstimate
+                updated.finalTokenEstimate = cleanup.finalTokenEstimate
+                updated.tokenEstimatorID = cleanup.tokenEstimatorID
             }
             recordings[index] = updated
         }
@@ -458,7 +536,11 @@ class RecordingStore: ObservableObject {
                         Recording.Columns.cleanupSource.set(to: cleanup.source.rawValue),
                         Recording.Columns.cleanupInputTokens.set(to: cleanup.inputTokens),
                         Recording.Columns.cleanupOutputTokens.set(to: cleanup.outputTokens),
-                        Recording.Columns.cleanupModelID.set(to: cleanup.modelID)
+                        Recording.Columns.cleanupModelID.set(to: cleanup.modelID),
+                        Recording.Columns.cleanupMode.set(to: cleanup.cleanupMode?.rawValue),
+                        Recording.Columns.rawTokenEstimate.set(to: cleanup.rawTokenEstimate),
+                        Recording.Columns.finalTokenEstimate.set(to: cleanup.finalTokenEstimate),
+                        Recording.Columns.tokenEstimatorID.set(to: cleanup.tokenEstimatorID)
                     ])
             }
             applyLocalProgressUpdate(

@@ -93,6 +93,7 @@ jobs:
             -only-testing:OpenSuperWhisperTests/VocabularyAndRulesTests \
             -only-testing:OpenSuperWhisperTests/OpenAIChatCleanupServiceTests \
             -only-testing:OpenSuperWhisperTests/ProviderPipelineTests \
+            -only-testing:OpenSuperWhisperTests/TokenEfficiencyTests \
             -only-testing:OpenSuperWhisperTests/LatestDictationGateTests \
             -only-testing:OpenSuperWhisperTests/ClipboardRestoreTests \
             -only-testing:OpenSuperWhisperTests/EmptyDictationDiscardTests \

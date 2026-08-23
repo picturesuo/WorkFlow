@@ -33,7 +33,11 @@ struct CleanupProviderResult: Equatable {
 
 protocol TranscriptCleanupProviding {
     var providerID: CleanupProviderID { get }
-    func clean(transcript: String, systemPrompt: String) async throws -> CleanupProviderResult
+    func clean(
+        transcript: String,
+        systemPrompt: String,
+        cleanupMode: CleanupMode
+    ) async throws -> CleanupProviderResult
 }
 
 enum CleanupProviderError: LocalizedError, Equatable {
@@ -56,12 +60,17 @@ struct BedrockCleanupProvider: TranscriptCleanupProviding {
     let apiKey: String
     let configuration: BedrockCleanupConfiguration
 
-    func clean(transcript: String, systemPrompt: String) async throws -> CleanupProviderResult {
+    func clean(
+        transcript: String,
+        systemPrompt: String,
+        cleanupMode: CleanupMode
+    ) async throws -> CleanupProviderResult {
         let response = try await service.clean(
             transcript: transcript,
             apiKey: apiKey,
             configuration: configuration,
-            systemPrompt: systemPrompt
+            systemPrompt: systemPrompt,
+            cleanupMode: cleanupMode
         )
         return CleanupProviderResult(
             text: response.text,

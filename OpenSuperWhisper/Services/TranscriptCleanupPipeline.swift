@@ -15,6 +15,32 @@ struct TranscriptCleanupOutcome: Equatable {
     let inputTokens: Int?
     let outputTokens: Int?
     let modelID: String?
+    let cleanupMode: CleanupMode?
+    let rawTokenEstimate: Int?
+    let finalTokenEstimate: Int?
+    let tokenEstimatorID: String?
+
+    init(
+        text: String,
+        source: Source,
+        inputTokens: Int?,
+        outputTokens: Int?,
+        modelID: String?,
+        cleanupMode: CleanupMode? = nil,
+        rawTokenEstimate: Int? = nil,
+        finalTokenEstimate: Int? = nil,
+        tokenEstimatorID: String? = nil
+    ) {
+        self.text = text
+        self.source = source
+        self.inputTokens = inputTokens
+        self.outputTokens = outputTokens
+        self.modelID = modelID
+        self.cleanupMode = cleanupMode
+        self.rawTokenEstimate = rawTokenEstimate
+        self.finalTokenEstimate = finalTokenEstimate
+        self.tokenEstimatorID = tokenEstimatorID
+    }
 }
 
 final class TranscriptCleanupPipeline {
@@ -25,6 +51,7 @@ final class TranscriptCleanupPipeline {
     private let vocabularyProvider: () -> [VocabularyEntry]
     private let appRuleProvider: (String?) -> TargetAppRule?
     private let bedrockBudgetProvider: () async -> BedrockBudgetStatus?
+    private let cleanupModeProvider: () -> CleanupMode
 
     init(
         isEnabled: @escaping () -> Bool = { AppPreferences.shared.bedrockCleanupEnabled },
@@ -42,6 +69,9 @@ final class TranscriptCleanupPipeline {
             let monthStart = Calendar.current.date(from: parts) ?? now
             let spent = (try? await RecordingStore.shared.bedrockUsage(since: monthStart).estimatedCostUSD) ?? 0
             return BedrockBudgetStatus(spentUSD: spent, limitUSD: prefs.bedrockMonthlyBudgetUSD)
+        },
+        cleanupModeProvider: @escaping () -> CleanupMode = {
+            CleanupMode(rawValue: AppPreferences.shared.cleanupMode) ?? .everyday
         }
     ) {
         self.isEnabled = isEnabled
@@ -49,6 +79,7 @@ final class TranscriptCleanupPipeline {
         self.vocabularyProvider = vocabularyProvider
         self.appRuleProvider = appRuleProvider
         self.bedrockBudgetProvider = bedrockBudgetProvider
+        self.cleanupModeProvider = cleanupModeProvider
     }
 
     convenience init(
@@ -78,17 +109,23 @@ final class TranscriptCleanupPipeline {
             },
             vocabularyProvider: { [] },
             appRuleProvider: { _ in nil },
-            bedrockBudgetProvider: { nil }
+            bedrockBudgetProvider: { nil },
+            cleanupModeProvider: {
+                CleanupMode(rawValue: AppPreferences.shared.cleanupMode) ?? .everyday
+            }
         )
     }
 
     func finalize(
         _ rawTranscript: String,
         targetBundleID: String? = nil,
-        cleanupOverride: Bool? = nil
+        cleanupOverride: Bool? = nil,
+        cleanupModeOverride: CleanupMode? = nil
     ) async -> TranscriptCleanupOutcome {
         let vocabulary = vocabularyProvider()
         let localTranscript = VocabularyRewriter.apply(rawTranscript, entries: vocabulary)
+        let rawTokenEstimate = LocalTokenEstimator.estimate(rawTranscript)
+        let cleanupMode = cleanupModeOverride ?? cleanupModeProvider()
         let appRule = appRuleProvider(targetBundleID)
         let cleanupEnabled: Bool
         if let cleanupOverride {
@@ -106,7 +143,10 @@ final class TranscriptCleanupPipeline {
                 source: .disabled,
                 inputTokens: nil,
                 outputTokens: nil,
-                modelID: nil
+                modelID: nil,
+                rawTokenEstimate: rawTokenEstimate,
+                finalTokenEstimate: LocalTokenEstimator.estimate(localTranscript),
+                tokenEstimatorID: LocalTokenEstimator.identifier
             )
         }
 
@@ -128,16 +168,25 @@ final class TranscriptCleanupPipeline {
                     source: .budgetLimited,
                     inputTokens: nil,
                     outputTokens: nil,
-                    modelID: AppPreferences.shared.bedrockModelID
+                    modelID: AppPreferences.shared.bedrockModelID,
+                    cleanupMode: cleanupMode,
+                    rawTokenEstimate: rawTokenEstimate,
+                    finalTokenEstimate: LocalTokenEstimator.estimate(localTranscript),
+                    tokenEstimatorID: LocalTokenEstimator.identifier
                 )
             }
             let systemPrompt = CleanupPromptBuilder.systemPrompt(
+                mode: cleanupMode,
                 instruction: appRule?.cleanupInstruction
             )
             let chunks = TranscriptChunker.chunks(localTranscript)
             var cleanedTranscript = ""
             for chunk in chunks {
-                let result = try await provider.clean(transcript: chunk.text, systemPrompt: systemPrompt)
+                let result = try await provider.clean(
+                    transcript: chunk.text,
+                    systemPrompt: systemPrompt,
+                    cleanupMode: cleanupMode
+                )
                 cleanedTranscript += result.text + chunk.separatorAfter
                 if let value = result.inputTokens {
                     inputTokens += value
@@ -150,12 +199,17 @@ final class TranscriptCleanupPipeline {
                 modelID = result.modelID
             }
             clearFailure()
+            let finalText = cleanedTranscript.trimmingCharacters(in: .whitespacesAndNewlines)
             return TranscriptCleanupOutcome(
-                text: cleanedTranscript.trimmingCharacters(in: .whitespacesAndNewlines),
+                text: finalText,
                 source: provider.providerID.outcomeSource,
                 inputTokens: hasInputTokens ? inputTokens : nil,
                 outputTokens: hasOutputTokens ? outputTokens : nil,
-                modelID: modelID
+                modelID: modelID,
+                cleanupMode: cleanupMode,
+                rawTokenEstimate: rawTokenEstimate,
+                finalTokenEstimate: LocalTokenEstimator.estimate(finalText),
+                tokenEstimatorID: LocalTokenEstimator.identifier
             )
         } catch {
             print("Transcript cleanup unavailable; using local transcript: \(error.localizedDescription)")
@@ -165,7 +219,11 @@ final class TranscriptCleanupPipeline {
                 source: .rawFallback,
                 inputTokens: hasInputTokens ? inputTokens : nil,
                 outputTokens: hasOutputTokens ? outputTokens : nil,
-                modelID: modelID
+                modelID: modelID,
+                cleanupMode: cleanupMode,
+                rawTokenEstimate: rawTokenEstimate,
+                finalTokenEstimate: LocalTokenEstimator.estimate(localTranscript),
+                tokenEstimatorID: LocalTokenEstimator.identifier
             )
         }
     }

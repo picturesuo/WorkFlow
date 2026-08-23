@@ -5,6 +5,8 @@ import UniformTypeIdentifiers
 struct CleanupSettingsView: View {
     @ObservedObject var viewModel: SettingsViewModel
 
+    @AppStorage("cleanupMode") private var cleanupModeRaw = CleanupMode.everyday.rawValue
+
     @State private var providerID: CleanupProviderID
     @State private var ollamaBaseURL: String
     @State private var ollamaModelID: String
@@ -35,6 +37,7 @@ struct CleanupSettingsView: View {
             VStack(alignment: .leading, spacing: 16) {
                 overviewCard
                 providerCard
+                efficiencyCard
                 usageCard
                 if let lastError = viewModel.bedrockLastErrorMessage {
                     VStack(alignment: .leading, spacing: 6) {
@@ -97,8 +100,40 @@ struct CleanupSettingsView: View {
             }
             .pickerStyle(.segmented)
             .disabled(!viewModel.bedrockCleanupEnabled)
+
+            Divider()
+
+            VStack(alignment: .leading, spacing: 7) {
+                Text("Writing mode")
+                    .font(.subheadline.weight(.medium))
+                Picker("Writing mode", selection: cleanupModeBinding) {
+                    ForEach(CleanupMode.allCases) { mode in
+                        Text(mode.displayName).tag(mode)
+                    }
+                }
+                .pickerStyle(.segmented)
+                .accessibilityHint("Controls how the selected provider rewrites future dictations")
+                Text(selectedCleanupMode.description)
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
         }
         .settingsCard()
+    }
+
+    private var selectedCleanupMode: CleanupMode {
+        CleanupMode(rawValue: cleanupModeRaw) ?? .everyday
+    }
+
+    private var cleanupModeBinding: Binding<CleanupMode> {
+        Binding(
+            get: { selectedCleanupMode },
+            set: {
+                cleanupModeRaw = $0.rawValue
+                NotificationCenter.default.post(name: .cleanupModeChanged, object: nil)
+            }
+        )
     }
 
     @ViewBuilder
@@ -325,6 +360,64 @@ struct CleanupSettingsView: View {
                 .font(.caption)
         }
         .settingsCard()
+    }
+
+    private var efficiencyCard: some View {
+        let summary = viewModel.tokenEfficiencySummary
+        return VStack(alignment: .leading, spacing: 10) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Writing efficiency this month")
+                    .font(.headline)
+                Text("Estimated source tokens ÷ final tokens for successful cleanups")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+            }
+
+            ForEach(CleanupMode.allCases) { mode in
+                HStack {
+                    Text(mode.displayName)
+                    Spacer()
+                    if let metric = summary[mode] {
+                        Text(TokenEfficiencyFormatter.ratio(metric.geometricMeanRatio))
+                            .font(.subheadline.weight(.semibold).monospacedDigit())
+                        Text("· \(metric.sampleCount) sample\(metric.sampleCount == 1 ? "" : "s")")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    } else {
+                        Text("No samples yet")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    }
+                }
+                .accessibilityElement(children: .combine)
+            }
+
+            if let homeworkComparison = technicalComparison(over: .homework) {
+                Label(homeworkComparison, systemImage: "chart.bar.xaxis")
+                    .font(.caption.weight(.medium))
+                    .foregroundColor(.accentColor)
+            }
+            if let everydayComparison = technicalComparison(over: .everyday) {
+                Label(everydayComparison, systemImage: "chart.bar.xaxis")
+                    .font(.caption.weight(.medium))
+                    .foregroundColor(.accentColor)
+            }
+
+            Text("These are local estimates from the text before and after cleanup (\(LocalTokenEstimator.identifier)), not provider billing tokens. Failed or budget-limited cleanups are excluded.")
+                .font(.caption2)
+                .foregroundColor(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .settingsCard()
+    }
+
+    private func technicalComparison(over mode: CleanupMode) -> String? {
+        guard let advantage = viewModel.tokenEfficiencySummary.advantage(of: .technical, over: mode),
+              advantage > 0 else { return nil }
+        if advantage >= 1 {
+            return String(format: "Technical is %.2f× as token-efficient as %@", advantage, mode.displayName)
+        }
+        return String(format: "%@ is %.2f× as token-efficient as Technical", mode.displayName, 1 / advantage)
     }
 
     private var privacyCard: some View {

@@ -211,10 +211,12 @@ class IndicatorViewModel: ObservableObject {
                         try? FileManager.default.removeItem(at: tempURL)
                         print("No speech detected, dictation discarded")
                     } else {
+                        let cleanupMode = CleanupMode(rawValue: AppPreferences.shared.cleanupMode) ?? .everyday
                         self.isFinalizing = true
                         let cleanup = await self.cleanupPipeline.finalize(
                             rawText,
-                            targetBundleID: self.pasteTarget?.bundleID
+                            targetBundleID: self.pasteTarget?.bundleID,
+                            cleanupModeOverride: cleanupMode
                         )
                         self.isFinalizing = false
 
@@ -243,7 +245,11 @@ class IndicatorViewModel: ObservableObject {
                             cleanupOutputTokens: cleanup.outputTokens,
                             cleanupModelID: cleanup.modelID,
                             cleanupRequested: cleanup.source != .disabled,
-                            targetBundleID: self.pasteTarget?.bundleID
+                            targetBundleID: self.pasteTarget?.bundleID,
+                            cleanupMode: cleanup.cleanupMode,
+                            rawTokenEstimate: cleanup.rawTokenEstimate,
+                            finalTokenEstimate: cleanup.finalTokenEstimate,
+                            tokenEstimatorID: cleanup.tokenEstimatorID
                         )
                         
                         try recorder.moveTemporaryRecording(from: tempURL, to: newRecording.url)

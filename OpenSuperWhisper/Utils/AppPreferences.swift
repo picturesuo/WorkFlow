@@ -157,6 +157,9 @@ final class AppPreferences {
     @UserDefault(key: "cleanupProviderID", defaultValue: CleanupProviderID.bedrock.rawValue)
     var cleanupProviderID: String
 
+    @UserDefault(key: "cleanupMode", defaultValue: CleanupMode.everyday.rawValue)
+    var cleanupMode: String
+
     @UserDefault(key: "ollamaBaseURL", defaultValue: "http://localhost:11434")
     var ollamaBaseURL: String
 

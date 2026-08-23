@@ -72,7 +72,8 @@ final class BedrockCleanupService {
         transcript: String,
         apiKey: String,
         configuration: BedrockCleanupConfiguration,
-        systemPrompt: String = BedrockCleanupService.systemPrompt
+        systemPrompt: String = BedrockCleanupService.systemPrompt,
+        cleanupMode: CleanupMode = .everyday
     ) async throws -> BedrockCleanupResponse {
         let raw = transcript.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !raw.isEmpty else {
@@ -100,7 +101,10 @@ final class BedrockCleanupService {
                     content: [.init(text: "RAW_TRANSCRIPTION:\n\(raw)")]
                 )
             ],
-            inferenceConfig: .init(maxTokens: CleanupTokenBudget.outputTokenLimit(for: raw), temperature: 0)
+            inferenceConfig: .init(
+                maxTokens: CleanupTokenBudget.outputTokenLimit(for: raw, mode: cleanupMode),
+                temperature: 0
+            )
         )
 
         var request = URLRequest(url: url)
@@ -133,7 +137,7 @@ final class BedrockCleanupService {
 
         let cleaned: String
         do {
-            cleaned = try CleanupGuard.postprocess(first, source: raw)
+            cleaned = try CleanupGuard.postprocess(first, source: raw, mode: cleanupMode)
         } catch CleanupGuardError.emptyResponse {
             throw BedrockCleanupError.emptyResponse
         } catch CleanupGuardError.unsafeRewrite {

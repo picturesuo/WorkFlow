@@ -2,6 +2,7 @@ import Foundation
 
 extension Notification.Name {
     static let appPreferencesLanguageChanged = Notification.Name("AppPreferencesLanguageChanged")
+    static let cleanupModeChanged = Notification.Name("CleanupModeChanged")
     static let hotkeySettingsChanged = Notification.Name("HotkeySettingsChanged")
     static let indicatorWindowDidHide = Notification.Name("IndicatorWindowDidHide")
     static let indicatorWindowWillShow = Notification.Name("IndicatorWindowWillShow")

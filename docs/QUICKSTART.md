@@ -41,9 +41,12 @@ If a prompt is missed, open System Settings → Privacy & Security and enable Wo
 ## First dictation
 
 1. Wait for Parakeet v3's first model download to finish.
-2. Put the cursor in any text field.
-3. Hold the bottom-left `Fn`/globe key and speak.
-4. Release `Fn` and leave focus in the same app until text appears.
+2. Choose **Homework**, **Technical**, or **Everyday** in the main window or WorkFlow's menu-bar menu.
+3. Put the cursor in any text field.
+4. Hold the bottom-left `Fn`/globe key and speak.
+5. Release `Fn` and leave focus in the same app until text appears.
+
+Use Homework for developed prose, Technical for compact commands sent to computers or coding agents, and Everyday for natural messages. After using more than one mode, open **Settings → Cleanup → Writing efficiency this month** to compare their estimated source-to-final token ratios. History also labels each successfully cleaned dictation with its mode and estimated efficiency.
 
 WorkFlow launches at login and stays available in the menu bar by default. Dictation works entirely locally before any API is configured.
 

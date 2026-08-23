@@ -231,7 +231,11 @@ class ContentViewModel: ObservableObject {
                             cleanupInputTokens: cleanup.inputTokens,
                             cleanupOutputTokens: cleanup.outputTokens,
                             cleanupModelID: cleanup.modelID,
-                            cleanupRequested: cleanup.source != .disabled
+                            cleanupRequested: cleanup.source != .disabled,
+                            cleanupMode: cleanup.cleanupMode,
+                            rawTokenEstimate: cleanup.rawTokenEstimate,
+                            finalTokenEstimate: cleanup.finalTokenEstimate,
+                            tokenEstimatorID: cleanup.tokenEstimatorID
                         )
 
                         try recorder.moveTemporaryRecording(from: tempURL, to: newRecording.url)
@@ -319,6 +323,7 @@ struct ContentView: View {
     @State private var showMeetingNamePrompt = false
     @State private var meetingTitle = MeetingSessionController.defaultTitle()
     @State private var searchTask: Task<Void, Never>? = nil
+    @AppStorage("cleanupMode") private var cleanupModeRaw = CleanupMode.everyday.rawValue
 
     private var currentShortcutDescription: String {
         let mouseButton = MouseButton(rawValue: AppPreferences.shared.mouseButtonHotkey) ?? .none
@@ -353,6 +358,20 @@ struct ContentView: View {
                 viewModel.search(query: query)
             }
         }
+    }
+
+    private var selectedCleanupMode: CleanupMode {
+        CleanupMode(rawValue: cleanupModeRaw) ?? .everyday
+    }
+
+    private var cleanupModeBinding: Binding<CleanupMode> {
+        Binding(
+            get: { selectedCleanupMode },
+            set: {
+                cleanupModeRaw = $0.rawValue
+                NotificationCenter.default.post(name: .cleanupModeChanged, object: nil)
+            }
+        )
     }
 
     var body: some View {
@@ -537,6 +556,23 @@ struct ContentView: View {
                         .padding(.bottom, 16)
                         .animation(.spring(response: 0.3, dampingFraction: 0.7), value: viewModel.isRecording)
                         .animation(.spring(response: 0.3, dampingFraction: 0.7), value: viewModel.state)
+
+                        VStack(alignment: .leading, spacing: 5) {
+                            Picker("Writing mode", selection: cleanupModeBinding) {
+                                ForEach(CleanupMode.allCases) { mode in
+                                    Text(mode.displayName).tag(mode)
+                                }
+                            }
+                            .pickerStyle(.segmented)
+                            .accessibilityHint("Changes how AI cleanup rewrites future dictations")
+
+                            Text(selectedCleanupMode.description)
+                                .font(.caption2)
+                                .foregroundColor(.secondary)
+                                .lineLimit(2)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                        .padding(.horizontal, 4)
 
                         // Нижняя панель с подсказкой и кнопками управления
                         HStack(alignment: .bottom) {
@@ -902,6 +938,29 @@ struct RecordingRow: View {
         }
     }
 
+    private var efficiencyBadgeLabel: String? {
+        guard recording.status == .completed,
+              recording.tokenEstimatorID == LocalTokenEstimator.identifier,
+              let mode = recording.cleanupMode,
+              let sourceTokens = recording.rawTokenEstimate,
+              let finalTokens = recording.finalTokenEstimate,
+              sourceTokens > 0,
+              finalTokens > 0 else { return nil }
+        switch recording.cleanupSource {
+        case .bedrock, .ollama, .openAICompatible:
+            let ratio = Double(sourceTokens) / Double(finalTokens)
+            return "\(mode.displayName) · \(TokenEfficiencyFormatter.ratio(ratio))"
+        case .rawFallback, .budgetLimited, .disabled, nil:
+            return nil
+        }
+    }
+
+    private var efficiencyBadgeHelp: String {
+        let source = recording.rawTokenEstimate ?? 0
+        let final = recording.finalTokenEstimate ?? 0
+        return "Estimated locally from the source and final text: \(source) → \(final) tokens. Provider billing tokens are reported separately."
+    }
+
     private var cleanupBadgeColor: Color {
         switch recording.cleanupSource {
         case .bedrock, .ollama, .openAICompatible:
@@ -1052,6 +1111,20 @@ struct RecordingRow: View {
                         .clipShape(Capsule())
                         .lineLimit(1)
                         .help(cleanupBadgeHelp)
+                }
+
+                if let efficiencyBadgeLabel {
+                    Text(efficiencyBadgeLabel)
+                        .font(.caption2.weight(.medium).monospacedDigit())
+                        .foregroundColor(BrandPalette.lavender)
+                        .padding(.horizontal, 7)
+                        .padding(.vertical, 3)
+                        .background(BrandPalette.violet.opacity(0.14))
+                        .clipShape(Capsule())
+                        .lineLimit(1)
+                        .help(efficiencyBadgeHelp)
+                        .accessibilityLabel(efficiencyBadgeLabel)
+                        .accessibilityHint(efficiencyBadgeHelp)
                 }
                 
                 if isRegenerating {

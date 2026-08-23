@@ -121,7 +121,10 @@ class TranscriptionQueue: ObservableObject {
                 title: title,
                 mode: mode,
                 cleanupRequested: cleanupRequested,
-                targetBundleID: targetBundleID
+                targetBundleID: targetBundleID,
+                cleanupMode: cleanupRequested
+                    ? (CleanupMode(rawValue: AppPreferences.shared.cleanupMode) ?? .everyday)
+                    : nil
             )
 
             try await recordingStore.addRecordingSync(recording)
@@ -309,7 +312,8 @@ class TranscriptionQueue: ObservableObject {
                     let cleanup = await cleanupPipeline.finalize(
                         text,
                         targetBundleID: recording.targetBundleID,
-                        cleanupOverride: true
+                        cleanupOverride: true,
+                        cleanupModeOverride: recording.cleanupMode
                     )
                     await recordingStore.completeRecording(
                         recording.id,
@@ -323,7 +327,10 @@ class TranscriptionQueue: ObservableObject {
                         source: .disabled,
                         inputTokens: nil,
                         outputTokens: nil,
-                        modelID: nil
+                        modelID: nil,
+                        rawTokenEstimate: LocalTokenEstimator.estimate(text),
+                        finalTokenEstimate: LocalTokenEstimator.estimate(localText),
+                        tokenEstimatorID: LocalTokenEstimator.identifier
                     )
                     await recordingStore.completeRecording(
                         recording.id,

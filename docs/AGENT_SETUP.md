@@ -47,7 +47,8 @@ This runbook lets a local coding agent install and verify WorkFlow without recei
 6. Ask the user to approve WorkFlow under Microphone, Accessibility, and Input Monitoring. Do not automate privacy approval.
 7. Verify `WorkFlow.app` is running, its visible version is current, and its bundle identifier is `com.picturesuo.Chat`. That identifier is intentionally retained to preserve existing local permissions, history, preferences, and Keychain data.
 8. Have the user perform one short `Fn` dictation into a disposable text field. Confirm the newest spoken text appears and History contains the same result.
-9. For Bedrock, open Cleanup settings, let the user enter the key, then let the user choose **Save & Test**. Confirm a successful status with token counts. Leave the key field blank in all captured logs and screenshots.
+9. Set **Technical** in the WorkFlow menu-bar menu and have the user dictate a verbose technical request. Confirm History labels it Technical and shows a source-to-final token estimate. Repeat with Homework only when the user wants to validate long-form behavior; do not fabricate samples in their History.
+10. For Bedrock, open Cleanup settings, let the user enter the key, then let the user choose **Save & Test**. Confirm a successful status with token counts. Leave the key field blank in all captured logs and screenshots.
 
 ## Definition of done
 
@@ -55,5 +56,6 @@ This runbook lets a local coding agent install and verify WorkFlow without recei
 - The app has all three required macOS permissions.
 - A short `Fn` hold/release produces the newest transcript in the original target.
 - The same transcript appears in History and remains available on the clipboard.
+- Writing mode is selectable from the main window and menu bar; successful cleanups record mode-specific efficiency without mixing in failed fallbacks.
 - If remote cleanup is requested, the in-app connection test passes and the $0.25 monthly estimated-cost stop is enabled.
 - No credential appears in shell history, process arguments, source control, logs, or agent conversation.

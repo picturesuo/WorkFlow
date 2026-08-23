@@ -29,7 +29,7 @@ xcodebuild test \
 
 WORKFLOW_SIGNING_IDENTITY='Developer ID Application: Your Name (TEAMID)' \
 WORKFLOW_NOTARY_PROFILE=workflow-notary \
-./Scripts/package-release.sh 0.4.0
+./Scripts/package-release.sh 0.5.0
 ```
 
 The packaging script verifies the certificate type and app version, builds Release, enables hardened runtime, signs nested code, submits to Apple, staples the ticket, runs Gatekeeper assessment, and writes `dist/WorkFlow-VERSION-macOS-arm64.zip`. The legacy `CHAT_SIGNING_IDENTITY` and `CHAT_NOTARY_PROFILE` aliases remain accepted only for migration during the 0.x series.
@@ -57,7 +57,7 @@ The workflow imports the certificate into an ephemeral keychain and delegates pa
 Review public release text for private information, then use the version tag that matches the app:
 
 ```bash
-gh release create v0.4.0 dist/WorkFlow-0.4.0-macOS-arm64.zip --generate-notes
+gh release create v0.5.0 dist/WorkFlow-0.5.0-macOS-arm64.zip --generate-notes
 ```
 
 After publication, confirm that [the latest-release page](https://github.com/picturesuo/WorkFlow/releases/latest) serves the notarized archive and that a clean Mac accepts it without bypassing Gatekeeper.

@@ -252,6 +252,7 @@ class SettingsViewModel: ObservableObject {
     @Published private(set) var bedrockStatus = "Add a Bedrock API key to enable cleanup."
     @Published private(set) var isTestingBedrock = false
     @Published private(set) var bedrockUsageSummary = BedrockUsageSummary()
+    @Published private(set) var tokenEfficiencySummary = TokenEfficiencySummary.empty
     @Published private(set) var bedrockLastErrorMessage: String?
     @Published private(set) var bedrockLastErrorDate: Date?
 
@@ -368,6 +369,8 @@ class SettingsViewModel: ObservableObject {
         let monthStart = Calendar.current.date(from: components) ?? now
         bedrockUsageSummary = (try? await RecordingStore.shared.bedrockUsage(since: monthStart))
             ?? BedrockUsageSummary()
+        tokenEfficiencySummary = (try? await RecordingStore.shared.tokenEfficiency(since: monthStart))
+            ?? .empty
         bedrockLastErrorMessage = AppPreferences.shared.bedrockLastErrorMessage
         bedrockLastErrorDate = AppPreferences.shared.bedrockLastErrorDate
     }

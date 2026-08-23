@@ -130,6 +130,18 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
             name: NSWindow.willCloseNotification,
             object: nil
         )
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(cleanupModePreferenceChanged),
+            name: .cleanupModeChanged,
+            object: nil
+        )
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(languagePreferenceChanged),
+            name: .appPreferencesLanguageChanged,
+            object: nil
+        )
 
         let prefs = AppPreferences.shared
         LaunchAtLoginManager.reconcile(enabled: prefs.launchAtLogin)
@@ -266,6 +278,24 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
         meetingItem.target = self
         meetingItem.isEnabled = !meeting.isSaving
         menu.addItem(meetingItem)
+
+        let cleanupModeItem = NSMenuItem(title: "Writing Mode", action: nil, keyEquivalent: "")
+        let cleanupModeMenu = NSMenu()
+        let currentCleanupMode = CleanupMode(rawValue: AppPreferences.shared.cleanupMode) ?? .everyday
+        for mode in CleanupMode.allCases {
+            let item = NSMenuItem(
+                title: mode.displayName,
+                action: #selector(selectCleanupMode(_:)),
+                keyEquivalent: ""
+            )
+            item.target = self
+            item.representedObject = mode.rawValue
+            item.state = mode == currentCleanupMode ? .on : .off
+            item.toolTip = mode.description
+            cleanupModeMenu.addItem(item)
+        }
+        cleanupModeItem.submenu = cleanupModeMenu
+        menu.addItem(cleanupModeItem)
         
         let transcriptionLanguageItem = NSMenuItem(title: "Language", action: nil, keyEquivalent: "")
         languageSubmenu = NSMenu()
@@ -276,14 +306,6 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
         
         transcriptionLanguageItem.submenu = languageSubmenu
         menu.addItem(transcriptionLanguageItem)
-        
-        // Listen for language preference changes
-        NotificationCenter.default.addObserver(
-            self,
-            selector: #selector(languagePreferenceChanged),
-            name: .appPreferencesLanguageChanged,
-            object: nil
-        )
         
         menu.addItem(NSMenuItem.separator())
         
@@ -368,6 +390,17 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
         } else if !meeting.isBusy {
             _ = meeting.start(title: MeetingSessionController.defaultTitle())
         }
+    }
+
+    @objc private func selectCleanupMode(_ sender: NSMenuItem) {
+        guard let rawValue = sender.representedObject as? String,
+              CleanupMode(rawValue: rawValue) != nil else { return }
+        AppPreferences.shared.cleanupMode = rawValue
+        NotificationCenter.default.post(name: .cleanupModeChanged, object: nil)
+    }
+
+    @objc private func cleanupModePreferenceChanged() {
+        updateStatusBarMenu()
     }
     
     @objc private func quitApp() {

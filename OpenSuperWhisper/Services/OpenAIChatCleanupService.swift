@@ -57,7 +57,11 @@ final class OpenAIChatCleanupService: TranscriptCleanupProviding {
         return ["localhost", "127.0.0.1", "::1"].contains(host)
     }
 
-    func clean(transcript: String, systemPrompt: String) async throws -> CleanupProviderResult {
+    func clean(
+        transcript: String,
+        systemPrompt: String,
+        cleanupMode: CleanupMode = .everyday
+    ) async throws -> CleanupProviderResult {
         let raw = transcript.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !raw.isEmpty else {
             return CleanupProviderResult(text: "", inputTokens: 0, outputTokens: 0, modelID: modelID)
@@ -80,7 +84,7 @@ final class OpenAIChatCleanupService: TranscriptCleanupProviding {
             ChatMessage(role: "system", content: systemPrompt),
             ChatMessage(role: "user", content: "RAW_TRANSCRIPTION:\n\(raw)")
         ]
-        let maxTokens = CleanupTokenBudget.outputTokenLimit(for: raw)
+        let maxTokens = CleanupTokenBudget.outputTokenLimit(for: raw, mode: cleanupMode)
         if providerID == .ollama {
             request.httpBody = try JSONEncoder().encode(
                 OllamaRequest(
@@ -135,7 +139,7 @@ final class OpenAIChatCleanupService: TranscriptCleanupProviding {
         }
 
         do {
-            let cleaned = try CleanupGuard.postprocess(value, source: raw)
+            let cleaned = try CleanupGuard.postprocess(value, source: raw, mode: cleanupMode)
             return CleanupProviderResult(
                 text: cleaned,
                 inputTokens: inputTokens,

@@ -36,6 +36,8 @@ Requirements: Apple Silicon, macOS 14 or newer, Xcode, Homebrew, Rust, and Git. 
 - Personal vocabulary and per-app cleanup, style, and paste rules are deterministic.
 - Meeting recordings go to named History items and never auto-paste.
 - Bedrock, local Ollama, and OpenAI-compatible cleanup all share the same literal-editing safety contract.
+- Homework, Technical, and Everyday modes give long-form explanation, compact agent commands, and natural prose separate rewriting contracts.
+- History records estimated source/final tokens and Cleanup settings compares each mode's normalized token efficiency.
 - Failed, slow, overlong, or assistant-style cleanup falls back to usable local text.
 - API credentials live in macOS Keychain; audio never goes to a cleanup provider.
 - History shows provider, token usage, and known costs. Bedrock has a default $0.25 monthly estimated-cost stop.
@@ -49,6 +51,16 @@ Fn down → local recording → Parakeet/Whisper → vocabulary → selected cle
 ```
 
 The focused application is captured when recording begins. WorkFlow copies the finished text before paste, restores the previous clipboard only when it is still safe, and grants paste ownership only to the newest dictation.
+
+## Writing modes
+
+Choose a mode in the main window or the WorkFlow menu-bar menu before dictating:
+
+- **Homework** preserves every stated idea and develops compressed reasoning into complete prose. It is intentionally not concise.
+- **Technical** produces compact, unambiguous instructions for computers and coding agents while retaining constraints, paths, flags, and acceptance criteria.
+- **Everyday** removes speech artifacts while preserving natural tone and detail.
+
+Each successful cleanup stores a local estimate of the source and final text size. History shows the result per dictation, and **Settings → Cleanup** compares Technical with Homework and Everyday for the current month. The comparison uses source tokens ÷ final tokens and a geometric mean across dictations. These are clearly labeled local estimates; provider-reported billing tokens and costs remain separate.
 
 ## Cleanup choices
 
