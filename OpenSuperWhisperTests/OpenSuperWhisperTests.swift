@@ -25,6 +25,44 @@ final class OpenSuperWhisperTests: XCTestCase {
     }
 }
 
+final class FluidAudioAccuracyTests: XCTestCase {
+    private static let repoRoot = URL(fileURLWithPath: #filePath)
+        .deletingLastPathComponent()
+        .deletingLastPathComponent()
+
+    func testCachedParakeetV3TranscribesReferenceSpeech() async throws {
+        let modelDirectory = FileManager.default.urls(
+            for: .applicationSupportDirectory,
+            in: .userDomainMask
+        )[0]
+            .appendingPathComponent("FluidAudio/Models/parakeet-tdt-0.6b-v3")
+        let audioURL = Self.repoRoot.appendingPathComponent("jfk.wav")
+        try XCTSkipUnless(
+            FileManager.default.fileExists(atPath: modelDirectory.path)
+                && FileManager.default.fileExists(atPath: audioURL.path),
+            "Cached Parakeet v3 model and reference audio are required"
+        )
+
+        let prefs = AppPreferences.shared
+        let originalVersion = prefs.fluidAudioModelVersion
+        let originalLanguage = prefs.whisperLanguage
+        defer {
+            prefs.fluidAudioModelVersion = originalVersion
+            prefs.whisperLanguage = originalLanguage
+        }
+        prefs.fluidAudioModelVersion = "v3"
+        prefs.whisperLanguage = "en"
+
+        let engine = FluidAudioEngine()
+        try await engine.initialize()
+        let text = try await engine.transcribeAudio(url: audioURL, settings: Settings())
+            .lowercased()
+
+        XCTAssertTrue(text.contains("country"), "Unexpected Parakeet transcription: \(text)")
+        XCTAssertTrue(text.contains("do for you"), "Unexpected Parakeet transcription: \(text)")
+    }
+}
+
 final class WhisperEngineMultiChannelTests: XCTestCase {
     func testMakeTargetFormat_withSixChannels_returnsFormat() {
         let engine = WhisperEngine()
@@ -666,6 +704,7 @@ final class ClipboardUtilPasteIntegrationTests: XCTestCase {
     
     override class func setUp() {
         super.setUp()
+        guard AXIsProcessTrusted() else { return }
         print("[TEST] ========== CLASS SETUP ==========")
         originalInputSourceID = ClipboardUtil.getCurrentInputSourceID()
         print("[TEST] Original layout: \(originalInputSourceID ?? "nil")")
@@ -678,6 +717,10 @@ final class ClipboardUtilPasteIntegrationTests: XCTestCase {
     }
     
     override class func tearDown() {
+        guard AXIsProcessTrusted() else {
+            super.tearDown()
+            return
+        }
         print("[TEST] ========== CLASS TEARDOWN ==========")
         if let originalID = originalInputSourceID {
             _ = ClipboardUtil.switchToInputSource(withID: originalID)
@@ -689,6 +732,10 @@ final class ClipboardUtilPasteIntegrationTests: XCTestCase {
     }
     
     override func setUpWithError() throws {
+        try XCTSkipUnless(
+            AXIsProcessTrusted(),
+            "Paste integration requires Accessibility permission for the XCTest host"
+        )
         Self.testCounter += 1
         log("--- Test #\(Self.testCounter) SETUP ---")
         try super.setUpWithError()

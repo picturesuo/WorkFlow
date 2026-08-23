@@ -226,6 +226,20 @@ class SettingsViewModel: ObservableObject {
         }
     }
 
+    @Published var bedrockMonthlyBudgetEnabled: Bool {
+        didSet {
+            AppPreferences.shared.bedrockMonthlyBudgetEnabled = bedrockMonthlyBudgetEnabled
+        }
+    }
+
+    @Published var bedrockMonthlyBudgetUSD: Double {
+        didSet {
+            let clamped = max(0.05, bedrockMonthlyBudgetUSD)
+            bedrockMonthlyBudgetUSD = clamped
+            AppPreferences.shared.bedrockMonthlyBudgetUSD = clamped
+        }
+    }
+
     @Published var launchAtLogin: Bool {
         didSet {
             AppPreferences.shared.launchAtLogin = launchAtLogin
@@ -269,6 +283,8 @@ class SettingsViewModel: ObservableObject {
         self.bedrockRegion = prefs.bedrockRegion
         self.bedrockModelID = prefs.bedrockModelID
         self.bedrockTimeoutSeconds = prefs.bedrockTimeoutSeconds
+        self.bedrockMonthlyBudgetEnabled = prefs.bedrockMonthlyBudgetEnabled
+        self.bedrockMonthlyBudgetUSD = prefs.bedrockMonthlyBudgetUSD
         self.launchAtLogin = prefs.launchAtLogin
         self.bedrockLastErrorMessage = prefs.bedrockLastErrorMessage
         self.bedrockLastErrorDate = prefs.bedrockLastErrorDate
@@ -312,7 +328,7 @@ class SettingsViewModel: ObservableObject {
             }
 
             let result = try await BedrockCleanupService.shared.clean(
-                transcript: "Um, this is a Chat connection test.",
+                transcript: "Um, this is a \(AppIdentity.productName) connection test.",
                 apiKey: token,
                 configuration: BedrockCleanupConfiguration(
                     region: bedrockRegion,
@@ -861,7 +877,7 @@ struct SettingsView: View {
                 
                 Spacer()
                 
-                Link(destination: URL(string: "https://github.com/picturesuo/chat")!) {
+                Link(destination: URL(string: "https://github.com/picturesuo/WorkFlow")!) {
                     HStack(spacing: 4) {
                         Image(systemName: "star")
                             .font(.system(size: 10))
@@ -1044,6 +1060,7 @@ struct SettingsView: View {
                                 Toggle("", isOn: $viewModel.useAsianAutocorrect)
                                     .toggleStyle(SwitchToggleStyle(tint: Color.accentColor))
                                     .labelsHidden()
+                                    .accessibilityLabel("Use Asian autocorrect")
                             }
                             .padding(.top, 4)
                         }
@@ -1068,6 +1085,7 @@ struct SettingsView: View {
                             Toggle("", isOn: $viewModel.showTimestamps)
                                 .toggleStyle(SwitchToggleStyle(tint: Color.accentColor))
                                 .labelsHidden()
+                                .accessibilityLabel("Show timestamps")
                         }
                         
                         HStack {
@@ -1077,6 +1095,7 @@ struct SettingsView: View {
                             Toggle("", isOn: $viewModel.suppressBlankAudio)
                                 .toggleStyle(SwitchToggleStyle(tint: Color.accentColor))
                                 .labelsHidden()
+                                .accessibilityLabel("Suppress blank audio")
                         }
                         
                         HStack {
@@ -1091,6 +1110,7 @@ struct SettingsView: View {
                             Toggle("", isOn: $viewModel.addSpaceAfterSentence)
                                 .toggleStyle(SwitchToggleStyle(tint: Color.accentColor))
                                 .labelsHidden()
+                                .accessibilityLabel("Add a space after sentences")
                         }
                     }
                 }
@@ -1118,6 +1138,7 @@ struct SettingsView: View {
                             Toggle("", isOn: $viewModel.autoCopyToClipboard)
                                 .toggleStyle(SwitchToggleStyle(tint: Color.accentColor))
                                 .labelsHidden()
+                                .accessibilityLabel("Keep dictation on the clipboard")
                         }
 
                         HStack {
@@ -1132,6 +1153,7 @@ struct SettingsView: View {
                             Toggle("", isOn: $viewModel.autoPasteTranscription)
                                 .toggleStyle(SwitchToggleStyle(tint: Color.accentColor))
                                 .labelsHidden()
+                                .accessibilityLabel("Automatically paste dictation")
                         }
                     }
                 }
@@ -1231,6 +1253,7 @@ struct SettingsView: View {
                                 .toggleStyle(SwitchToggleStyle(tint: Color.accentColor))
                                 .labelsHidden()
                                 .help("Beam search can provide better results but is slower")
+                                .accessibilityLabel("Use beam search")
                         }
                         
                         if viewModel.useBeamSearch {
@@ -1305,6 +1328,7 @@ struct SettingsView: View {
                             .toggleStyle(SwitchToggleStyle(tint: Color.accentColor))
                             .labelsHidden()
                             .help("Enable additional logging and debugging information")
+                            .accessibilityLabel("Enable debug mode")
                     }
                 }
                 .padding()
@@ -1421,6 +1445,7 @@ struct SettingsView: View {
                                     Toggle("", isOn: $viewModel.doublePressToTrigger)
                                         .toggleStyle(SwitchToggleStyle(tint: Color.accentColor))
                                         .labelsHidden()
+                                        .accessibilityLabel("Require a double tap to trigger dictation")
                                 }
                                 .padding(.horizontal, 12)
                                 .padding(.vertical, 10)
@@ -1511,6 +1536,7 @@ struct SettingsView: View {
                             Toggle("", isOn: $viewModel.holdToRecord)
                                 .toggleStyle(SwitchToggleStyle(tint: Color.accentColor))
                                 .labelsHidden()
+                                .accessibilityLabel("Hold to record")
                         }
                         
                         HStack {
@@ -1521,6 +1547,7 @@ struct SettingsView: View {
                                 .toggleStyle(SwitchToggleStyle(tint: Color.accentColor))
                                 .labelsHidden()
                                 .help("Play a notification sound when recording begins")
+                                .accessibilityLabel("Play a sound when recording starts")
                         }
                         
                         HStack {
@@ -1535,6 +1562,7 @@ struct SettingsView: View {
                             Toggle("", isOn: $viewModel.escCancelWithoutConfirmation)
                                 .toggleStyle(SwitchToggleStyle(tint: Color.accentColor))
                                 .labelsHidden()
+                                .accessibilityLabel("Cancel long recordings without confirmation")
                         }
                     }
                 }
@@ -1554,7 +1582,7 @@ struct SettingsView: View {
                             VStack(alignment: .leading, spacing: 2) {
                                 Text("Launch at login")
                                     .font(.subheadline)
-                                Text("Keep Chat ready after you sign in")
+                                Text("Keep \(AppIdentity.productName) ready after you sign in")
                                     .font(.caption)
                                     .foregroundColor(.secondary)
                             }
@@ -1562,6 +1590,7 @@ struct SettingsView: View {
                             Toggle("", isOn: $viewModel.launchAtLogin)
                                 .toggleStyle(SwitchToggleStyle(tint: Color.accentColor))
                                 .labelsHidden()
+                                .accessibilityLabel("Launch WorkFlow at login")
                         }
 
                         HStack {
@@ -1576,6 +1605,7 @@ struct SettingsView: View {
                             Toggle("", isOn: $viewModel.startHiddenInMenuBar)
                                 .toggleStyle(SwitchToggleStyle(tint: Color.accentColor))
                                 .labelsHidden()
+                                .accessibilityLabel("Start hidden in the menu bar")
                         }
                     }
                 }
@@ -1854,8 +1884,9 @@ struct RecordingStorageSettingsView: View {
                             }
                         }
                     ))
-                    .toggleStyle(SwitchToggleStyle(tint: Color.accentColor))
-                    .labelsHidden()
+                        .toggleStyle(SwitchToggleStyle(tint: Color.accentColor))
+                        .labelsHidden()
+                        .accessibilityLabel("Automatically delete old recordings")
                     .help("Automatically delete recordings and their transcriptions older than the selected number of days")
                 }
             }

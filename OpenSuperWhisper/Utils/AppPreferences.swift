@@ -129,7 +129,7 @@ final class AppPreferences {
     var addSpaceAfterSentence: Bool
 
     // Clipboard settings
-    @UserDefault(key: "autoCopyToClipboard", defaultValue: false)
+    @UserDefault(key: "autoCopyToClipboard", defaultValue: true)
     var autoCopyToClipboard: Bool
 
     @UserDefault(key: "autoPasteTranscription", defaultValue: true)
@@ -147,6 +147,12 @@ final class AppPreferences {
 
     @UserDefault(key: "bedrockTimeoutSeconds", defaultValue: BedrockCleanupConfiguration.defaultTimeout)
     var bedrockTimeoutSeconds: Double
+
+    @UserDefault(key: "bedrockMonthlyBudgetEnabled", defaultValue: true)
+    var bedrockMonthlyBudgetEnabled: Bool
+
+    @UserDefault(key: "bedrockMonthlyBudgetUSD", defaultValue: 0.25)
+    var bedrockMonthlyBudgetUSD: Double
 
     @UserDefault(key: "cleanupProviderID", defaultValue: CleanupProviderID.bedrock.rawValue)
     var cleanupProviderID: String

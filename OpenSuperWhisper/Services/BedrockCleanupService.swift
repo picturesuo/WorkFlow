@@ -55,10 +55,17 @@ final class BedrockCleanupService {
 
     static let systemPrompt = CleanupPromptBuilder.baseSystemPrompt
 
-    private let session: URLSession?
+    private let session: URLSession
 
     init(session: URLSession? = nil) {
-        self.session = session
+        if let session {
+            self.session = session
+        } else {
+            let configuration = URLSessionConfiguration.ephemeral
+            configuration.waitsForConnectivity = false
+            configuration.httpMaximumConnectionsPerHost = 2
+            self.session = URLSession(configuration: configuration)
+        }
     }
 
     func clean(
@@ -93,7 +100,7 @@ final class BedrockCleanupService {
                     content: [.init(text: "RAW_TRANSCRIPTION:\n\(raw)")]
                 )
             ],
-            inferenceConfig: .init(maxTokens: Self.outputTokenLimit(for: raw), temperature: 0)
+            inferenceConfig: .init(maxTokens: CleanupTokenBudget.outputTokenLimit(for: raw), temperature: 0)
         )
 
         var request = URLRequest(url: url)
@@ -103,33 +110,23 @@ final class BedrockCleanupService {
         request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         request.httpBody = try JSONEncoder().encode(body)
 
-        let requestSession: URLSession
-        if let session {
-            requestSession = session
-        } else {
-            let sessionConfiguration = URLSessionConfiguration.ephemeral
-            sessionConfiguration.timeoutIntervalForRequest = max(0.5, configuration.timeout)
-            sessionConfiguration.timeoutIntervalForResource = max(0.5, configuration.timeout)
-            requestSession = URLSession(configuration: sessionConfiguration)
+        let session = session
+        let preparedRequest = request
+        let result = try await CleanupDeadline.run(seconds: configuration.timeout) {
+            let (data, response) = try await session.data(for: preparedRequest)
+            return CleanupHTTPResponse(data: data, response: response)
         }
-        defer {
-            if session == nil {
-                requestSession.finishTasksAndInvalidate()
-            }
-        }
-
-        let (data, response) = try await requestSession.data(for: request)
-        guard let httpResponse = response as? HTTPURLResponse else {
+        guard let httpResponse = result.response as? HTTPURLResponse else {
             throw BedrockCleanupError.invalidResponse
         }
 
         guard (200..<300).contains(httpResponse.statusCode) else {
-            let serviceError = try? JSONDecoder().decode(ServiceErrorResponse.self, from: data)
+            let serviceError = try? JSONDecoder().decode(ServiceErrorResponse.self, from: result.data)
             let message = serviceError?.message ?? HTTPURLResponse.localizedString(forStatusCode: httpResponse.statusCode)
             throw BedrockCleanupError.requestFailed(statusCode: httpResponse.statusCode, message: message)
         }
 
-        let decoded = try JSONDecoder().decode(ConverseResponse.self, from: data)
+        let decoded = try JSONDecoder().decode(ConverseResponse.self, from: result.data)
         guard let first = decoded.output.message.content.first?.text else {
             throw BedrockCleanupError.invalidResponse
         }
@@ -155,10 +152,6 @@ final class BedrockCleanupService {
             inputTokens: decoded.usage?.inputTokens,
             outputTokens: decoded.usage?.outputTokens
         )
-    }
-
-    private static func outputTokenLimit(for transcript: String) -> Int {
-        min(4_096, max(1_024, transcript.count / 2))
     }
 
 }

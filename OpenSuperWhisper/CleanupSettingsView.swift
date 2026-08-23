@@ -86,6 +86,8 @@ struct CleanupSettingsView: View {
                 Toggle("", isOn: $viewModel.bedrockCleanupEnabled)
                     .labelsHidden()
                     .toggleStyle(.switch)
+                    .accessibilityLabel("Enable AI transcript cleanup")
+                    .accessibilityValue(viewModel.bedrockCleanupEnabled ? "On" : "Off")
             }
 
             Picker("Cleanup provider", selection: $providerID) {
@@ -141,6 +143,8 @@ struct CleanupSettingsView: View {
                 text: $viewModel.bedrockAPIKeyInput
             )
             .textFieldStyle(.roundedBorder)
+            .accessibilityLabel("Amazon Bedrock API key")
+            .accessibilityHint("Stored securely in macOS Keychain after a successful connection test")
 
             LabeledContent("AWS region") {
                 TextField("us-east-1", text: $viewModel.bedrockRegion)
@@ -155,6 +159,29 @@ struct CleanupSettingsView: View {
             timeoutRow(value: $viewModel.bedrockTimeoutSeconds, range: 0.5...20)
 
             HStack {
+                Toggle("Monthly estimated-cost stop", isOn: $viewModel.bedrockMonthlyBudgetEnabled)
+                    .accessibilityHint("For models with verified pricing, uses local text after the monthly estimate reaches the limit")
+                Spacer()
+                if viewModel.bedrockMonthlyBudgetEnabled {
+                    Stepper(
+                        BedrockPricing.formatUSD(viewModel.bedrockMonthlyBudgetUSD),
+                        value: $viewModel.bedrockMonthlyBudgetUSD,
+                        in: 0.05...10,
+                        step: 0.05
+                    )
+                    .frame(width: 150)
+                    .accessibilityLabel("Monthly Bedrock estimated-cost stop")
+                    .accessibilityValue(BedrockPricing.formatUSD(viewModel.bedrockMonthlyBudgetUSD))
+                }
+            }
+
+            if !BedrockPricing.supports(modelID: viewModel.bedrockModelID) {
+                Text("This model has no verified price in WorkFlow, so the monthly stop cannot be enforced. Use Recommended defaults for a bounded estimate.")
+                    .font(.caption)
+                    .foregroundColor(.orange)
+            }
+
+            HStack {
                 Button {
                     Task { await viewModel.saveAndTestBedrock() }
                 } label: {
@@ -162,6 +189,7 @@ struct CleanupSettingsView: View {
                 }
                 .buttonStyle(.borderedProminent)
                 .disabled(viewModel.isTestingBedrock)
+                .accessibilityLabel(viewModel.isTestingBedrock ? "Testing Amazon Bedrock connection" : "Save API key and test Amazon Bedrock")
 
                 Button("Recommended defaults") { viewModel.useRecommendedBedrockDefaults() }
                 if viewModel.hasBedrockAPIKey {
@@ -237,6 +265,8 @@ struct CleanupSettingsView: View {
                 text: $compatibleAPIKey
             )
             .textFieldStyle(.roundedBorder)
+            .accessibilityLabel("OpenAI-compatible API key")
+            .accessibilityHint("Stored securely in macOS Keychain after a successful connection test")
             timeoutRow(value: $compatibleTimeout, range: 1...60)
 
             HStack {
@@ -253,7 +283,7 @@ struct CleanupSettingsView: View {
                 }
             }
 
-            Text("Pricing depends on the service and model. Chat records token counts but does not invent a dollar estimate when provider pricing is unknown.")
+            Text("Pricing depends on the service and model. \(AppIdentity.productName) records token counts but does not invent a dollar estimate when provider pricing is unknown.")
                 .font(.caption)
                 .foregroundColor(.secondary)
         }
@@ -285,6 +315,12 @@ struct CleanupSettingsView: View {
             Text("Nova Micro example: 100 short dictations/day is roughly $0.04/month at the checked AWS price. Ollama API cost is $0; electricity and hardware are yours.")
                 .font(.caption)
                 .foregroundColor(.secondary)
+            if viewModel.bedrockMonthlyBudgetEnabled {
+                let remaining = max(0, viewModel.bedrockMonthlyBudgetUSD - usage.estimatedCostUSD)
+                Text("Bedrock limit: \(BedrockPricing.formatUSD(viewModel.bedrockMonthlyBudgetUSD)) · \(BedrockPricing.formatUSD(remaining)) estimated remaining")
+                    .font(.caption.weight(.medium))
+                    .foregroundColor(remaining > 0 ? .secondary : .orange)
+            }
             Link("AWS pricing · checked \(BedrockPricing.asOfDate)", destination: BedrockPricing.pricingURL)
                 .font(.caption)
         }
@@ -295,7 +331,7 @@ struct CleanupSettingsView: View {
         VStack(alignment: .leading, spacing: 6) {
             Label("Fail-safe by design", systemImage: "lock.shield")
                 .font(.headline)
-            Text("Provider keys use macOS Keychain. Remote servers must use HTTPS. If cleanup times out, fails, or rewrites too aggressively, Chat keeps the local transcript instead of losing your dictation.")
+            Text("Provider keys use macOS Keychain. Remote servers must use HTTPS. If cleanup times out, fails, exceeds its budget, or rewrites too aggressively, \(AppIdentity.productName) keeps the local transcript instead of losing your dictation.")
                 .font(.caption)
                 .foregroundColor(.secondary)
         }
@@ -359,7 +395,7 @@ struct CleanupSettingsView: View {
             }
 
             let result = try await provider.clean(
-                transcript: "Um, this is a Chat connection test.",
+                transcript: "Um, this is a \(AppIdentity.productName) connection test.",
                 systemPrompt: CleanupPromptBuilder.baseSystemPrompt
             )
             if providerID == .openAICompatible, !enteredCompatibleKey.isEmpty {
@@ -458,7 +494,9 @@ struct PersonalizationSettingsView: View {
 
             ForEach($vocabulary) { $entry in
                 HStack {
-                    Toggle("", isOn: $entry.isEnabled).labelsHidden()
+                    Toggle("", isOn: $entry.isEnabled)
+                        .labelsHidden()
+                        .accessibilityLabel("Enable vocabulary replacement from \(entry.spoken) to \(entry.replacement)")
                     TextField("What speech recognition writes", text: $entry.spoken)
                         .textFieldStyle(.roundedBorder)
                     Image(systemName: "arrow.right")
@@ -471,6 +509,7 @@ struct PersonalizationSettingsView: View {
                         Image(systemName: "trash")
                     }
                     .buttonStyle(.plain)
+                    .accessibilityLabel("Delete vocabulary replacement")
                 }
             }
         }
@@ -502,6 +541,7 @@ struct PersonalizationSettingsView: View {
                     Image(systemName: "arrow.clockwise")
                 }
                 .help("Refresh running apps")
+                .accessibilityLabel("Refresh running apps")
             }
 
             ForEach($rules) { $rule in
@@ -591,7 +631,7 @@ struct PersonalizationSettingsView: View {
     private func exportArchive() {
         let panel = NSSavePanel()
         panel.allowedContentTypes = [.json]
-        panel.nameFieldStringValue = "Chat-personalization.json"
+        panel.nameFieldStringValue = "WorkFlow-personalization.json"
         guard panel.runModal() == .OK, let url = panel.url else { return }
         do {
             let archive = Archive(formatVersion: 1, vocabulary: vocabulary, appRules: rules)

@@ -1,7 +1,9 @@
 import Foundation
 
 enum AppIdentity {
-    static let productName = "Chat"
+    static let productName = "WorkFlow"
+    // Keep the installed identity stable so existing macOS permissions,
+    // preferences, history, and Keychain credentials continue to work.
     static let bundleIdentifier = "com.picturesuo.Chat"
     static let legacyBundleIdentifier = "com.picturesuo.GlowScribe"
 }

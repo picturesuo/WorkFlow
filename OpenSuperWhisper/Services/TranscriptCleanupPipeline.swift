@@ -6,6 +6,7 @@ struct TranscriptCleanupOutcome: Equatable {
         case ollama
         case openAICompatible = "openai_compatible"
         case rawFallback
+        case budgetLimited = "budget_limited"
         case disabled
     }
 
@@ -23,6 +24,7 @@ final class TranscriptCleanupPipeline {
     private let providerResolver: () throws -> any TranscriptCleanupProviding
     private let vocabularyProvider: () -> [VocabularyEntry]
     private let appRuleProvider: (String?) -> TargetAppRule?
+    private let bedrockBudgetProvider: () async -> BedrockBudgetStatus?
 
     init(
         isEnabled: @escaping () -> Bool = { AppPreferences.shared.bedrockCleanupEnabled },
@@ -30,12 +32,23 @@ final class TranscriptCleanupPipeline {
             try CleanupProviderFactory.makeSelected()
         },
         vocabularyProvider: @escaping () -> [VocabularyEntry] = { VocabularyStore.load() },
-        appRuleProvider: @escaping (String?) -> TargetAppRule? = { TargetAppRuleStore.rule(for: $0) }
+        appRuleProvider: @escaping (String?) -> TargetAppRule? = { TargetAppRuleStore.rule(for: $0) },
+        bedrockBudgetProvider: @escaping () async -> BedrockBudgetStatus? = {
+            let prefs = AppPreferences.shared
+            guard prefs.bedrockMonthlyBudgetEnabled,
+                  BedrockPricing.supports(modelID: prefs.bedrockModelID) else { return nil }
+            let now = Date()
+            let parts = Calendar.current.dateComponents([.year, .month], from: now)
+            let monthStart = Calendar.current.date(from: parts) ?? now
+            let spent = (try? await RecordingStore.shared.bedrockUsage(since: monthStart).estimatedCostUSD) ?? 0
+            return BedrockBudgetStatus(spentUSD: spent, limitUSD: prefs.bedrockMonthlyBudgetUSD)
+        }
     ) {
         self.isEnabled = isEnabled
         self.providerResolver = providerResolver
         self.vocabularyProvider = vocabularyProvider
         self.appRuleProvider = appRuleProvider
+        self.bedrockBudgetProvider = bedrockBudgetProvider
     }
 
     convenience init(
@@ -64,7 +77,8 @@ final class TranscriptCleanupPipeline {
                 )
             },
             vocabularyProvider: { [] },
-            appRuleProvider: { _ in nil }
+            appRuleProvider: { _ in nil },
+            bedrockBudgetProvider: { nil }
         )
     }
 
@@ -104,6 +118,19 @@ final class TranscriptCleanupPipeline {
 
         do {
             let provider = try providerResolver()
+            if provider.providerID == .bedrock,
+               let budget = await bedrockBudgetProvider(),
+               budget.isExhausted {
+                clearFailure()
+                print("Monthly Bedrock limit reached; using local text until next month.")
+                return TranscriptCleanupOutcome(
+                    text: localTranscript,
+                    source: .budgetLimited,
+                    inputTokens: nil,
+                    outputTokens: nil,
+                    modelID: AppPreferences.shared.bedrockModelID
+                )
+            }
             let systemPrompt = CleanupPromptBuilder.systemPrompt(
                 instruction: appRule?.cleanupInstruction
             )
@@ -151,5 +178,14 @@ final class TranscriptCleanupPipeline {
     private func clearFailure() {
         AppPreferences.shared.bedrockLastErrorMessage = nil
         AppPreferences.shared.bedrockLastErrorDate = nil
+    }
+}
+
+struct BedrockBudgetStatus: Equatable {
+    let spentUSD: Double
+    let limitUSD: Double
+
+    var isExhausted: Bool {
+        limitUSD > 0 && spentUSD >= limitUSD
     }
 }

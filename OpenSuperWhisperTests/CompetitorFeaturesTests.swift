@@ -131,7 +131,7 @@ final class OpenAIChatCleanupServiceTests: XCTestCase {
             let body = try Self.requestBody(request)
             let json = try XCTUnwrap(JSONSerialization.jsonObject(with: body) as? [String: Any])
             let options = try XCTUnwrap(json["options"] as? [String: Any])
-            XCTAssertEqual(options["num_predict"] as? Int, 1_024)
+            XCTAssertEqual(options["num_predict"] as? Int, 64)
             return Self.response(
                 request,
                 body: #"{"message":{"role":"assistant","content":"Send the report."},"prompt_eval_count":20,"eval_count":4}"#
@@ -238,6 +238,29 @@ final class OpenAIChatCleanupServiceTests: XCTestCase {
 }
 
 final class ProviderPipelineTests: XCTestCase {
+    func testExhaustedBedrockBudgetSkipsRemoteProvider() async {
+        let provider = FakeBedrockCleanupProvider()
+        let pipeline = TranscriptCleanupPipeline(
+            isEnabled: { true },
+            providerResolver: { provider },
+            vocabularyProvider: { [] },
+            appRuleProvider: { _ in nil },
+            bedrockBudgetProvider: {
+                BedrockBudgetStatus(spentUSD: 0.25, limitUSD: 0.25)
+            }
+        )
+
+        let result = await pipeline.finalize("Keep this local.")
+
+        XCTAssertEqual(result.text, "Keep this local.")
+        XCTAssertEqual(result.source, .budgetLimited)
+        XCTAssertEqual(provider.callCount, 0)
+    }
+
+    func testUnknownBedrockPriceDoesNotClaimToEnforceDollarBudget() {
+        XCTAssertFalse(BedrockPricing.supports(modelID: "custom.unpriced-model"))
+    }
+
     func testPerAppDisableSkipsProviderAndStillAppliesVocabulary() async {
         let provider = FakeCleanupProvider()
         let rule = TargetAppRule(
@@ -345,6 +368,21 @@ private final class FakeCleanupProvider: TranscriptCleanupProviding {
     func clean(transcript: String, systemPrompt: String) async throws -> CleanupProviderResult {
         callCount += 1
         return CleanupProviderResult(text: transcript, inputTokens: nil, outputTokens: nil, modelID: "fake")
+    }
+}
+
+private final class FakeBedrockCleanupProvider: TranscriptCleanupProviding {
+    let providerID: CleanupProviderID = .bedrock
+    private(set) var callCount = 0
+
+    func clean(transcript: String, systemPrompt: String) async throws -> CleanupProviderResult {
+        callCount += 1
+        return CleanupProviderResult(
+            text: transcript,
+            inputTokens: 10,
+            outputTokens: 5,
+            modelID: BedrockCleanupConfiguration.defaultModelID
+        )
     }
 }
 

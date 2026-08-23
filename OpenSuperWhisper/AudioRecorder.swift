@@ -11,7 +11,9 @@ class AudioRecorder: NSObject, ObservableObject {
     @Published var canRecord = false
     @Published var isConnecting = false
     
-    static let minimumRecordingDuration: TimeInterval = 1.0
+    /// Short commands such as “yes”, “stop”, or a single name are valid
+    /// dictations. Blank-audio suppression remains the authority for silence.
+    static let minimumRecordingDuration: TimeInterval = 0.35
     static let temporaryFileMaxAge: TimeInterval = 24 * 60 * 60
     /// Extra audio captured after a stop request, so the tail of the last word
     /// (released together with the hotkey) is not clipped.

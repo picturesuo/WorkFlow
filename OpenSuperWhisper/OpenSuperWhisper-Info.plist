@@ -3,9 +3,9 @@
 <plist version="1.0">
 <dict>
 	<key>CFBundleDisplayName</key>
-	<string>Chat</string>
+	<string>WorkFlow</string>
 	<key>CFBundleName</key>
-	<string>Chat</string>
+	<string>WorkFlow</string>
 	<key>CFBundleIconFile</key>
 	<string>AppIcon.icns</string>
 	<key>CFBundleDocumentTypes</key>
@@ -29,10 +29,10 @@
 		<true/>
 	</dict>
 	<key>NSMicrophoneUsageDescription</key>
-	<string>Chat needs microphone access to record audio for transcription.</string>
+	<string>WorkFlow needs microphone access to record audio for transcription.</string>
 	<key>NSAccessibilityUsageDescription</key>
-	<string>Chat needs accessibility access to paste dictation into the focused app.</string>
+	<string>WorkFlow needs accessibility access to paste dictation into the focused app.</string>
 	<key>NSAppleEventsUsageDescription</key>
-	<string>Chat needs accessibility access to paste dictation into the focused app.</string>
+	<string>WorkFlow needs accessibility access to paste dictation into the focused app.</string>
 </dict>
 </plist>

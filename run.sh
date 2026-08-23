@@ -5,7 +5,7 @@ JUST_BUILD=false
 if [[ "${1:-}" == "build" ]]; then
     JUST_BUILD=true
 fi
-build_configuration=${CHAT_BUILD_CONFIGURATION:-Debug}
+build_configuration=${WORKFLOW_BUILD_CONFIGURATION:-${CHAT_BUILD_CONFIGURATION:-Debug}}
 
 if [[ -z "${DEVELOPER_DIR:-}" && -d /Applications/Xcode.app/Contents/Developer ]]; then
     export DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer
@@ -42,7 +42,7 @@ install_name_tool -id "@rpath/libomp.dylib" ./build/libomp.dylib
 codesign --force --sign - ./build/libomp.dylib
 
 # Build the app
-echo "Building Chat..."
+echo "Building WorkFlow..."
 set +e
 BUILD_OUTPUT=$(xcodebuild -scheme OpenSuperWhisper -configuration "$build_configuration" -jobs 8 -derivedDataPath build -quiet -destination 'platform=macOS,arch=arm64' -skipPackagePluginValidation -skipMacroValidation -UseModernBuildSystem=YES -clonedSourcePackagesDirPath SourcePackages -skipUnavailableActions CODE_SIGNING_ALLOWED=NO CODE_SIGN_IDENTITY="" CODE_SIGNING_REQUIRED=NO OTHER_CODE_SIGN_FLAGS="--entitlements OpenSuperWhisper/OpenSuperWhisper.entitlements" build 2>&1)
 build_exit=$?
@@ -64,9 +64,9 @@ if [[ $build_exit -eq 0 ]] && [[ ! "$BUILD_OUTPUT" =~ "BUILD FAILED" ]]; then
     fi
     echo "Starting the app..."
     # Remove quarantine attribute if exists
-    xattr -d com.apple.quarantine "./build/Build/Products/$build_configuration/Chat.app" 2>/dev/null || true
+    xattr -d com.apple.quarantine "./build/Build/Products/$build_configuration/WorkFlow.app" 2>/dev/null || true
     # Run the app and show logs
-    "./build/Build/Products/$build_configuration/Chat.app/Contents/MacOS/Chat"
+    "./build/Build/Products/$build_configuration/WorkFlow.app/Contents/MacOS/WorkFlow"
 else
     echo "Build failed!"
     exit 1

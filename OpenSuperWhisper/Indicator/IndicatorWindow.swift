@@ -41,14 +41,19 @@ class IndicatorViewModel: ObservableObject {
     private let transcriptionService: TranscriptionService
     private let transcriptionQueue: TranscriptionQueue
     private let cleanupPipeline: TranscriptCleanupPipeline
-    private let latestDictationGate = LatestDictationGate()
+    private let latestDictationGate: LatestDictationGate
+    private var dictationGeneration: UInt64?
     private let pasteTarget: PasteTarget?
     
-    init(pasteTarget: PasteTarget? = nil) {
+    init(
+        pasteTarget: PasteTarget? = nil,
+        latestDictationGate: LatestDictationGate? = nil
+    ) {
         self.recordingStore = RecordingStore.shared
         self.transcriptionService = TranscriptionService.shared
         self.transcriptionQueue = TranscriptionQueue.shared
         self.cleanupPipeline = TranscriptCleanupPipeline.shared
+        self.latestDictationGate = latestDictationGate ?? .shared
         self.pasteTarget = pasteTarget
         
         recorder.$isConnecting
@@ -127,6 +132,9 @@ class IndicatorViewModel: ObservableObject {
             return
         }
 
+        // Starting a newer recording immediately retires every older async
+        // transcription/cleanup result, even before this recording is stopped.
+        dictationGeneration = latestDictationGate.begin()
         state = .recording
         startBlinking()
         recordingStartedAt = Date()
@@ -191,7 +199,7 @@ class IndicatorViewModel: ObservableObject {
         
         Task { [weak self] in
             guard let self = self else { return }
-            let generation = self.latestDictationGate.begin()
+            let generation = self.dictationGeneration ?? self.latestDictationGate.begin()
             
             if let tempURL = await self.recorder.stopRecording() {
                 do {
@@ -244,10 +252,10 @@ class IndicatorViewModel: ObservableObject {
                             self.recordingStore.addRecording(newRecording)
                         }
 
-                        // begin() and this final decision both run on MainActor, so
-                        // no newer generation can slip between the check and paste.
-                        guard self.latestDictationGate.isCurrent(generation) else {
-                            print("Saved stale dictation generation \(generation) without pasting")
+                        // claimIfCurrent is process-wide and one-shot, so an older
+                        // session finishing late cannot paste over a newer dictation.
+                        guard self.latestDictationGate.claimIfCurrent(generation) else {
+                            print("Saved stale or already-pasted dictation generation \(generation) without pasting")
                             self.delegate?.didFinishDecoding()
                             return
                         }

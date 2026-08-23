@@ -286,6 +286,8 @@ class RecordingStore: ObservableObject {
                    ) {
                     summary.estimatedCostUSD += estimate
                 }
+            case .budgetLimited:
+                summary.fallbackDictations += 1
             case .disabled, nil:
                 break
             }

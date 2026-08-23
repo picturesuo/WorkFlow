@@ -588,6 +588,7 @@ struct ContentView: View {
                                 }
                                 .buttonStyle(.plain)
                                 .help(meetingController.statusLabel)
+                                .accessibilityLabel(meetingController.statusLabel)
 
                                 MicrophonePickerIconView(microphoneService: viewModel.microphoneService)
                                 
@@ -608,6 +609,7 @@ struct ContentView: View {
                                     }
                                     .buttonStyle(.plain)
                                     .help("Delete all recordings")
+                                    .accessibilityLabel("Delete all recordings")
                                     .confirmationDialog(
                                         "Delete All Recordings",
                                         isPresented: $showDeleteConfirmation,
@@ -639,6 +641,7 @@ struct ContentView: View {
                                 }
                                 .buttonStyle(.plain)
                                 .help("Settings")
+                                .accessibilityLabel("Open settings")
                             }
                         }
                     }
@@ -700,7 +703,7 @@ struct ContentView: View {
                 _ = meetingController.start(title: meetingTitle)
             }
         } message: {
-            Text("Chat records locally until you stop it. Meeting mode never pastes into another app.")
+            Text("\(AppIdentity.productName) records locally until you stop it. Meeting mode never pastes into another app.")
         }
         .alert(
             "Meeting recording failed",
@@ -871,6 +874,8 @@ struct RecordingRow: View {
             return tokenCount > 0 ? "Custom API · \(tokenCount) tokens" : "Custom API"
         case .rawFallback:
             return "Local fallback"
+        case .budgetLimited:
+            return "Local · budget limit"
         case .disabled:
             return "Local only"
         }
@@ -887,7 +892,9 @@ struct RecordingRow: View {
         case .openAICompatible:
             return "Transcript cleaned by the configured OpenAI-compatible API. Audio stayed on this Mac."
         case .rawFallback:
-            return "The cleanup provider was unavailable, so Chat preserved the local transcript."
+            return "The cleanup provider was unavailable, so \(AppIdentity.productName) preserved the local transcript."
+        case .budgetLimited:
+            return "The monthly Bedrock limit was reached, so this transcript stayed local."
         case .disabled:
             return "This transcript was processed entirely on this Mac."
         case nil:
@@ -899,7 +906,7 @@ struct RecordingRow: View {
         switch recording.cleanupSource {
         case .bedrock, .ollama, .openAICompatible:
             return ThemePalette.iconAccent(colorScheme)
-        case .rawFallback:
+        case .rawFallback, .budgetLimited:
             return .orange
         case .disabled, nil:
             return .secondary
@@ -1100,6 +1107,7 @@ struct RecordingRow: View {
                                 .contentTransition(.symbolEffect(.replace))
                         }
                         .buttonStyle(.plain)
+                        .accessibilityLabel(isPlaying ? "Stop recording playback" : "Play recording")
                         .transition(.opacity)
 
                         Button(action: {
@@ -1114,6 +1122,7 @@ struct RecordingRow: View {
                         }
                         .buttonStyle(.plain)
                         .help("Copy entire text")
+                        .accessibilityLabel("Copy entire transcription")
                         .transition(.opacity)
                     }
 
@@ -1127,6 +1136,7 @@ struct RecordingRow: View {
                         }
                         .buttonStyle(.plain)
                         .help("Regenerate transcription")
+                        .accessibilityLabel("Regenerate transcription")
                         .transition(.opacity)
                     }
 
@@ -1142,6 +1152,7 @@ struct RecordingRow: View {
                                 .foregroundColor(.secondary)
                         }
                         .buttonStyle(.plain)
+                        .accessibilityLabel("Delete transcription")
                         .transition(.opacity)
                     }
                 }

@@ -29,7 +29,7 @@ final class MeetingSessionController: ObservableObject {
 
     var statusLabel: String {
         if errorMessage != nil, state == .idle {
-            return "Meeting failed — open Chat for details"
+            return "Meeting failed — open \(AppIdentity.productName) for details"
         }
         return switch state {
         case .idle: "Start meeting"

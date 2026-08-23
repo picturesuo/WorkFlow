@@ -241,7 +241,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
                 iconImage.isTemplate = true
                 button.image = iconImage
             } else {
-                button.image = NSImage(systemSymbolName: "waveform", accessibilityDescription: "Chat")
+                button.image = NSImage(systemSymbolName: "waveform", accessibilityDescription: AppIdentity.productName)
             }
             
             button.action = #selector(statusBarButtonClicked(_:))
@@ -255,7 +255,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
         let menu = NSMenu()
         menu.autoenablesItems = false
         
-        menu.addItem(NSMenuItem(title: "Chat", action: #selector(openApp), keyEquivalent: "o"))
+        menu.addItem(NSMenuItem(title: AppIdentity.productName, action: #selector(openApp), keyEquivalent: "o"))
 
         let meeting = MeetingSessionController.shared
         let meetingItem = NSMenuItem(

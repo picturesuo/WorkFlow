@@ -201,40 +201,10 @@ class MicrophoneService: ObservableObject {
         let macAddressPattern = "^[0-9A-Fa-f]{2}-[0-9A-Fa-f]{2}-[0-9A-Fa-f]{2}-[0-9A-Fa-f]{2}-[0-9A-Fa-f]{2}-[0-9A-Fa-f]{2}"
         let hasMACAddress = id.range(of: macAddressPattern, options: .regularExpression) != nil
         
-        if hasBluetoothInName || hasBluetoothInID {
-            return true
-        }
-        
-        if hasMACAddress {
-            let transportType = getTransportType(for: device)
-            return transportType == 1651275109
-        }
-        
-        return false
-    }
-    
-    private func getTransportType(for device: AudioDevice) -> Int32 {
-        guard let deviceID = getCoreAudioDeviceID(for: device) else { return 0 }
-        
-        var propertyAddress = AudioObjectPropertyAddress(
-            mSelector: kAudioDevicePropertyTransportType,
-            mScope: kAudioObjectPropertyScopeGlobal,
-            mElement: kAudioObjectPropertyElementMain
-        )
-        
-        var transportType: UInt32 = 0
-        var propertySize = UInt32(MemoryLayout<UInt32>.size)
-        
-        let status = AudioObjectGetPropertyData(
-            AudioObjectID(deviceID),
-            &propertyAddress,
-            0,
-            nil,
-            &propertySize,
-            &transportType
-        )
-        
-        return status == noErr ? Int32(transportType) : 0
+        // CoreAudio Bluetooth input IDs commonly begin with the device MAC.
+        // Treat that stable identifier as Bluetooth even when a disconnected
+        // device cannot currently be resolved through AVCaptureDevice.
+        return hasBluetoothInName || hasBluetoothInID || hasMACAddress
     }
     
     func isActiveMicrophoneContinuity() -> Bool {
@@ -483,4 +453,3 @@ class MicrophoneService: ObservableObject {
 extension Notification.Name {
     static let microphoneDidChange = Notification.Name("microphoneDidChange")
 }
-

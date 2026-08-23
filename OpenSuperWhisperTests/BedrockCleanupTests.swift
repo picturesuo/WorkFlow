@@ -14,6 +14,23 @@ final class LatestDictationGateTests: XCTestCase {
         XCTAssertFalse(firstIsCurrent)
         XCTAssertTrue(secondIsCurrent)
     }
+
+    func testNewestGenerationCanClaimPasteOnlyOnce() {
+        let gate = LatestDictationGate()
+        let generation = gate.begin()
+
+        XCTAssertTrue(gate.claimIfCurrent(generation))
+        XCTAssertFalse(gate.claimIfCurrent(generation))
+    }
+
+    func testOlderSessionCannotClaimAfterNewRecordingStarts() {
+        let sharedGate = LatestDictationGate()
+        let olderSession = sharedGate.begin()
+        let newerSession = sharedGate.begin()
+
+        XCTAssertFalse(sharedGate.claimIfCurrent(olderSession))
+        XCTAssertTrue(sharedGate.claimIfCurrent(newerSession))
+    }
 }
 
 final class BedrockCleanupServiceTests: XCTestCase {
@@ -194,6 +211,33 @@ final class TranscriptCleanupPipelineTests: XCTestCase {
 }
 
 final class BedrockPricingTests: XCTestCase {
+    func testCleanupDeadlineStopsSlowOperation() async {
+        let started = ContinuousClock.now
+
+        do {
+            _ = try await CleanupDeadline.run(seconds: 0.05) {
+                try await Task.sleep(nanoseconds: 2_000_000_000)
+                return "too late"
+            }
+            XCTFail("Expected the cleanup deadline to time out")
+        } catch let error as URLError {
+            XCTAssertEqual(error.code, .timedOut)
+        } catch {
+            XCTFail("Unexpected deadline error: \(error)")
+        }
+
+        XCTAssertLessThan(started.duration(to: .now), .seconds(0.5))
+    }
+
+    func testShortCleanupUsesSmallBoundedOutputBudget() {
+        XCTAssertEqual(CleanupTokenBudget.outputTokenLimit(for: "Um, ship it."), 64)
+    }
+
+    func testLongCleanupBudgetScalesWithoutExceedingHardLimit() {
+        XCTAssertEqual(CleanupTokenBudget.outputTokenLimit(for: String(repeating: "a", count: 4_800)), 2_400)
+        XCTAssertEqual(CleanupTokenBudget.outputTokenLimit(for: String(repeating: "a", count: 20_000)), 4_096)
+    }
+
     func testNovaMicroEstimateUsesPublishedInputAndOutputRates() throws {
         let estimate = try XCTUnwrap(BedrockPricing.estimateUSD(
             modelID: "us.amazon.nova-micro-v1:0",

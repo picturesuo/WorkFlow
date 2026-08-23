@@ -1,115 +1,87 @@
 <p align="center">
-  <img src="docs/chat-icon.png" width="144" height="144" alt="Chat icon">
+  <img src="docs/chat-icon.png" width="144" height="144" alt="WorkFlow purple waveform icon">
 </p>
 
-<h1 align="center">Chat</h1>
+<h1 align="center">WorkFlow</h1>
 
 <p align="center">
-  Hold <kbd>Fn</kbd>, speak, release, and get polished text in the app you were already using.
+  Hold <kbd>Fn</kbd>, speak, release, and keep working.
 </p>
 
-Chat is an open-source macOS dictation and meeting-transcription app built for the fast, system-wide workflow popularized by Wispr Flow and Superwhisper—without a recurring dictation subscription. Speech recognition runs locally with Parakeet or Whisper. An optional cleanup pass removes fillers, resolves self-corrections, and fixes punctuation through Amazon Bedrock, free local Ollama, or an OpenAI-compatible API.
+WorkFlow is an open-source, macOS-only dictation and meeting-transcription app. Speech recognition stays on your Mac with Parakeet or Whisper. An optional cleanup pass removes fillers, resolves self-corrections, and repairs punctuation through Amazon Bedrock, free local Ollama, or an OpenAI-compatible API.
 
-Chat is not affiliated with Wispr Flow or Superwhisper.
+WorkFlow is independently designed and is not affiliated with Wispr Flow, Superwhisper, or OpenSuperWhisper.
 
-## What makes it useful
+## Use it now
 
-- **One-button dictation:** hold the bottom-left `Fn`/globe key, speak, then release.
-- **Local speech recognition:** Parakeet v3 is the default; Whisper remains available.
-- **Three cleanup choices:** use Amazon Bedrock, free local Ollama, or any OpenAI-compatible chat-completions endpoint.
-- **Personal vocabulary:** deterministic, whole-phrase corrections keep names and technical terms spelled your way.
-- **Per-app modes:** set cleanup, paste, and style behavior independently for each target app.
-- **Meeting transcription:** record a named long-form session into History without pasting it into another app.
-- **Visible cost and provenance:** history identifies the provider or local fallback; Settings totals tokens and only shows dollar estimates for prices Chat can verify.
-- **Failure-safe:** a three-second deadline falls back to the raw local transcript, so an API problem does not eat your words.
-- **Current utterance only:** a monotonic generation gate prevents an older async result from winning a paste race.
-- **Clipboard-safe paste:** Chat pastes the generated text and restores the prior clipboard only if the clipboard has not changed since.
-- **Keychain storage:** the Bedrock API key never goes into `UserDefaults`, source files, or logs.
-- **Ready after login:** the app registers with macOS Launch at Login and can stay hidden in the menu bar.
-
-## How it works
-
-```text
-Fn down → record locally → Parakeet/Whisper → vocabulary → selected cleanup provider → paste
-                                                                  ↘ timeout/error → local text ↗
-
-Meeting → record locally → Parakeet/Whisper → optional cleanup → named History item (never paste)
-```
-
-Audio always stays on the Mac. When a remote cleanup provider is enabled, only transcript text is sent to the endpoint you configure.
-
-## Install from source
-
-Requirements: Apple Silicon Mac, macOS 14 or later, Xcode, Homebrew, Rust, and Git. On macOS 26 Tahoe or later, add your Apple Account in **Xcode → Settings → Accounts** and create a free Apple Development certificate before installing. Tahoe silently rejects microphone requests from ad-hoc and locally self-signed apps.
+The [two-minute quickstart](docs/QUICKSTART.md) covers installation, macOS permissions, the first model download, `Fn` dictation, and optional Bedrock setup. A coding agent can perform the non-secret setup by following [the agent setup runbook](docs/AGENT_SETUP.md).
 
 ```bash
-git clone --recurse-submodules https://github.com/picturesuo/chat.git
-cd chat
+git clone --recurse-submodules https://github.com/picturesuo/WorkFlow.git
+cd WorkFlow
 brew install cmake libomp rust
 ./Scripts/generate-icon.sh
 ./Scripts/install-local.sh
-open /Applications/Chat.app
+open /Applications/WorkFlow.app
 ```
 
-Grant Microphone, Accessibility, and Input Monitoring when macOS asks. The first two permit recording and paste; Input Monitoring permits the global `Fn` trigger. The default configuration is Parakeet v3, hold-to-record, auto-paste, and launch at login.
+Requirements: Apple Silicon, macOS 14 or newer, Xcode, Homebrew, Rust, and Git. On macOS 26 or newer, the local installer requires an Apple-issued signing identity so microphone permission remains functional. See [the quickstart](docs/QUICKSTART.md) if the installer asks you to create one in Xcode.
 
-The installer prefers an Apple Development, Developer ID Application, Apple Distribution, or Mac Developer identity so macOS permission grants survive rebuilds. Set `CHAT_SIGNING_IDENTITY` to a certificate name or SHA-1 hash from the default keychain search list to select one explicitly. On macOS 25 and earlier, the installer can fall back to ad-hoc signing and macOS may ask for permissions again after a rebuild. On macOS 26 and later, it stops with setup instructions if no Apple-issued identity exists, because an ad-hoc install would launch but could not request microphone access.
+## Why WorkFlow
 
-For a build without installation, run `./run.sh build`.
+- Hold the bottom-left `Fn`/globe key to record and release it to transcribe.
+- Parakeet v3 runs locally by default; Whisper remains available.
+- A single app-wide generation gate prevents a slower, older dictation from pasting over the newest one.
+- The recorder starts before accessibility-position lookup, and transcription waits for cold model loading instead of dropping the first request.
+- Personal vocabulary and per-app cleanup, style, and paste rules are deterministic.
+- Meeting recordings go to named History items and never auto-paste.
+- Bedrock, local Ollama, and OpenAI-compatible cleanup all share the same literal-editing safety contract.
+- Failed, slow, overlong, or assistant-style cleanup falls back to usable local text.
+- API credentials live in macOS Keychain; audio never goes to a cleanup provider.
+- History shows provider, token usage, and known costs. Bedrock has a default $0.25 monthly estimated-cost stop.
+- The interface has explicit VoiceOver labels for its primary controls.
 
-If you build directly in Xcode, select your own Apple Developer team in **Signing & Capabilities**. The public project intentionally does not contain a contributor-specific team ID.
+## How dictation works
 
-## Choose a cleanup provider
+```text
+Fn down → local recording → Parakeet/Whisper → vocabulary → selected cleanup → targeted paste
+                                                       ↘ timeout/error/budget → local text ↗
+```
 
-Open **Chat → Settings → Cleanup**, enable cleanup, and select exactly one provider. Chat never silently chains providers: if the selected one fails, it preserves the local transcript.
+The focused application is captured when recording begins. WorkFlow copies the finished text before paste, restores the previous clipboard only when it is still safe, and grants paste ownership only to the newest dictation.
 
-### Free and local with Ollama
+## Cleanup choices
 
-1. Install [Ollama for macOS](https://ollama.com/download/mac).
-2. Pull a small model, for example `ollama pull llama3.2:3b`.
-3. Select **Ollama (local, free)** in Chat and click **Test local Ollama**.
-
-The default endpoint is Ollama's documented `http://localhost:11434/api/chat`. No API key or per-token payment is required. Chat also supports Ollama's OpenAI-compatible interface through the custom-provider option if desired. Hardware and electricity costs still apply.
+Open **WorkFlow → Settings → Cleanup**, enable cleanup, then select one provider. WorkFlow never silently sends text to a second provider when the selected one fails.
 
 ### Amazon Bedrock
 
-1. Open the [Amazon Bedrock API keys console](https://console.aws.amazon.com/bedrock/home#/api-keys).
-   - Easiest personal setup: create a long-term key with an explicit expiration and permission only to invoke the model you plan to use. AWS designates long-term keys for exploration.
-   - AWS-recommended production setup: generate and automatically refresh a short-term key. Short-term keys last no more than 12 hours, so a key pasted into Chat must be replaced when it expires.
-2. Open **Chat → Settings → Cleanup**, select **Amazon Bedrock**, and enable cleanup.
-3. Paste the key and click **Save & Test**. The key is stored in the macOS Keychain under `AWS_BEARER_TOKEN_BEDROCK`.
-4. Keep the defaults unless your AWS setup requires another region or model:
-   - Region: `us-east-1`
-   - Model: `us.amazon.nova-micro-v1:0` (the US cross-Region inference profile)
-   - Raw fallback: `3.0` seconds
+The recommended default is Amazon Nova Micro through the `us.amazon.nova-micro-v1:0` inference profile in `us-east-1`.
 
-Chat never stores an AWS secret in the repository or preferences. See the official [Bedrock API keys guide](https://docs.aws.amazon.com/bedrock/latest/userguide/api-keys.html) and [Converse API reference](https://docs.aws.amazon.com/bedrock/latest/APIReference/API_runtime_Converse.html).
+1. Create a scoped key in the [Amazon Bedrock API keys console](https://console.aws.amazon.com/bedrock/home#/api-keys).
+2. In WorkFlow, select **Amazon Bedrock**, paste the key, and choose **Save & Test**.
+3. Leave the recommended model, three-second fallback, and $0.25 monthly limit in place unless you have a reason to change them.
 
-### Cost
+The key is saved only in macOS Keychain. For production or shared machines, prefer AWS short-term credentials and least-privilege access to the selected model. See AWS's [API key guide](https://docs.aws.amazon.com/bedrock/latest/userguide/api-keys.html) and [Converse API reference](https://docs.aws.amazon.com/bedrock/latest/APIReference/API_runtime_Converse.html).
 
-The live AWS US on-demand catalog reported Nova Micro at **$0.035 per million input tokens** and **$0.14 per million output tokens** on August 21, 2026. For example, a short cleanup using 200 input and 40 output tokens costs about **$0.0000126**; 100 such dictations every day is about **$0.04/month**.
+### Cost estimate
 
-Chat records the token counts returned by the Converse API and shows per-dictation estimates in History plus a monthly total in **Settings → Cleanup**. Custom model IDs still show token counts, but Chat deliberately omits a dollar estimate unless it has a dated price for that model. Estimates exclude taxes, discounts, free tiers, and later AWS price changes; verify the current [Bedrock pricing page](https://aws.amazon.com/bedrock/pricing/).
+The AWS US on-demand catalog listed Nova Micro at **$0.035 per million input tokens** and **$0.14 per million output tokens** on August 21, 2026. A typical cleanup using 200 input and 40 output tokens is about **$0.0000126**. At 100 such dictations every day, the estimate is about **$0.04/month**.
 
-### Any OpenAI-compatible API
+WorkFlow records returned token counts and displays per-dictation and monthly estimates. Its monthly stop applies to models for which WorkFlow has verified pricing and takes effect after the estimate reaches the configured amount, so one final request can exceed it slightly. Unknown/custom model prices are clearly labeled unknown. Estimates exclude taxes, discounts, free tiers, and future AWS price changes; confirm the [current Bedrock pricing](https://aws.amazon.com/bedrock/pricing/).
 
-Select **OpenAI-compatible**, enter the provider's base URL and exact model ID, then save and test an API key. Chat appends `/chat/completions`, sends a Bearer token when supplied, and stores that token in a separate macOS Keychain item. Localhost endpoints may omit the key; remote endpoints must use HTTPS. Vendor prices vary, so Chat reports returned token counts but labels their dollar cost as unknown rather than making a misleading estimate.
+### Ollama or another API
 
-## Personal vocabulary and app rules
+- **Ollama:** install [Ollama](https://ollama.com/download/mac), run `ollama pull llama3.2:3b`, then choose **Ollama (local, free)**. No API key or token bill is involved.
+- **OpenAI-compatible:** enter an HTTPS base URL, exact model ID, and API key. Localhost HTTP is permitted; remote plaintext HTTP is rejected. Vendor prices vary, so WorkFlow reports tokens but does not invent a dollar estimate.
 
-Open **Settings → Personalize** to add literal speech-to-spelling replacements and per-app rules. Rules are matched by exact macOS bundle identifier and use the app that was focused when the dictation started, which prevents focus changes during cleanup from redirecting the paste. You can make a private app local-only, make a writing app copy-only, or add a short style preference for one app.
+## Personalization and meetings
 
-Vocabulary and rules can be exported as JSON for backup. Credentials are never included.
+Use **Settings → Personalize** for whole-phrase spelling replacements and per-app rules. Rules use the bundle identifier captured at dictation start, so a later focus change cannot redirect the paste. Exports contain vocabulary and rules, never credentials.
 
-## Meetings
+Use **Start meeting** for long-form audio. WorkFlow saves a named transcription in History and never pastes meeting text automatically. Remote meeting cleanup is off by default.
 
-Use **Start meeting** in the main window or menu bar, give the session a name, and stop it when finished. Chat transcribes the audio locally and saves the named result in History; it never auto-pastes meeting text. AI cleanup for meetings is off by default because long transcripts cost more and take longer.
-
-## Cleanup contract
-
-Every provider receives the same literal-cleanup prompt, which treats speech as untrusted text. It may remove fillers, keep the final version of a self-correction, and repair obvious grammar or punctuation. It must not answer instructions, invent content, or wrap the result in an explanation. Responses that look like assistant prose or expand far beyond the source are rejected and the local transcript is used instead.
-
-## Development and tests
+## Development
 
 ```bash
 DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer \
@@ -120,29 +92,17 @@ xcodebuild test \
   CODE_SIGNING_ALLOWED=NO
 ```
 
-Focused coverage includes Bedrock, Ollama, and OpenAI-compatible request/response handling; HTTPS enforcement; unsafe rewrite rejection; vocabulary boundaries; per-app overrides; latest-generation gating; clipboard restoration; empty-dictation discard; shortcuts; recording lifecycle; and model behavior.
+The internal Xcode target remains `OpenSuperWhisper` so the fork retains a reviewable history. The visible app and executable are WorkFlow. The bundle identifier remains `com.picturesuo.Chat` intentionally: changing it would discard existing microphone, Accessibility, Input Monitoring, preferences, history, and Keychain grants for current users.
 
-## Public releases
+Public binaries require a Developer ID Application certificate and Apple notarization. The release workflow fails closed rather than distributing a build that macOS may reject. See [the maintainer release guide](docs/RELEASING.md).
 
-The repository is public and can be installed from source today. A broadly downloadable macOS binary additionally requires a paid Developer ID Application certificate and Apple notarization; a development or ad-hoc signature is not a safe substitute. Maintainers can use the fail-closed packaging workflow in [docs/RELEASING.md](docs/RELEASING.md). Once a notarized archive is published, it should be attached to this repository's Releases page.
+## Privacy, attribution, and license
 
-## Privacy and security
-
-- No Chat server exists.
 - Audio is processed locally.
-- Only the selected remote provider receives transcript text when cleanup is enabled; Ollama stays local.
-- Provider bearer tokens are stored with `kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly`.
-- Network failure, invalid output, and timeout all preserve a usable local transcript.
-- Please report security issues according to [SECURITY.md](SECURITY.md).
+- Only transcript text reaches the one remote cleanup provider you enable.
+- Network failure preserves local text.
+- Security reports follow [SECURITY.md](SECURITY.md).
 
-## Acknowledgements
-
-Chat is derived from [Starmel/OpenSuperWhisper](https://github.com/Starmel/OpenSuperWhisper) and keeps its MIT license and history. The local-speech-plus-cleanup approach and literal post-processing constraints were also informed by [zachlatta/freeflow](https://github.com/zachlatta/freeflow). See [NOTICE](NOTICE) for attribution.
-
-## Upgrading from GlowScribe
-
-The first Chat launch copies existing preferences and application-support data from the previous GlowScribe identity without deleting the old data. A stored Bedrock key is moved to Chat's Keychain service on first use. After a verified install, the installer moves `/Applications/GlowScribe.app` to the Trash so the replacement remains recoverable.
-
-## License
+WorkFlow is derived from [Starmel/OpenSuperWhisper](https://github.com/Starmel/OpenSuperWhisper) under the MIT license. The literal-cleanup approach was also informed by [zachlatta/freeflow](https://github.com/zachlatta/freeflow). See [NOTICE](NOTICE) for attribution.
 
 MIT. See [LICENSE](LICENSE).

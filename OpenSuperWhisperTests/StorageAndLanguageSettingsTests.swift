@@ -322,8 +322,8 @@ final class StartHiddenPreferenceTests: XCTestCase {
         super.tearDown()
     }
 
-    func testStartHiddenInMenuBar_defaultsToFalse() {
-        XCTAssertFalse(AppPreferences.shared.startHiddenInMenuBar)
+    func testStartHiddenInMenuBar_defaultsToTrue() {
+        XCTAssertTrue(AppPreferences.shared.startHiddenInMenuBar)
     }
 
     func testStartHiddenInMenuBar_persistsChanges() {

@@ -16,10 +16,11 @@ permissions:
 
 jobs:
   release:
+    if: ${{ vars.ENABLE_NOTARIZED_RELEASES == 'true' }}
     runs-on: macos-latest
     env:
-      CHAT_SIGNING_IDENTITY: ${{ secrets.MACOS_SIGNING_IDENTITY }}
-      CHAT_NOTARY_PROFILE: chat-ci-notary
+      WORKFLOW_SIGNING_IDENTITY: ${{ secrets.MACOS_SIGNING_IDENTITY }}
+      WORKFLOW_NOTARY_PROFILE: workflow-ci-notary
       BUILD_CERTIFICATE_BASE64: ${{ secrets.MACOS_CERTIFICATE_P12_BASE64 }}
       P12_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
       KEYCHAIN_PASSWORD: ${{ secrets.MACOS_KEYCHAIN_PASSWORD }}
@@ -35,7 +36,7 @@ jobs:
 
       - name: Require release credentials
         run: |
-          required=(CHAT_SIGNING_IDENTITY BUILD_CERTIFICATE_BASE64 P12_PASSWORD KEYCHAIN_PASSWORD APPLE_ID APPLE_TEAM_ID APPLE_APP_PASSWORD)
+          required=(WORKFLOW_SIGNING_IDENTITY BUILD_CERTIFICATE_BASE64 P12_PASSWORD KEYCHAIN_PASSWORD APPLE_ID APPLE_TEAM_ID APPLE_APP_PASSWORD)
           for name in "${required[@]}"; do
             if [[ -z "${!name}" ]]; then
               echo "Missing required GitHub secret: $name" >&2
@@ -60,7 +61,7 @@ jobs:
 
       - name: Configure notarization
         run: |
-          xcrun notarytool store-credentials "$CHAT_NOTARY_PROFILE" \
+          xcrun notarytool store-credentials "$WORKFLOW_NOTARY_PROFILE" \
             --apple-id "$APPLE_ID" \
             --team-id "$APPLE_TEAM_ID" \
             --password "$APPLE_APP_PASSWORD"
@@ -103,12 +104,12 @@ jobs:
       - name: Upload notarized artifact
         uses: actions/upload-artifact@v6
         with:
-          name: Chat-${{ steps.version.outputs.value }}-macOS-arm64
-          path: dist/Chat-${{ steps.version.outputs.value }}-macOS-arm64.zip
+          name: WorkFlow-${{ steps.version.outputs.value }}-macOS-arm64
+          path: dist/WorkFlow-${{ steps.version.outputs.value }}-macOS-arm64.zip
           if-no-files-found: error
 
       - name: Publish GitHub release for tag
         if: github.ref_type == 'tag'
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release create "$GITHUB_REF_NAME" "dist/Chat-${{ steps.version.outputs.value }}-macOS-arm64.zip" --generate-notes --verify-tag
+        run: gh release create "$GITHUB_REF_NAME" "dist/WorkFlow-${{ steps.version.outputs.value }}-macOS-arm64.zip" --generate-notes --verify-tag

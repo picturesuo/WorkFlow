@@ -341,7 +341,7 @@ struct OnboardingView: View {
                         .fontWeight(.medium)
                         .foregroundColor(.secondary)
                     
-                    Text("Chat")
+                    Text(AppIdentity.productName)
                         .font(.system(size: 32, weight: .bold))
                         .foregroundStyle(
                             .white

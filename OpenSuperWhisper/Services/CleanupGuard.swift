@@ -136,3 +136,12 @@ enum CleanupPromptBuilder {
             .joined(separator: " ")
     }
 }
+
+enum CleanupTokenBudget {
+    /// Cleanup output should never need to be substantially longer than the
+    /// source. A small floor leaves room for punctuation/tokenization while
+    /// avoiding a 1,024-token allowance for a two-word dictation.
+    static func outputTokenLimit(for transcript: String) -> Int {
+        min(4_096, max(64, transcript.count / 2))
+    }
+}

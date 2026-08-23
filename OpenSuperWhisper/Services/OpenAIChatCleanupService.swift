@@ -19,12 +19,19 @@ enum OpenAIChatCleanupError: LocalizedError, Equatable {
 }
 
 final class OpenAIChatCleanupService: TranscriptCleanupProviding {
+    private static let sharedSession: URLSession = {
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.waitsForConnectivity = false
+        configuration.httpMaximumConnectionsPerHost = 2
+        return URLSession(configuration: configuration)
+    }()
+
     let providerID: CleanupProviderID
     let baseURL: String
     let modelID: String
     let apiKey: String?
     let timeout: TimeInterval
-    private let session: URLSession?
+    private let session: URLSession
 
     init(
         providerID: CleanupProviderID,
@@ -39,7 +46,7 @@ final class OpenAIChatCleanupService: TranscriptCleanupProviding {
         self.modelID = modelID
         self.apiKey = apiKey
         self.timeout = timeout
-        self.session = session
+        self.session = session ?? Self.sharedSession
     }
 
     static func isLocalBaseURL(_ value: String) -> Bool {
@@ -73,7 +80,7 @@ final class OpenAIChatCleanupService: TranscriptCleanupProviding {
             ChatMessage(role: "system", content: systemPrompt),
             ChatMessage(role: "user", content: "RAW_TRANSCRIPTION:\n\(raw)")
         ]
-        let maxTokens = min(4_096, max(1_024, raw.count / 2))
+        let maxTokens = CleanupTokenBudget.outputTokenLimit(for: raw)
         if providerID == .ollama {
             request.httpBody = try JSONEncoder().encode(
                 OllamaRequest(
@@ -94,25 +101,17 @@ final class OpenAIChatCleanupService: TranscriptCleanupProviding {
             )
         }
 
-        let requestSession: URLSession
-        if let session {
-            requestSession = session
-        } else {
-            let configuration = URLSessionConfiguration.ephemeral
-            configuration.timeoutIntervalForRequest = max(0.5, timeout)
-            configuration.timeoutIntervalForResource = max(0.5, timeout)
-            requestSession = URLSession(configuration: configuration)
+        let session = session
+        let preparedRequest = request
+        let result = try await CleanupDeadline.run(seconds: timeout) {
+            let (data, response) = try await session.data(for: preparedRequest)
+            return CleanupHTTPResponse(data: data, response: response)
         }
-        defer {
-            if session == nil { requestSession.finishTasksAndInvalidate() }
-        }
-
-        let (data, response) = try await requestSession.data(for: request)
-        guard let httpResponse = response as? HTTPURLResponse else {
+        guard let httpResponse = result.response as? HTTPURLResponse else {
             throw OpenAIChatCleanupError.invalidResponse
         }
         guard (200..<300).contains(httpResponse.statusCode) else {
-            let message = (try? JSONDecoder().decode(ServiceErrorEnvelope.self, from: data))?.error.message
+            let message = (try? JSONDecoder().decode(ServiceErrorEnvelope.self, from: result.data))?.error.message
                 ?? HTTPURLResponse.localizedString(forStatusCode: httpResponse.statusCode)
             throw OpenAIChatCleanupError.requestFailed(statusCode: httpResponse.statusCode, message: message)
         }
@@ -121,12 +120,12 @@ final class OpenAIChatCleanupService: TranscriptCleanupProviding {
         let inputTokens: Int?
         let outputTokens: Int?
         if providerID == .ollama {
-            let decoded = try JSONDecoder().decode(OllamaResponse.self, from: data)
+            let decoded = try JSONDecoder().decode(OllamaResponse.self, from: result.data)
             value = decoded.message.content
             inputTokens = decoded.promptEvalCount
             outputTokens = decoded.evalCount
         } else {
-            let decoded = try JSONDecoder().decode(OpenAIResponse.self, from: data)
+            let decoded = try JSONDecoder().decode(OpenAIResponse.self, from: result.data)
             guard let content = decoded.choices.first?.message.content else {
                 throw OpenAIChatCleanupError.invalidResponse
             }

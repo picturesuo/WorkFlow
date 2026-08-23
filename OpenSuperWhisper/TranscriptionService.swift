@@ -18,6 +18,8 @@ class TranscriptionService: ObservableObject {
     }
     
     private var currentEngine: TranscriptionEngine?
+    private var engineLoadTask: Task<any TranscriptionEngine, Error>?
+    private var engineLoadGeneration: UInt64 = 0
     private var transcriptionTask: TranscriptionTaskBox? = nil
     private var isCancelled = false
     
@@ -42,29 +44,35 @@ class TranscriptionService: ObservableObject {
         print("Loading engine: \(selectedEngine)")
         
         isLoading = true
+        currentEngine = nil
+        engineLoadGeneration &+= 1
+        let generation = engineLoadGeneration
         
-        Task.detached(priority: .userInitiated) {
-            let engine: TranscriptionEngine?
-            
+        let task = Task.detached(priority: .userInitiated) { () throws -> any TranscriptionEngine in
+            let engine: any TranscriptionEngine
             if selectedEngine == "fluidaudio" {
-                engine = await FluidAudioEngine()
+                engine = FluidAudioEngine()
             } else {
-                engine = await WhisperEngine()
+                engine = WhisperEngine()
             }
-            
+            try await engine.initialize()
+            return engine
+        }
+        engineLoadTask = task
+
+        Task { [weak self] in
             do {
-                try await engine?.initialize()
-                
-                await MainActor.run {
-                    self.currentEngine = engine
-                    self.isLoading = false
-                    print("Engine loaded: \(selectedEngine)")
-                }
+                let engine = try await task.value
+                guard let self, self.engineLoadGeneration == generation else { return }
+                self.currentEngine = engine
+                self.engineLoadTask = nil
+                self.isLoading = false
+                print("Engine loaded: \(selectedEngine)")
             } catch {
-                await MainActor.run {
-                    self.isLoading = false
-                    print("Failed to load engine: \(error)")
-                }
+                guard let self, self.engineLoadGeneration == generation else { return }
+                self.engineLoadTask = nil
+                self.isLoading = false
+                print("Failed to load engine: \(error)")
             }
         }
     }
@@ -111,9 +119,7 @@ class TranscriptionService: ObservableObject {
             }
         }
         
-        guard let engine = currentEngine else {
-            throw TranscriptionError.contextInitializationFailed
-        }
+        let engine = try await readyEngine()
         
         // Setup progress callback for engines
         if let whisperEngine = engine as? WhisperEngine {
@@ -173,6 +179,35 @@ class TranscriptionService: ObservableObject {
         } catch is CancellationError {
             isCancelled = true
             throw TranscriptionError.processingFailed
+        }
+    }
+
+    /// Waits for the newest load only. If the user changes engines while an
+    /// older load is finishing, loop onto the replacement task instead of
+    /// publishing the stale engine or clearing the new task.
+    private func readyEngine() async throws -> any TranscriptionEngine {
+        while true {
+            if let currentEngine {
+                return currentEngine
+            }
+            guard let loadTask = engineLoadTask else {
+                throw TranscriptionError.contextInitializationFailed
+            }
+
+            let generation = engineLoadGeneration
+            do {
+                let loadedEngine = try await loadTask.value
+                guard generation == engineLoadGeneration else { continue }
+                currentEngine = loadedEngine
+                engineLoadTask = nil
+                isLoading = false
+                return loadedEngine
+            } catch {
+                guard generation == engineLoadGeneration else { continue }
+                engineLoadTask = nil
+                isLoading = false
+                throw TranscriptionError.contextInitializationFailed
+            }
         }
     }
 }

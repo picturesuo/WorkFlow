@@ -2,10 +2,11 @@
 
 ## Unreleased
 
-- Rename the app to Chat with a new icon and bundle identity, including a bounded migration from the previous GlowScribe install.
-- Add optional Amazon Bedrock transcript cleanup using Nova Micro and the Converse API.
-- Store Bedrock API keys in the macOS Keychain with an in-app connection test.
-- Add a bounded raw-transcript fallback and reject assistant-style model output.
-- Add latest-generation gating so stale async dictations cannot paste over a newer one.
-- Keep the upstream conditional clipboard-restore timing fix for slow target apps.
-- Default to Parakeet v3, hold-to-record `Fn`, auto-paste, hidden menu-bar launch, and Launch at Login.
+- Rename the visible app and executable to WorkFlow with an independent purple waveform identity while retaining the existing bundle identifier for permission and data continuity.
+- Upgrade FluidAudio from 0.15.4 to 0.15.6 and pass the selected language into Parakeet v3.
+- Make cold-start dictation wait for model loading and accept short commands down to 350 ms.
+- Serialize `Fn` press/release state and use one global, one-shot paste gate so an older async result cannot overwrite the newest dictation.
+- Keep each configured cleanup provider on a reusable HTTP session and reduce short-dictation output allowances.
+- Add a default $0.25 monthly Bedrock estimated-cost stop with local fallback and History status.
+- Add VoiceOver labels and hints to primary history, settings, cleanup, and shortcut controls.
+- Add immediate-use, agent-assisted setup, cost, privacy, and notarized-release documentation.

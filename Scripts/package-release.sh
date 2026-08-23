@@ -4,16 +4,16 @@ set -euo pipefail
 script_dir=${0:A:h}
 repo_root=${script_dir:h}
 version=${1:-}
-signing_identity=${CHAT_SIGNING_IDENTITY:-}
-notary_profile=${CHAT_NOTARY_PROFILE:-}
+signing_identity=${WORKFLOW_SIGNING_IDENTITY:-${CHAT_SIGNING_IDENTITY:-}}
+notary_profile=${WORKFLOW_NOTARY_PROFILE:-${CHAT_NOTARY_PROFILE:-}}
 
 if [[ -z "$version" ]]; then
-    echo "Usage: CHAT_SIGNING_IDENTITY='Developer ID Application: …' CHAT_NOTARY_PROFILE=… $0 VERSION" >&2
+    echo "Usage: WORKFLOW_SIGNING_IDENTITY='Developer ID Application: …' WORKFLOW_NOTARY_PROFILE=… $0 VERSION" >&2
     exit 1
 fi
 
 if [[ -z "$signing_identity" || -z "$notary_profile" ]]; then
-    echo "CHAT_SIGNING_IDENTITY and CHAT_NOTARY_PROFILE are required." >&2
+    echo "WORKFLOW_SIGNING_IDENTITY and WORKFLOW_NOTARY_PROFILE are required." >&2
     exit 1
 fi
 
@@ -25,11 +25,11 @@ if [[ "$identity_line" != *"Developer ID Application:"* ]]; then
 fi
 
 cd "$repo_root"
-CHAT_BUILD_CONFIGURATION=Release ./run.sh build
+WORKFLOW_BUILD_CONFIGURATION=Release ./run.sh build
 
-source_app="$repo_root/build/Build/Products/Release/Chat.app"
+source_app="$repo_root/build/Build/Products/Release/WorkFlow.app"
 if [[ ! -d "$source_app" ]]; then
-    echo "Build succeeded but Chat.app was not found." >&2
+    echo "Build succeeded but WorkFlow.app was not found." >&2
     exit 1
 fi
 
@@ -39,18 +39,18 @@ if [[ "$app_version" != "$version" ]]; then
     exit 1
 fi
 
-release_stage=$(mktemp -d /tmp/chat-release.XXXXXX)
+release_stage=$(mktemp -d /tmp/workflow-release.XXXXXX)
 cleanup() {
-    if [[ "$release_stage" == /tmp/chat-release.* && -d "$release_stage" ]]; then
+    if [[ "$release_stage" == /tmp/workflow-release.* && -d "$release_stage" ]]; then
         rm -rf -- "$release_stage"
     fi
 }
 trap cleanup EXIT
 
-staged_app="$release_stage/Chat.app"
-submission_zip="$release_stage/Chat-$version-submission.zip"
+staged_app="$release_stage/WorkFlow.app"
+submission_zip="$release_stage/WorkFlow-$version-submission.zip"
 output_dir="$repo_root/dist"
-output_zip="$output_dir/Chat-$version-macOS-arm64.zip"
+output_zip="$output_dir/WorkFlow-$version-macOS-arm64.zip"
 
 ditto "$source_app" "$staged_app"
 xattr -cr "$staged_app"

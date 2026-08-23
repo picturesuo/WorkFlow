@@ -123,6 +123,16 @@ class ShortcutManager {
     }
     
     private func handleKeyDown() {
+        // All trigger sources enter the same serial main-queue state machine.
+        // This guarantees a fast Fn release cannot overtake its press while
+        // the first indicator view is being prepared.
+        DispatchQueue.main.async { [weak self] in
+            self?.handleKeyDownOnMain()
+        }
+    }
+
+    @MainActor
+    private func handleKeyDownOnMain() {
         holdWorkItem?.cancel()
         holdMode = false
 
@@ -145,24 +155,26 @@ class ShortcutManager {
         let isStartingRecording = activeVm == nil
         let pasteTarget = isStartingRecording ? PasteTarget.captureFrontmost() : nil
 
-        Task { @MainActor in
-            if self.activeVm == nil {
-                // Start recording immediately: resolving the caret position talks to
-                // the focused app via AX IPC and can hang for seconds if that app
-                // is busy — the first words must not be lost because of it.
-                let vm = IndicatorWindowManager.shared.prepare(pasteTarget: pasteTarget)
-                vm.startRecording()
-                self.activeVm = vm
-                
+        if activeVm == nil {
+            // Start recording immediately: resolving the caret position talks to
+            // the focused app via AX IPC and can hang for seconds if that app
+            // is busy — the first words must not be lost because of it.
+            let vm = IndicatorWindowManager.shared.prepare(pasteTarget: pasteTarget)
+            vm.startRecording()
+            activeVm = vm
+
+            Task { @MainActor [weak self, weak vm] in
+                guard let self, let vm else { return }
                 let cursorPosition = FocusUtils.getCurrentCursorPosition()
                 let anchorPoint = await Self.resolveAnchorPoint(timeoutNanoseconds: 150_000_000)
                 let indicatorPoint = anchorPoint ?? cursorPosition
-                
+
+                guard self.activeVm === vm else { return }
                 IndicatorWindowManager.shared.presentWindow(for: vm, nearPoint: indicatorPoint)
-            } else if !self.holdMode {
-                IndicatorWindowManager.shared.stopRecording()
-                self.activeVm = nil
             }
+        } else if !holdMode {
+            IndicatorWindowManager.shared.stopRecording()
+            activeVm = nil
         }
 
         // Arm hold mode only when this press starts a recording. Arming it on the
@@ -208,6 +220,13 @@ class ShortcutManager {
     }
 
     private func handleKeyUp() {
+        DispatchQueue.main.async { [weak self] in
+            self?.handleKeyUpOnMain()
+        }
+    }
+
+    @MainActor
+    private func handleKeyUpOnMain() {
         holdWorkItem?.cancel()
         holdWorkItem = nil
 
@@ -216,12 +235,10 @@ class ShortcutManager {
 
         let holdToRecordEnabled = AppPreferences.shared.holdToRecord
 
-        Task { @MainActor in
-            if holdToRecordEnabled && self.holdMode && self.activeVm != nil {
-                IndicatorWindowManager.shared.stopRecording()
-                self.activeVm = nil
-            }
-            self.holdMode = false
+        if holdToRecordEnabled && holdMode && activeVm != nil {
+            IndicatorWindowManager.shared.stopRecording()
+            activeVm = nil
         }
+        holdMode = false
     }
 }
