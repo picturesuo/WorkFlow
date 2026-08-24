@@ -1693,6 +1693,22 @@ struct OnboardingUnifiedModel: Identifiable {
     let type: OnboardingModelType
     var downloadProgress: Double = 0.0
 
+    var sizeMegabytes: Int? {
+        switch type {
+        case .whisper(_, let size):
+            return size
+        case .parakeet(let version):
+            return SettingsFluidAudioModels.availableModels
+                .first(where: { $0.version == version })?
+                .size
+        }
+    }
+
+    var sizeString: String {
+        guard let sizeMegabytes else { return "Size unknown" }
+        return formatModelSize(megabytes: sizeMegabytes)
+    }
+
     var huggingFacePageURL: URL? {
         switch type {
         case .whisper(let url, _):

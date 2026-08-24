@@ -125,11 +125,15 @@ class PermissionsManager: ObservableObject {
 
             DispatchQueue.main.async {
                 guard let self = self else { return }
+                let inputMonitoringWasGranted = self.isInputMonitoringPermissionGranted
                 self.isCheckInFlight = false
                 self.isMicrophonePermissionGranted = microphone
                 self.isAccessibilityPermissionGranted = accessibility
                 self.isInputMonitoringPermissionGranted = inputMonitoring
                 self.hasCompletedInitialCheck = true
+                if inputMonitoring && !inputMonitoringWasGranted {
+                    NotificationCenter.default.post(name: .hotkeySettingsChanged, object: nil)
+                }
             }
         }
     }
@@ -156,7 +160,12 @@ class PermissionsManager: ObservableObject {
         checkQueue.async { [weak self] in
             let granted = IOHIDCheckAccess(kIOHIDRequestTypeListenEvent) == kIOHIDAccessTypeGranted
             DispatchQueue.main.async {
-                self?.isInputMonitoringPermissionGranted = granted
+                guard let self else { return }
+                let wasGranted = self.isInputMonitoringPermissionGranted
+                self.isInputMonitoringPermissionGranted = granted
+                if granted && !wasGranted {
+                    NotificationCenter.default.post(name: .hotkeySettingsChanged, object: nil)
+                }
             }
         }
     }
@@ -174,11 +183,19 @@ class PermissionsManager: ObservableObject {
     func requestInputMonitoringPermissionOrOpenSystemPreferences() {
         switch IOHIDCheckAccess(kIOHIDRequestTypeListenEvent) {
         case kIOHIDAccessTypeGranted:
-            isInputMonitoringPermissionGranted = true
+            if !isInputMonitoringPermissionGranted {
+                isInputMonitoringPermissionGranted = true
+                NotificationCenter.default.post(name: .hotkeySettingsChanged, object: nil)
+            }
         case kIOHIDAccessTypeUnknown:
             let granted = IOHIDRequestAccess(kIOHIDRequestTypeListenEvent)
             DispatchQueue.main.async { [weak self] in
-                self?.isInputMonitoringPermissionGranted = granted
+                guard let self else { return }
+                let wasGranted = self.isInputMonitoringPermissionGranted
+                self.isInputMonitoringPermissionGranted = granted
+                if granted && !wasGranted {
+                    NotificationCenter.default.post(name: .hotkeySettingsChanged, object: nil)
+                }
             }
         default:
             openSystemPreferences(for: .inputMonitoring)

@@ -26,17 +26,19 @@ final class DiskSpaceUtilTests: XCTestCase {
 
 final class RenamedAppMigrationTests: XCTestCase {
 
-    func testPreferencesMigrationCopiesLegacyValuesWithoutOverwritingChatValues() throws {
-        let suiteName = "chat-migration-test-\(UUID().uuidString)"
+    func testPreferencesMigrationCopiesLegacyValuesWithoutOverwritingWorkFlowValues() throws {
+        let suiteName = "workflow-migration-test-\(UUID().uuidString)"
         let target = try XCTUnwrap(UserDefaults(suiteName: suiteName))
         defer { target.removePersistentDomain(forName: suiteName) }
 
         target.set("eu-west-1", forKey: "bedrockRegion")
         RenamedAppMigration.migratePreferences(
             target: target,
-            legacyDomain: [
-                "bedrockRegion": "us-east-1",
-                "launchAtLogin": true
+            legacyDomains: [
+                (
+                    identifier: "com.picturesuo.Chat",
+                    values: ["bedrockRegion": "us-east-1", "launchAtLogin": true]
+                )
             ]
         )
 
@@ -46,16 +48,19 @@ final class RenamedAppMigrationTests: XCTestCase {
         target.set(false, forKey: "launchAtLogin")
         RenamedAppMigration.migratePreferences(
             target: target,
-            legacyDomain: ["launchAtLogin": true]
+            legacyDomains: [
+                (identifier: "com.picturesuo.Chat", values: ["launchAtLogin": true])
+            ]
         )
         XCTAssertFalse(target.bool(forKey: "launchAtLogin"))
+        XCTAssertTrue(target.bool(forKey: RenamedAppMigration.didMigrateFromChatKey))
     }
 
     func testApplicationSupportMigrationCopiesMissingDataWithoutDeletingLegacyData() throws {
         let fileManager = FileManager.default
         let root = fileManager.temporaryDirectory
-            .appendingPathComponent("chat-migration-test-\(UUID().uuidString)")
-        let legacyDirectory = root.appendingPathComponent(AppIdentity.legacyBundleIdentifier)
+            .appendingPathComponent("workflow-migration-test-\(UUID().uuidString)")
+        let legacyDirectory = root.appendingPathComponent("com.picturesuo.Chat")
         let currentDirectory = root.appendingPathComponent(AppIdentity.bundleIdentifier)
         defer { try? fileManager.removeItem(at: root) }
 
@@ -73,12 +78,43 @@ final class RenamedAppMigrationTests: XCTestCase {
         XCTAssertEqual(try Data(contentsOf: migratedURL), Data("legacy recordings".utf8))
         XCTAssertTrue(fileManager.fileExists(atPath: legacyDirectory.path))
 
-        try Data("chat recordings".utf8).write(to: migratedURL)
+        try Data("workflow recordings".utf8).write(to: migratedURL)
         try RenamedAppMigration.migrateApplicationSupport(
             fileManager: fileManager,
             applicationSupportDirectory: root
         )
-        XCTAssertEqual(try Data(contentsOf: migratedURL), Data("chat recordings".utf8))
+        XCTAssertEqual(try Data(contentsOf: migratedURL), Data("workflow recordings".utf8))
+    }
+
+    func testApplicationSupportMigrationMergesLegacyChainWithoutOverwriting() throws {
+        let fileManager = FileManager.default
+        let root = fileManager.temporaryDirectory
+            .appendingPathComponent("workflow-chain-test-\(UUID().uuidString)")
+        let chatDirectory = root.appendingPathComponent("com.picturesuo.Chat")
+        let glowDirectory = root.appendingPathComponent("com.picturesuo.GlowScribe")
+        let currentDirectory = root.appendingPathComponent(AppIdentity.bundleIdentifier)
+        defer { try? fileManager.removeItem(at: root) }
+
+        try fileManager.createDirectory(at: chatDirectory, withIntermediateDirectories: true)
+        try fileManager.createDirectory(at: glowDirectory, withIntermediateDirectories: true)
+        try Data("chat".utf8).write(to: chatDirectory.appendingPathComponent("recordings.sqlite"))
+        try Data("glow".utf8).write(to: glowDirectory.appendingPathComponent("model.bin"))
+
+        try RenamedAppMigration.migrateApplicationSupport(
+            fileManager: fileManager,
+            applicationSupportDirectory: root
+        )
+
+        XCTAssertEqual(
+            try Data(contentsOf: currentDirectory.appendingPathComponent("recordings.sqlite")),
+            Data("chat".utf8)
+        )
+        XCTAssertEqual(
+            try Data(contentsOf: currentDirectory.appendingPathComponent("model.bin")),
+            Data("glow".utf8)
+        )
+        XCTAssertTrue(fileManager.fileExists(atPath: chatDirectory.path))
+        XCTAssertTrue(fileManager.fileExists(atPath: glowDirectory.path))
     }
 }
 
@@ -107,6 +143,45 @@ final class AppPreferencesMigrationTests: XCTestCase {
         AppPreferences.migrateOldPreferences(in: defaults)
 
         XCTAssertEqual(defaults.string(forKey: "bedrockModelID"), "custom.model-profile")
+    }
+}
+
+final class OnboardingShortcutOptionTests: XCTestCase {
+
+    func testFreshInstallUsesPermissionFreeShortcut() {
+        XCTAssertEqual(
+            OnboardingShortcutOption.initialOption(
+                currentModifier: .fn,
+                hasCompletedOnboarding: false
+            ),
+            .keyCombination
+        )
+    }
+
+    func testReturningFnUserKeepsFnShortcut() {
+        XCTAssertEqual(
+            OnboardingShortcutOption.initialOption(
+                currentModifier: .fn,
+                hasCompletedOnboarding: true
+            ),
+            .fn
+        )
+    }
+
+    func testOnboardingChoicesMapToStoredModifier() {
+        XCTAssertEqual(OnboardingShortcutOption.keyCombination.modifierKey, .none)
+        XCTAssertEqual(OnboardingShortcutOption.fn.modifierKey, .fn)
+        XCTAssertEqual(OnboardingShortcutOption.rightOption.modifierKey, .rightOption)
+        XCTAssertFalse(OnboardingShortcutOption.keyCombination.requiresInputMonitoring)
+        XCTAssertTrue(OnboardingShortcutOption.fn.requiresInputMonitoring)
+        XCTAssertTrue(OnboardingShortcutOption.rightOption.requiresInputMonitoring)
+    }
+
+    func testRecommendedModelShowsExpectedDownloadSize() throws {
+        let parakeet = try XCTUnwrap(
+            OnboardingUnifiedModels.availableModels.first(where: { $0.name == "Parakeet v3" })
+        )
+        XCTAssertEqual(parakeet.sizeMegabytes, 483)
     }
 }
 

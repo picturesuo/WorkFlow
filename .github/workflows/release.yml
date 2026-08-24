@@ -94,9 +94,12 @@ jobs:
             -only-testing:OpenSuperWhisperTests/OpenAIChatCleanupServiceTests \
             -only-testing:OpenSuperWhisperTests/ProviderPipelineTests \
             -only-testing:OpenSuperWhisperTests/TokenEfficiencyTests \
+            -only-testing:OpenSuperWhisperTests/RenamedAppMigrationTests \
+            -only-testing:OpenSuperWhisperTests/OnboardingShortcutOptionTests \
             -only-testing:OpenSuperWhisperTests/LatestDictationGateTests \
             -only-testing:OpenSuperWhisperTests/ClipboardRestoreTests \
             -only-testing:OpenSuperWhisperTests/EmptyDictationDiscardTests \
+            -only-testing:OpenSuperWhisperTests/EscapeCancelConfirmationTests \
             CODE_SIGNING_ALLOWED=NO
 
       - name: Build, sign, notarize, and assess

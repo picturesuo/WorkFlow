@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Make the first-run shortcut truthful: new users get the permission-free key combination by default, while `Fn`/globe is a visible onboarding choice with Input Monitoring guidance and automatic hotkey activation after permission is granted.
+- Show model download sizes, percentage progress, and a clear ready state during onboarding.
+- Give WorkFlow its own macOS bundle identity while non-destructively copying preferences and History/models and securely moving provider credentials from earlier Chat and GlowScribe installs.
+- Explain the one-time macOS permission re-grant required after the identity migration.
+- Keep the release checks covering first-run shortcut behavior and Escape protection.
+
 ## 0.5.1 — 2026-08-23
 
 - Add an accessible **Ignore Esc while recording** setting so accidental Escape presses cannot discard an active dictation.

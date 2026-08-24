@@ -3,9 +3,33 @@ import Security
 
 enum CleanupCredentialStore {
     private static let service = "\(AppIdentity.bundleIdentifier).cleanup"
+    private static let legacyServices = AppIdentity.legacyBundleIdentifiers.map { "\($0).cleanup" }
     private static let account = "openai-compatible"
 
     static func loadAPIKey() throws -> String? {
+        if let currentValue = try loadAPIKey(service: service) {
+            return currentValue
+        }
+
+        var firstLegacyError: Error?
+        for legacyService in legacyServices {
+            let legacyValue: String?
+            do {
+                legacyValue = try loadAPIKey(service: legacyService)
+            } catch {
+                if firstLegacyError == nil { firstLegacyError = error }
+                continue
+            }
+            guard let legacyValue else { continue }
+            try saveAPIKey(legacyValue)
+            try? deleteAPIKey(service: legacyService)
+            return legacyValue
+        }
+        if let firstLegacyError { throw firstLegacyError }
+        return nil
+    }
+
+    private static func loadAPIKey(service: String) throws -> String? {
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,
@@ -48,6 +72,13 @@ enum CleanupCredentialStore {
     }
 
     static func deleteAPIKey() throws {
+        try deleteAPIKey(service: service)
+        for legacyService in legacyServices {
+            try deleteAPIKey(service: legacyService)
+        }
+    }
+
+    private static func deleteAPIKey(service: String) throws {
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,

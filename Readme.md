@@ -5,7 +5,7 @@
 <h1 align="center">WorkFlow</h1>
 
 <p align="center">
-  Hold <kbd>Fn</kbd>, speak, release, and keep working.
+  Choose <kbd>Fn</kbd> or a keyboard shortcut, speak, and keep working.
 </p>
 
 WorkFlow is an open-source, macOS-only dictation and meeting-transcription app. Speech recognition stays on your Mac with Parakeet or Whisper. An optional cleanup pass removes fillers, resolves self-corrections, and repairs punctuation through Amazon Bedrock, free local Ollama, or an OpenAI-compatible API.
@@ -14,7 +14,7 @@ WorkFlow is independently designed and is not affiliated with Wispr Flow, Superw
 
 ## Use it now
 
-The [two-minute quickstart](docs/QUICKSTART.md) covers installation, macOS permissions, the first model download, `Fn` dictation, and optional Bedrock setup. A coding agent can perform the non-secret setup by following [the agent setup runbook](docs/AGENT_SETUP.md).
+The current v0.5.1 release contains source archives only; a notarized drag-and-drop app is not published yet. Do not bypass Gatekeeper for an unsigned build. The [quickstart](docs/QUICKSTART.md) covers the source install, macOS permissions, the first model download, shortcut selection, and optional Bedrock setup. A coding agent can perform the non-secret setup by following [the agent setup runbook](docs/AGENT_SETUP.md).
 
 ```bash
 git clone --recurse-submodules https://github.com/picturesuo/WorkFlow.git
@@ -29,7 +29,7 @@ Requirements: Apple Silicon, macOS 14 or newer, Xcode, Homebrew, Rust, and Git. 
 
 ## Why WorkFlow
 
-- Hold the bottom-left `Fn`/globe key to record and release it to transcribe.
+- Choose the bottom-left `Fn`/globe key, another modifier, or the permission-free `Option`+backtick shortcut.
 - Parakeet v3 runs locally by default; Whisper remains available.
 - A single app-wide generation gate prevents a slower, older dictation from pasting over the newest one.
 - The recorder starts before accessibility-position lookup, and transcription waits for cold model loading instead of dropping the first request.
@@ -46,7 +46,7 @@ Requirements: Apple Silicon, macOS 14 or newer, Xcode, Homebrew, Rust, and Git. 
 ## How dictation works
 
 ```text
-Fn down → local recording → Parakeet/Whisper → vocabulary → selected cleanup → targeted paste
+shortcut down → local recording → Parakeet/Whisper → vocabulary → selected cleanup → targeted paste
                                                        ↘ timeout/error/budget → local text ↗
 ```
 
@@ -104,7 +104,7 @@ xcodebuild test \
   CODE_SIGNING_ALLOWED=NO
 ```
 
-The internal Xcode target remains `OpenSuperWhisper` so the fork retains a reviewable history. The visible app and executable are WorkFlow. The bundle identifier remains `com.picturesuo.Chat` intentionally: changing it would discard existing microphone, Accessibility, Input Monitoring, preferences, history, and Keychain grants for current users.
+The internal Xcode target remains `OpenSuperWhisper` so the fork retains a reviewable history. The app, executable, and bundle identity are WorkFlow. Upgrades copy preferences and History/models forward from earlier Chat or GlowScribe installations without deleting the old data, and securely move provider credentials into WorkFlow's Keychain identity. Because macOS does not migrate privacy grants between bundle identifiers, an existing user must approve Microphone, Accessibility, and—when using a modifier-only shortcut—Input Monitoring once more.
 
 Public binaries require a Developer ID Application certificate and Apple notarization. The release workflow fails closed rather than distributing a build that macOS may reject. See [the maintainer release guide](docs/RELEASING.md).
 

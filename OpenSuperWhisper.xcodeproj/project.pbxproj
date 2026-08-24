@@ -826,7 +826,7 @@
 					"$(inherited)",
 					"-lomp",
 				);
-				PRODUCT_BUNDLE_IDENTIFIER = com.picturesuo.Chat;
+				PRODUCT_BUNDLE_IDENTIFIER = com.picturesuo.WorkFlow;
 				PRODUCT_MODULE_NAME = OpenSuperWhisper;
 				PRODUCT_NAME = WorkFlow;
 				PROVISIONING_PROFILE_SPECIFIER = "";
@@ -891,7 +891,7 @@
 					"$(inherited)",
 					"-lomp",
 				);
-				PRODUCT_BUNDLE_IDENTIFIER = com.picturesuo.Chat;
+				PRODUCT_BUNDLE_IDENTIFIER = com.picturesuo.WorkFlow;
 				PRODUCT_MODULE_NAME = OpenSuperWhisper;
 				PRODUCT_NAME = WorkFlow;
 				PROVISIONING_PROFILE_SPECIFIER = "";
@@ -917,7 +917,7 @@
 				);
 				MACOSX_DEPLOYMENT_TARGET = 15.1;
 				MARKETING_VERSION = 0.5.1;
-				PRODUCT_BUNDLE_IDENTIFIER = com.picturesuo.ChatTests;
+				PRODUCT_BUNDLE_IDENTIFIER = com.picturesuo.WorkFlowTests;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = NO;
 				SWIFT_OBJC_BRIDGING_HEADER = "$(PROJECT_DIR)/Bridge.h";
@@ -940,7 +940,7 @@
 				);
 				MACOSX_DEPLOYMENT_TARGET = 15.1;
 				MARKETING_VERSION = 0.5.1;
-				PRODUCT_BUNDLE_IDENTIFIER = com.picturesuo.ChatTests;
+				PRODUCT_BUNDLE_IDENTIFIER = com.picturesuo.WorkFlowTests;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = NO;
 				SWIFT_OBJC_BRIDGING_HEADER = "$(PROJECT_DIR)/Bridge.h";
@@ -957,7 +957,7 @@
 				DEAD_CODE_STRIPPING = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				MARKETING_VERSION = 0.5.1;
-				PRODUCT_BUNDLE_IDENTIFIER = com.picturesuo.ChatUITests;
+				PRODUCT_BUNDLE_IDENTIFIER = com.picturesuo.WorkFlowUITests;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = NO;
 				SWIFT_VERSION = 5.0;
@@ -973,7 +973,7 @@
 				DEAD_CODE_STRIPPING = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				MARKETING_VERSION = 0.5.1;
-				PRODUCT_BUNDLE_IDENTIFIER = com.picturesuo.ChatUITests;
+				PRODUCT_BUNDLE_IDENTIFIER = com.picturesuo.WorkFlowUITests;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = NO;
 				SWIFT_VERSION = 5.0;

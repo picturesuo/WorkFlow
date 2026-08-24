@@ -324,6 +324,7 @@ struct ContentView: View {
     @State private var meetingTitle = MeetingSessionController.defaultTitle()
     @State private var searchTask: Task<Void, Never>? = nil
     @AppStorage("cleanupMode") private var cleanupModeRaw = CleanupMode.everyday.rawValue
+    @AppStorage("modifierOnlyHotkey") private var modifierOnlyHotkeyRaw = ModifierKey.fn.rawValue
 
     private var currentShortcutDescription: String {
         let mouseButton = MouseButton(rawValue: AppPreferences.shared.mouseButtonHotkey) ?? .none
@@ -374,6 +375,11 @@ struct ContentView: View {
         )
     }
 
+    private var requiresInputMonitoring: Bool {
+        let modifier = ModifierKey(rawValue: modifierOnlyHotkeyRaw) ?? .none
+        return modifier != .none
+    }
+
     var body: some View {
         VStack {
             if permissionsManager.hasCompletedInitialCheck,
@@ -383,6 +389,26 @@ struct ContentView: View {
                 PermissionsView(permissionsManager: permissionsManager)
             } else {
                 VStack(spacing: 0) {
+                    if permissionsManager.hasCompletedInitialCheck,
+                       requiresInputMonitoring,
+                       !permissionsManager.isInputMonitoringPermissionGranted {
+                        HStack(spacing: 10) {
+                            Image(systemName: "exclamationmark.triangle.fill")
+                                .foregroundColor(.orange)
+                            Text("Enable Input Monitoring to use \(currentShortcutDescription).")
+                                .font(.caption)
+                            Spacer()
+                            Button("Enable") {
+                                permissionsManager.requestInputMonitoringPermissionOrOpenSystemPreferences()
+                            }
+                            .controlSize(.small)
+                            .accessibilityLabel("Enable Input Monitoring")
+                        }
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 10)
+                        .background(Color.orange.opacity(0.12))
+                    }
+
                     // Search bar
                     HStack {
                         Image(systemName: "magnifyingglass")
@@ -453,7 +479,7 @@ struct ContentView: View {
                                         .multilineTextAlignment(.center)
                                         .padding(.horizontal)
 
-                                    if let shortcut = KeyboardShortcuts.getShortcut(for: .toggleRecord) {
+                                    if !currentShortcutDescription.isEmpty {
                                         VStack(spacing: 8) {
                                             Text("Pro Tip:")
                                                 .font(.subheadline)
@@ -463,7 +489,7 @@ struct ContentView: View {
                                                 Text("Press")
                                                     .font(.subheadline)
                                                     .foregroundColor(.secondary)
-                                                Text(shortcut.description)
+                                                Text(currentShortcutDescription)
                                                     .font(.system(size: 16, weight: .medium))
                                                     .padding(.horizontal, 6)
                                                     .padding(.vertical, 3)
@@ -779,12 +805,21 @@ struct ContentView: View {
 
 struct PermissionsView: View {
     @ObservedObject var permissionsManager: PermissionsManager
+    @AppStorage(RenamedAppMigration.didMigrateFromChatKey) private var didMigrateFromChat = false
 
     var body: some View {
         VStack(spacing: 20) {
             Text("Required Permissions")
                 .font(.title)
                 .padding()
+
+            if didMigrateFromChat {
+                Text("WorkFlow now has its own macOS identity. Your settings and History were preserved, but macOS needs these permissions once more.")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+                    .accessibilityLabel("WorkFlow was renamed. Settings and History were preserved. Grant permissions once more.")
+            }
 
             PermissionRow(
                 isGranted: permissionsManager.isMicrophonePermissionGranted,
@@ -798,7 +833,7 @@ struct PermissionsView: View {
             PermissionRow(
                 isGranted: permissionsManager.isAccessibilityPermissionGranted,
                 title: "Accessibility Access",
-                description: "Required for global keyboard shortcuts",
+                description: "Required to paste transcriptions into other apps",
                 action: { permissionsManager.openSystemPreferences(for: .accessibility) }
             )
 
@@ -831,6 +866,7 @@ struct PermissionRow: View {
                         action()
                     }
                     .buttonStyle(.borderedProminent)
+                    .accessibilityLabel("Grant \(title)")
                 }
             }
 

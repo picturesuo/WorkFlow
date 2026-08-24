@@ -2,9 +2,9 @@
 
 ## Install
 
-### Signed release
+### Public release status
 
-Open [WorkFlow Releases](https://github.com/picturesuo/WorkFlow/releases/latest). If a notarized `WorkFlow-…-macOS-arm64.zip` is attached, download it, unzip it, move `WorkFlow.app` to Applications, and open it. Do not bypass Gatekeeper for an unnotarized build.
+The current v0.5.1 release contains source archives only. A notarized `WorkFlow-…-macOS-arm64.zip` is not attached yet, so use the local source build below. Do not bypass Gatekeeper for an unsigned or unnotarized build. Future signed builds will appear on [WorkFlow Releases](https://github.com/picturesuo/WorkFlow/releases/latest).
 
 ### Local source build
 
@@ -19,7 +19,7 @@ brew install cmake libomp rust
 open /Applications/WorkFlow.app
 ```
 
-The first build downloads dependencies and can take several minutes. On macOS 26 or newer, the installer can reuse the exact trusted signer from a working WorkFlow or Chat installation. Otherwise, if it reports that no Apple-issued signing identity exists:
+The first build downloads dependencies and can take several minutes. WorkFlow now uses its own `com.picturesuo.WorkFlow` identity. When upgrading from Chat or GlowScribe, it copies preferences and History/models forward without deleting the old data and moves provider credentials into WorkFlow's Keychain identity. macOS privacy grants cannot be copied, so approve WorkFlow once under Microphone, Accessibility, and—if selected—Input Monitoring. On macOS 26 or newer, the installer can reuse the exact trusted signer from a working installation. Otherwise, if it reports that no Apple-issued signing identity exists:
 
 1. Open Xcode → Settings → Accounts.
 2. Add an Apple Account and select **Manage Certificates**.
@@ -34,17 +34,17 @@ When WorkFlow opens, allow:
 
 1. **Microphone** — records speech locally.
 2. **Accessibility** — pastes into the app that was focused when recording began.
-3. **Input Monitoring** — detects the global `Fn`/globe key.
+3. **Input Monitoring** — needed only when you choose `Fn`/globe or another single-modifier shortcut.
 
-If a prompt is missed, open System Settings → Privacy & Security and enable WorkFlow in those three sections. Quit and reopen WorkFlow after changing Input Monitoring.
+If a prompt is missed, open System Settings → Privacy & Security and enable the missing permission. WorkFlow detects a newly granted Input Monitoring permission and activates the selected shortcut automatically.
 
 ## First dictation
 
-1. Wait for Parakeet v3's first model download to finish.
-2. Choose **Homework**, **Technical**, or **Everyday** in the main window or WorkFlow's menu-bar menu.
-3. Put the cursor in any text field.
-4. Hold the bottom-left `Fn`/globe key and speak.
-5. Release `Fn` and leave focus in the same app until text appears.
+1. In onboarding, keep the permission-free `Option`+backtick shortcut or choose `Fn`/globe and enable Input Monitoring.
+2. Download the recommended Parakeet v3 model (about 483 MB). Onboarding shows its percentage and marks it **Ready** when complete.
+3. Choose **Homework**, **Technical**, or **Everyday** in the main window or WorkFlow's menu-bar menu.
+4. Put the cursor in any text field, hold your chosen shortcut, speak, and release it.
+5. Keep the cursor in the intended field until text appears. WorkFlow targets the app that was active when recording began, but changing fields inside that app can redirect the paste.
 
 Use Homework for developed prose, Technical for compact commands sent to computers or coding agents, and Everyday for natural messages. After using more than one mode, open **Settings → Cleanup → Writing efficiency this month** to compare their estimated source-to-final token ratios. History also labels each successfully cleaned dictation with its mode and estimated efficiency.
 
@@ -62,11 +62,11 @@ If you sometimes press Escape accidentally, enable **Settings → Shortcuts → 
 
 At the August 21, 2026 US price, a typical 200-input/40-output-token cleanup is about $0.0000126, and 100 daily dictations are about $0.04/month. AWS billing is authoritative.
 
-## If `Fn` does nothing
+## If your shortcut does nothing
 
 - Confirm WorkFlow is running in the menu bar.
-- Re-enable WorkFlow under System Settings → Privacy & Security → Input Monitoring.
-- In WorkFlow → Settings → Shortcuts, confirm `Fn` and hold-to-record are enabled.
-- Quit and reopen WorkFlow after permission changes.
+- If you selected `Fn` or another modifier, enable WorkFlow under System Settings → Privacy & Security → Input Monitoring.
+- In WorkFlow → Settings → Shortcuts, confirm the expected shortcut and hold-to-record are enabled.
+- WorkFlow detects a newly granted Input Monitoring permission and activates the shortcut automatically.
 
 If text is copied but not pasted, re-enable Accessibility. The newest transcript remains on the clipboard by default, so Command-V is a safe fallback.

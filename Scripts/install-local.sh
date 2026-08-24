@@ -22,7 +22,7 @@ fi
 
 # A previously working install may use a locally trusted certificate whose
 # name does not mimic an Apple certificate. Reusing that exact signer and the
-# existing bundle identifier preserves its TCC designated requirement.
+# existing signing identity keeps the replacement trusted by macOS.
 reuses_previous_identity=false
 signing_sources=("$destination_app" "$previous_app")
 if [[ -z "$signing_identity" ]]; then

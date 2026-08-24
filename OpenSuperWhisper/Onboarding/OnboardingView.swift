@@ -11,7 +11,32 @@ import FluidAudio
 
 enum OnboardingShortcutOption: String, CaseIterable {
     case keyCombination
+    case fn
     case rightOption
+
+    var modifierKey: ModifierKey {
+        switch self {
+        case .keyCombination: return .none
+        case .fn: return .fn
+        case .rightOption: return .rightOption
+        }
+    }
+
+    var requiresInputMonitoring: Bool {
+        modifierKey != .none
+    }
+
+    static func initialOption(
+        currentModifier: ModifierKey,
+        hasCompletedOnboarding: Bool
+    ) -> OnboardingShortcutOption {
+        guard hasCompletedOnboarding else { return .keyCombination }
+        switch currentModifier {
+        case .fn: return .fn
+        case .rightOption: return .rightOption
+        default: return .keyCombination
+        }
+    }
 }
 
 class OnboardingViewModel: ObservableObject {
@@ -29,12 +54,10 @@ class OnboardingViewModel: ObservableObject {
     
     @Published var selectedShortcut: OnboardingShortcutOption {
         didSet {
-            switch selectedShortcut {
-            case .keyCombination:
-                AppPreferences.shared.modifierOnlyHotkey = ModifierKey.none.rawValue
-            case .rightOption:
-                AppPreferences.shared.modifierOnlyHotkey = ModifierKey.rightOption.rawValue
-                AppPreferences.shared.lastModifierOnlyHotkey = ModifierKey.rightOption.rawValue
+            let modifierKey = selectedShortcut.modifierKey
+            AppPreferences.shared.modifierOnlyHotkey = modifierKey.rawValue
+            if modifierKey != .none {
+                AppPreferences.shared.lastModifierOnlyHotkey = modifierKey.rawValue
             }
             NotificationCenter.default.post(name: .hotkeySettingsChanged, object: nil)
         }
@@ -55,15 +78,19 @@ class OnboardingViewModel: ObservableObject {
         self.selectedLanguage = systemLanguage
         self.useAsianAutocorrect = AppPreferences.shared.useAsianAutocorrect
         
-        let currentHotkey = ModifierKey(rawValue: AppPreferences.shared.modifierOnlyHotkey) ?? .none
-        if currentHotkey == .none && !AppPreferences.shared.hasCompletedOnboarding {
-            // Default to key combination mode — does NOT require Input Monitoring permission.
-            // Users can switch to single modifier key mode later in Settings if they prefer.
-            self.selectedShortcut = .keyCombination
-            AppPreferences.shared.modifierOnlyHotkey = ModifierKey.none.rawValue
+        let preferences = AppPreferences.shared
+        let currentHotkey = ModifierKey(rawValue: preferences.modifierOnlyHotkey) ?? .none
+        let isFirstRun = !preferences.hasCompletedOnboarding
+        let initialShortcut = OnboardingShortcutOption.initialOption(
+            currentModifier: currentHotkey,
+            hasCompletedOnboarding: preferences.hasCompletedOnboarding
+        )
+        self.selectedShortcut = initialShortcut
+        if isFirstRun {
+            // Give new users a working, permission-light default while keeping
+            // Fn visible as a first-class choice below.
+            preferences.modifierOnlyHotkey = initialShortcut.modifierKey.rawValue
             NotificationCenter.default.post(name: .hotkeySettingsChanged, object: nil)
-        } else {
-            self.selectedShortcut = currentHotkey == .rightOption ? .rightOption : .keyCombination
         }
         
         initializeUnifiedModels()
@@ -325,6 +352,7 @@ class OnboardingViewModel: ObservableObject {
 
 struct OnboardingView: View {
     @StateObject private var viewModel = OnboardingViewModel()
+    @StateObject private var permissionsManager = PermissionsManager()
     @EnvironmentObject private var appState: AppState
     @State private var showError = false
     @State private var errorMessage = ""
@@ -406,25 +434,61 @@ struct OnboardingView: View {
                         HStack(spacing: 8) {
                             OnboardingShortcutCard(
                                 title: "⌥ + ~",
-                                subtitle: "Key Combination",
+                                subtitle: "No Input Monitoring",
                                 isSelected: viewModel.selectedShortcut == .keyCombination
                             ) {
                                 viewModel.selectedShortcut = .keyCombination
                             }
+
+                            OnboardingShortcutCard(
+                                title: "Fn / 🌐",
+                                subtitle: "Hold to talk",
+                                isSelected: viewModel.selectedShortcut == .fn
+                            ) {
+                                viewModel.selectedShortcut = .fn
+                            }
                             
                             OnboardingShortcutCard(
                                 title: "Right ⌥",
-                                subtitle: "Single Modifier Key",
+                                subtitle: "Tap or hold",
                                 isSelected: viewModel.selectedShortcut == .rightOption
                             ) {
                                 viewModel.selectedShortcut = .rightOption
                             }
                         }
                         
-                        if viewModel.selectedShortcut == .rightOption {
-                            Text("⚠️ Single modifier key mode requires Input Monitoring permission (macOS needs it to detect modifier keys globally). Only modifier key events are monitored — no regular keystrokes.")
-                                .font(.caption2)
-                                .foregroundColor(.orange)
+                        if viewModel.selectedShortcut.requiresInputMonitoring {
+                            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                                if !permissionsManager.hasCompletedInitialCheck {
+                                    ProgressView()
+                                        .controlSize(.small)
+                                    Text("Checking Input Monitoring…")
+                                        .font(.caption2)
+                                        .foregroundColor(.secondary)
+                                } else {
+                                    Image(systemName: permissionsManager.isInputMonitoringPermissionGranted
+                                          ? "checkmark.circle.fill"
+                                          : "exclamationmark.triangle.fill")
+                                        .foregroundColor(permissionsManager.isInputMonitoringPermissionGranted ? .green : .orange)
+
+                                    Text(permissionsManager.isInputMonitoringPermissionGranted
+                                         ? "Input Monitoring is enabled. Only modifier-key events are observed."
+                                         : "Fn and single-modifier shortcuts need Input Monitoring. No regular keystrokes are captured.")
+                                        .font(.caption2)
+                                        .foregroundColor(.secondary)
+
+                                    Spacer()
+                                }
+
+                                if permissionsManager.hasCompletedInitialCheck,
+                                   !permissionsManager.isInputMonitoringPermissionGranted {
+                                    Button("Enable") {
+                                        permissionsManager.requestInputMonitoringPermissionOrOpenSystemPreferences()
+                                    }
+                                    .controlSize(.small)
+                                    .accessibilityLabel("Enable Input Monitoring")
+                                }
+                            }
                         }
 
                         Text("You can change this later in Settings")
@@ -530,15 +594,20 @@ struct OnboardingUnifiedModelItemView: View {
                     }
                 }
                 
-                Text(model.description)
+                Text("\(model.description) · \(model.sizeString)")
                     .font(.caption)
                     .foregroundColor(.secondary)
 
                 if viewModel.isDownloading && viewModel.downloadingModelName == model.name {
-                    ProgressView(value: model.downloadProgress)
-                        .progressViewStyle(LinearProgressViewStyle())
-                        .frame(height: 6)
-                        .padding(.top, 4)
+                    HStack(spacing: 8) {
+                        ProgressView(value: model.downloadProgress)
+                            .progressViewStyle(LinearProgressViewStyle())
+                            .frame(height: 6)
+                        Text("\(Int(model.downloadProgress * 100))%")
+                            .font(.caption2.monospacedDigit())
+                            .foregroundColor(.secondary)
+                    }
+                    .padding(.top, 4)
                 }
             }
             
@@ -552,9 +621,9 @@ struct OnboardingUnifiedModelItemView: View {
                 .controlSize(.small)
             } else if model.isDownloaded {
                 if isSelected {
-                    Image(systemName: "checkmark.circle.fill")
+                    Label("Ready", systemImage: "checkmark.circle.fill")
+                        .font(.caption)
                         .foregroundColor(.green)
-                        .imageScale(.large)
                 } else {
                     Button(action: {
                         viewModel.selectModel(model)
@@ -650,6 +719,8 @@ struct OnboardingKeyboardView: View {
         switch selectedShortcut {
         case .keyCombination:
             return id == "leftOption" || id == "tilde"
+        case .fn:
+            return id == "fn"
         case .rightOption:
             return id == "rightOption"
         }
@@ -724,7 +795,7 @@ struct OnboardingKeyboardView: View {
                 }
                 
                 HStack(spacing: gap) {
-                    KeyCap(label: "fn", w: u, h: h, highlighted: false)
+                    KeyCap(label: "fn", w: u, h: h, highlighted: isHighlighted("fn"))
                     KeyCap(label: "⌃", w: u, h: h, highlighted: false)
                     KeyCap(label: "⌥", w: u, h: h, highlighted: isHighlighted("leftOption"))
                     KeyCap(label: "⌘", w: cmd, h: h, highlighted: false)
@@ -746,6 +817,7 @@ struct OnboardingKeyboardView: View {
             RoundedRectangle(cornerRadius: 10)
                 .fill(Color(.controlBackgroundColor).opacity(0.3))
         )
+        .accessibilityHidden(true)
         .animation(.easeInOut(duration: 0.2), value: selectedShortcut)
     }
     
