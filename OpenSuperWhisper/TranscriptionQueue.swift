@@ -131,7 +131,7 @@ class TranscriptionQueue: ObservableObject {
 
             startProcessingQueue()
         } catch {
-            print("Failed to add file to queue: \(error)")
+            print("Failed to add the audio file to the transcription queue.")
         }
     }
 
@@ -170,7 +170,7 @@ class TranscriptionQueue: ObservableObject {
         do {
             try await recordingStore.updateSourceFileURL(recording.id, sourceURL: sourceURL.path)
         } catch {
-            print("Failed to update source URL: \(error)")
+            print("Failed to update the queued audio source.")
         }
 
         startProcessingQueue()

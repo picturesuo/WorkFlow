@@ -72,7 +72,7 @@ class TranscriptionService: ObservableObject {
                 guard let self, self.engineLoadGeneration == generation else { return }
                 self.engineLoadTask = nil
                 self.isLoading = false
-                print("Failed to load engine: \(error)")
+                print("Failed to load the transcription engine.")
             }
         }
     }

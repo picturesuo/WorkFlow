@@ -57,7 +57,7 @@ struct OpenSuperWhisperApp: App {
         do {
             try RenamedAppMigration.migrateApplicationSupport()
         } catch {
-            print("Unable to migrate application data to \(AppIdentity.productName): \(error.localizedDescription)")
+            print("Unable to migrate application data to \(AppIdentity.productName).")
         }
         _ = ShortcutManager.shared
         _ = MicrophoneService.shared

@@ -19,15 +19,17 @@ class ClipboardUtil {
     }
 
     /// Pastes text and keeps it in clipboard (does not restore original clipboard)
-    static func insertTextAndKeepInClipboard(_ text: String, targetPID: pid_t? = nil) {
+    @discardableResult
+    static func insertTextAndKeepInClipboard(_ text: String, targetPID: pid_t? = nil) -> Bool {
         let pasteboard = NSPasteboard.general
         pasteboard.declareTypes([.string], owner: nil)
-        pasteboard.setString(text, forType: .string)
-        simulatePaste(targetPID: targetPID)
+        guard pasteboard.setString(text, forType: .string) else { return false }
+        return simulatePaste(targetPID: targetPID)
     }
 
     /// Pastes text and restores original clipboard (legacy behavior)
-    static func insertText(_ text: String, targetPID: pid_t? = nil) {
+    @discardableResult
+    static func insertText(_ text: String, targetPID: pid_t? = nil) -> Bool {
         let pasteboard = NSPasteboard.general
 
         // Save current pasteboard contents
@@ -35,11 +37,15 @@ class ClipboardUtil {
 
         // Set new text to pasteboard
         pasteboard.declareTypes([.string], owner: nil)
-        pasteboard.setString(text, forType: .string)
+        guard pasteboard.setString(text, forType: .string) else { return false }
         let changeCountAfterCopy = pasteboard.changeCount
 
         // Simulate Cmd+V using layout-aware keycode resolution
-        simulatePaste(targetPID: targetPID)
+        guard simulatePaste(targetPID: targetPID) else {
+            // Keep the newest transcript available for a manual Cmd+V. In
+            // particular, do not restore stale clipboard contents on failure.
+            return false
+        }
 
         // Restore original contents only after the target app had a chance to
         // process the paste, and only if the pasteboard still holds our text:
@@ -50,6 +56,7 @@ class ClipboardUtil {
                 restoreIfUnchanged(contents, expectedChangeCount: changeCountAfterCopy, pasteboard: pasteboard)
             }
         }
+        return true
     }
 
     @discardableResult
@@ -61,11 +68,18 @@ class ClipboardUtil {
         return true
     }
     
-    private static func simulatePaste(targetPID: pid_t?) {
+    private static func simulatePaste(targetPID: pid_t?) -> Bool {
         sendCmdV(targetPID: targetPID)
     }
     
-    private static func sendCmdV(targetPID: pid_t?) {
+    private static func sendCmdV(targetPID: pid_t?) -> Bool {
+        // Never redirect a finished dictation into whichever app happens to
+        // be focused if its original target closed while transcription ran.
+        if let targetPID, NSRunningApplication(processIdentifier: targetPID) == nil {
+            return false
+        }
+        guard AXIsProcessTrusted() else { return false }
+
         // QWERTY keycode for V
         let qwertyKeyCodeV: CGKeyCode = 9
         
@@ -86,18 +100,19 @@ class ClipboardUtil {
         guard let source = CGEventSource(stateID: .combinedSessionState),
               let keyDown = CGEvent(keyboardEventSource: source, virtualKey: keyCodeV, keyDown: true),
               let keyUp = CGEvent(keyboardEventSource: source, virtualKey: keyCodeV, keyDown: false)
-        else { return }
+        else { return false }
         
         keyDown.flags = .maskCommand
         keyUp.flags = .maskCommand
         
-        if let targetPID, NSRunningApplication(processIdentifier: targetPID) != nil {
+        if let targetPID {
             keyDown.postToPid(targetPID)
             keyUp.postToPid(targetPID)
         } else {
             keyDown.post(tap: .cghidEventTap)
             keyUp.post(tap: .cghidEventTap)
         }
+        return true
     }
     
     static func isQwertyCommandLayout() -> Bool {

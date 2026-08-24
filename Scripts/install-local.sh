@@ -10,6 +10,33 @@ legacy_app="/Applications/GlowScribe.app"
 entitlements_file="$repo_root/OpenSuperWhisper/OpenSuperWhisper.entitlements"
 macos_major=${$(sw_vers -productVersion)%%.*}
 
+if [[ "$(uname -m)" != "arm64" ]]; then
+    echo "WorkFlow currently supports Apple Silicon Macs only." >&2
+    exit 1
+fi
+
+if (( macos_major < 14 )); then
+    echo "WorkFlow requires macOS 14 or newer." >&2
+    exit 1
+fi
+
+missing_tools=()
+for tool_name in cmake cargo xcodebuild; do
+    if ! command -v "$tool_name" >/dev/null 2>&1; then
+        missing_tools+=("$tool_name")
+    fi
+done
+if (( ${#missing_tools[@]} > 0 )); then
+    echo "Missing build tools: ${missing_tools[*]}" >&2
+    echo "Install Xcode, then run: brew install cmake libomp rust" >&2
+    exit 1
+fi
+
+if [[ ! -f /opt/homebrew/opt/libomp/lib/libomp.dylib ]]; then
+    echo "libomp is missing. Run: brew install libomp" >&2
+    exit 1
+fi
+
 signing_identity=${WORKFLOW_SIGNING_IDENTITY:-${CHAT_SIGNING_IDENTITY:-}}
 identities=$(security find-identity -v -p codesigning 2>/dev/null || true)
 if [[ -z "$signing_identity" ]]; then

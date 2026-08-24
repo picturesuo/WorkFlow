@@ -38,10 +38,9 @@ This runbook lets a local coding agent install and verify WorkFlow without recei
      -only-testing:OpenSuperWhisperTests/ProviderPipelineTests
    ```
 
-4. Generate the supplied independent purple icon and install:
+4. Install the app. The independent purple icon is already included in the repository:
 
    ```bash
-   ./Scripts/generate-icon.sh
    ./Scripts/install-local.sh
    open /Applications/WorkFlow.app
    ```

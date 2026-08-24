@@ -83,7 +83,7 @@ class WhisperModelManager {
         do {
             try FileManager.default.createDirectory(at: modelsDirectory, withIntermediateDirectories: true)
         } catch {
-            print("Failed to create models directory: \(error)")
+            print("Failed to create models directory.")
         }
     }
     
@@ -100,9 +100,9 @@ class WhisperModelManager {
         if let bundleURL = Bundle.main.url(forResource: "ggml-tiny.en", withExtension: "bin") {
             do {
                 try FileManager.default.copyItem(at: bundleURL, to: destinationURL)
-                print("Copied default model to: \(destinationURL.path)")
+                print("Copied the bundled default model.")
             } catch {
-                print("Failed to copy default model: \(error)")
+                print("Failed to copy the bundled default model.")
             }
         }
     }
@@ -122,7 +122,7 @@ class WhisperModelManager {
                 .filter { $0.pathExtension == "bin" }
                 .sorted { $0.lastPathComponent < $1.lastPathComponent }
         } catch {
-            print("Failed to get available models: \(error)")
+            print("Failed to list available models.")
             return []
         }
     }
@@ -133,16 +133,14 @@ class WhisperModelManager {
         
         // Check if model already exists
         if FileManager.default.fileExists(atPath: destinationURL.path) {
-            print("Model already exists at: \(destinationURL.path)")
+            print("The selected model is already installed.")
             DispatchQueue.main.async {
                 progressCallback(1.0)
             }
             return
         }
         
-        print("Starting model download:")
-        print("- URL: \(url.absoluteString)")
-        print("- Destination: \(destinationURL.path)")
+        print("Starting model download.")
         
         return try await withCheckedThrowingContinuation { continuation in
             let delegate = WhisperDownloadDelegate(progressCallback: progressCallback)
@@ -180,7 +178,7 @@ class WhisperModelManager {
                 }
                 
                 if let error = error {
-                    print("Download failed with error: \(error)")
+                    print("Model download failed.")
                     continuation.resume(throwing: error)
                     return
                 }
@@ -194,7 +192,7 @@ class WhisperModelManager {
                 do {
                     print("Download completed. Moving file to destination...")
                     try FileManager.default.moveItem(at: location, to: destinationURL)
-                    print("Model successfully saved to: \(destinationURL.path)")
+                    print("Model download completed.")
                     
                     DispatchQueue.main.async {
                         progressCallback(1.0)
@@ -202,7 +200,7 @@ class WhisperModelManager {
                     
                     continuation.resume(returning: ())
                 } catch {
-                    print("Failed to move downloaded file: \(error)")
+                    print("Failed to save the downloaded model.")
                     continuation.resume(throwing: error)
                 }
             }

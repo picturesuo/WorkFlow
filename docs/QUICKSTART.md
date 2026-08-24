@@ -14,7 +14,6 @@ On an Apple Silicon Mac with macOS 14 or newer:
 git clone --recurse-submodules https://github.com/picturesuo/WorkFlow.git
 cd WorkFlow
 brew install cmake libomp rust
-./Scripts/generate-icon.sh
 ./Scripts/install-local.sh
 open /Applications/WorkFlow.app
 ```
@@ -59,6 +58,8 @@ If you sometimes press Escape accidentally, enable **Settings → Shortcuts → 
 3. Choose **Amazon Bedrock** and paste the key into the secure field.
 4. Select **Save & Test**. A successful test shows input/output tokens and its estimated cost.
 5. Keep Nova Micro, the three-second fallback, and the default $0.25 monthly stop for the lowest-cost setup.
+
+Amazon models are available by default in commercial AWS regions when the key has the required Bedrock permissions. If the test reports `AccessDeniedException`, confirm that the key can invoke Nova Micro in `us-east-1`; an organization policy or restricted account may require an administrator to grant model access.
 
 At the August 21, 2026 US price, a typical 200-input/40-output-token cleanup is about $0.0000126, and 100 daily dictations are about $0.04/month. AWS billing is authoritative.
 

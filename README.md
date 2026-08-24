@@ -20,7 +20,6 @@ The current v0.5.1 release contains source archives only; a notarized drag-and-d
 git clone --recurse-submodules https://github.com/picturesuo/WorkFlow.git
 cd WorkFlow
 brew install cmake libomp rust
-./Scripts/generate-icon.sh
 ./Scripts/install-local.sh
 open /Applications/WorkFlow.app
 ```
@@ -74,6 +73,8 @@ The recommended default is Amazon Nova Micro through the `us.amazon.nova-micro-v
 2. In WorkFlow, select **Amazon Bedrock**, paste the key, and choose **Save & Test**.
 3. Leave the recommended model, three-second fallback, and $0.25 monthly limit in place unless you have a reason to change them.
 
+Amazon models are available by default in commercial AWS regions when the key has the required Bedrock permissions. If **Save & Test** reports `AccessDeniedException`, confirm the key can invoke Nova Micro in `us-east-1`; an organization policy or restricted account may require an administrator to grant model access.
+
 The key is saved only in macOS Keychain. For production or shared machines, prefer AWS short-term credentials and least-privilege access to the selected model. See AWS's [API key guide](https://docs.aws.amazon.com/bedrock/latest/userguide/api-keys.html) and [Converse API reference](https://docs.aws.amazon.com/bedrock/latest/APIReference/API_runtime_Converse.html).
 
 ### Cost estimate
@@ -101,8 +102,11 @@ xcodebuild test \
   -scheme OpenSuperWhisper \
   -derivedDataPath build \
   -destination 'platform=macOS,arch=arm64' \
+  -only-testing:OpenSuperWhisperTests \
   CODE_SIGNING_ALLOWED=NO
 ```
+
+This runs the complete deterministic unit-test target. The separate UI-test target needs an interactive macOS session and is intentionally excluded from headless and agent runs.
 
 The internal Xcode target remains `OpenSuperWhisper` so the fork retains a reviewable history. The app, executable, and bundle identity are WorkFlow. Upgrades copy preferences and History/models forward from earlier Chat or GlowScribe installations without deleting the old data, and securely move provider credentials into WorkFlow's Keychain identity. Because macOS does not migrate privacy grants between bundle identifiers, an existing user must approve Microphone, Accessibility, and—when using a modifier-only shortcut—Input Monitoring once more.
 
@@ -112,6 +116,7 @@ Public binaries require a Developer ID Application certificate and Apple notariz
 
 - Audio is processed locally.
 - Only transcript text reaches the one remote cleanup provider you enable.
+- WorkFlow does not write transcript text or provider credentials to diagnostic logs.
 - Network failure preserves local text.
 - Security reports follow [SECURITY.md](SECURITY.md).
 

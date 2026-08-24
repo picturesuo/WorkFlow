@@ -16,7 +16,7 @@ enum LaunchAtLoginManager {
                 try SMAppService.mainApp.unregister()
             }
         } catch {
-            print("Unable to update launch-at-login: \(error.localizedDescription)")
+            print("Unable to update launch-at-login.")
         }
     }
 }

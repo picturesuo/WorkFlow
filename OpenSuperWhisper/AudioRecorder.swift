@@ -100,7 +100,7 @@ class AudioRecorder: NSObject, ObservableObject {
         do {
             try FileManager.default.createDirectory(at: temporaryDirectory, withIntermediateDirectories: true)
         } catch {
-            print("Failed to create temporary recordings directory: \(error)")
+            print("Failed to create temporary recordings directory.")
         }
     }
     
@@ -188,14 +188,14 @@ class AudioRecorder: NSObject, ObservableObject {
         let fileURL = temporaryDirectory.appendingPathComponent("\(timestamp).wav")
         currentRecordingURL = fileURL
         
-        print("start record file to \(fileURL)")
+        print("Starting audio recording.")
         
         var channelCount = 1
         #if os(macOS)
         if let activeMic = activeMic {
             switchSystemDefaultInput(to: activeMic)
             channelCount = MicrophoneService.shared.getInputChannelCount(for: activeMic)
-            print("Recording with \(channelCount) input channel(s) from \(activeMic.displayName)")
+            print("Recording with \(channelCount) input channel(s).")
         }
         #endif
         
@@ -231,7 +231,7 @@ class AudioRecorder: NSObject, ObservableObject {
             print("Recording started successfully")
             return nil
         } catch {
-            print("Failed to start recording: \(error)")
+            print("Failed to start recording.")
             currentRecordingURL = nil
             restoreSystemDefaultInputIfNeeded()
             releaseSessionReservation()
@@ -318,7 +318,7 @@ class AudioRecorder: NSObject, ObservableObject {
         
         if MicrophoneService.shared.setSystemDefaultInputDevice(targetID) {
             previousDefaultInputDeviceID = currentDefault
-            print("Set system default input to: \(device.displayName)")
+            print("Set the selected microphone as the system default input.")
         }
     }
     
@@ -361,7 +361,7 @@ class AudioRecorder: NSObject, ObservableObject {
             isPlaying = true
             currentlyPlayingURL = url
         } catch {
-            print("Failed to play recording: \(error), url: \(url)")
+            print("Failed to play recording.")
             isPlaying = false
             currentlyPlayingURL = nil
         }

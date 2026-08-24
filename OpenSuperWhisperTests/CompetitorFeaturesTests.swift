@@ -477,6 +477,32 @@ final class ProviderPipelineTests: XCTestCase {
         XCTAssertEqual(result.outputTokens, 7)
         XCTAssertEqual(result.modelID, "amazon.nova-micro-v1:0")
     }
+
+    func testProviderFailureMessageCannotPersistProviderPayload() async {
+        let previousMessage = AppPreferences.shared.bedrockLastErrorMessage
+        let previousDate = AppPreferences.shared.bedrockLastErrorDate
+        defer {
+            AppPreferences.shared.bedrockLastErrorMessage = previousMessage
+            AppPreferences.shared.bedrockLastErrorDate = previousDate
+        }
+
+        let provider = SensitiveFailingCleanupProvider()
+        let pipeline = TranscriptCleanupPipeline(
+            isEnabled: { true },
+            providerResolver: { provider },
+            vocabularyProvider: { [] },
+            appRuleProvider: { _ in nil }
+        )
+
+        let result = await pipeline.finalize("private transcript")
+
+        XCTAssertEqual(result.source, .rawFallback)
+        XCTAssertEqual(
+            AppPreferences.shared.bedrockLastErrorMessage,
+            TranscriptCleanupPipeline.safeFailureMessage
+        )
+        XCTAssertFalse(AppPreferences.shared.bedrockLastErrorMessage?.contains("private transcript") ?? true)
+    }
 }
 
 private final class FakeCleanupProvider: TranscriptCleanupProviding {
@@ -512,6 +538,23 @@ private final class FakeBedrockCleanupProvider: TranscriptCleanupProviding {
             modelID: BedrockCleanupConfiguration.defaultModelID
         )
     }
+}
+
+private final class SensitiveFailingCleanupProvider: TranscriptCleanupProviding {
+    let providerID: CleanupProviderID = .openAICompatible
+
+    func clean(
+        transcript: String,
+        systemPrompt: String,
+        cleanupMode: CleanupMode
+    ) async throws -> CleanupProviderResult {
+        throw SensitiveProviderError(message: "provider echoed: \(transcript)")
+    }
+}
+
+private struct SensitiveProviderError: LocalizedError {
+    let message: String
+    var errorDescription: String? { message }
 }
 
 private final class PartiallyFailingCleanupProvider: TranscriptCleanupProviding {

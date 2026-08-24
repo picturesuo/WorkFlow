@@ -136,15 +136,13 @@ class RecordingStore: ObservableObject {
         let appDirectory = applicationSupport.appendingPathComponent(Bundle.main.bundleIdentifier!)
         let dbPath = appDirectory.appendingPathComponent("recordings.sqlite")
 
-        print("Database path: \(dbPath.path)")
-
         do {
             try FileManager.default.createDirectory(
                 at: appDirectory, withIntermediateDirectories: true)
             dbQueue = try DatabaseQueue(path: dbPath.path)
             try setupDatabase()
         } catch {
-            fatalError("Failed to setup database: \(error)")
+            fatalError("Failed to set up the recording database.")
         }
     }
 
@@ -377,7 +375,7 @@ class RecordingStore: ObservableObject {
                     .fetchAll(db)
             }
         } catch {
-            print("Failed to get pending recordings: \(error)")
+            print("Failed to get pending recordings.")
             return []
         }
     }
@@ -392,7 +390,7 @@ class RecordingStore: ObservableObject {
                     .fetchOne(db)
             }
         } catch {
-            print("Failed to get next pending recording: \(error)")
+            print("Failed to get the next pending recording.")
             return nil
         }
     }
@@ -407,7 +405,7 @@ class RecordingStore: ObservableObject {
                     NotificationCenter.default.post(name: Self.recordingsDidUpdateNotification, object: nil)
                 }
             } catch {
-                print("Failed to add recording: \(error)")
+                print("Failed to add recording.")
             }
         }
     }
@@ -433,7 +431,7 @@ class RecordingStore: ObservableObject {
                     NotificationCenter.default.post(name: Self.recordingsDidUpdateNotification, object: nil)
                 }
             } catch {
-                print("Failed to update recording: \(error)")
+                print("Failed to update recording.")
             }
         }
     }
@@ -520,7 +518,7 @@ class RecordingStore: ObservableObject {
             }
             applyLocalProgressUpdate(id, transcription: transcription, progress: progress, status: status, isRegeneration: isRegeneration)
         } catch {
-            print("Failed to update recording progress: \(error)")
+            print("Failed to update recording progress.")
         }
     }
 
@@ -553,7 +551,7 @@ class RecordingStore: ObservableObject {
             )
             NotificationCenter.default.post(name: Self.recordingsDidUpdateNotification, object: nil)
         } catch {
-            print("Failed to complete recording: \(error)")
+            print("Failed to complete recording.")
         }
     }
 
@@ -578,7 +576,7 @@ class RecordingStore: ObservableObject {
                 recordings[index].cleanupRequested = cleanupRequested
             }
         } catch {
-            print("Failed to update cleanup preference: \(error)")
+            print("Failed to update the cleanup preference.")
         }
     }
 
@@ -594,7 +592,7 @@ class RecordingStore: ObservableObject {
             }
             applyLocalProgressUpdate(id, progress: progress, status: status, isRegeneration: isRegeneration)
         } catch {
-            print("Failed to update recording status: \(error)")
+            print("Failed to update recording status.")
         }
     }
 
@@ -617,7 +615,7 @@ class RecordingStore: ObservableObject {
                     NotificationCenter.default.post(name: Self.recordingsDidUpdateNotification, object: nil)
                 }
             } catch {
-                print("Failed to delete recording: \(error)")
+                print("Failed to delete recording.")
             }
         }
     }
@@ -628,7 +626,7 @@ class RecordingStore: ObservableObject {
             try? FileManager.default.removeItem(at: recording.url)
             NotificationCenter.default.post(name: Self.recordingsDidUpdateNotification, object: nil)
         } catch {
-            print("Failed to delete recording: \(error)")
+            print("Failed to delete recording.")
         }
     }
 
@@ -650,7 +648,7 @@ class RecordingStore: ObservableObject {
                     NotificationCenter.default.post(name: Self.recordingsDidUpdateNotification, object: nil)
                 }
             } catch {
-                print("Failed to delete all recordings: \(error)")
+                print("Failed to delete all recordings.")
             }
         }
     }
@@ -739,7 +737,7 @@ class RecordingStore: ObservableObject {
                 }
                 updatedAny = true
             } catch {
-                print("Failed to backfill duration for \(recording.id): \(error)")
+                print("Failed to backfill a recording duration.")
             }
         }
 
@@ -773,7 +771,7 @@ class RecordingStore: ObservableObject {
                     .fetchAll(db)
             }
         } catch {
-            print("Failed to search recordings: \(error)")
+            print("Failed to search recordings.")
             return []
         }
     }
@@ -788,7 +786,7 @@ class RecordingStore: ObservableObject {
                     .fetchAll(db)
             }
         } catch {
-            print("Failed to search recordings: \(error)")
+            print("Failed to search recordings.")
             return []
         }
     }

@@ -10,6 +10,8 @@ Include the affected version, macOS version, reproduction steps, and impact. Do 
 
 WorkFlow stores Bedrock and OpenAI-compatible bearer tokens in separate macOS Keychain items and never intentionally writes them to logs, preferences, recordings, exports, or the repository. A report that shows otherwise is high priority.
 
+Diagnostic logs contain operational status only. They do not include transcript text, dropped-file paths, or provider response bodies.
+
 After an identity upgrade, WorkFlow writes a legacy credential under its current Keychain service before removing the old item. Failed reads or writes leave the legacy item intact for a later retry and never print credential material.
 
 Rotate the AWS key immediately if you believe it has been exposed. AWS recommends automatically refreshed short-term Bedrock API keys for production; they expire within 12 hours. If you use a long-term key for personal exploration, set an explicit expiration and grant only the model-invocation permissions WorkFlow needs.

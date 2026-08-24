@@ -34,11 +34,11 @@ class FileDropHandler: ObservableObject {
                         continue
                     }
                     
-                    print("Adding to queue: \(url)")
+                    print("Adding dropped audio file to the transcription queue.")
                     await transcriptionQueue.addFileToQueue(url: url)
                     
                 } catch {
-                    print("Error loading dropped audio file: \(error)")
+                    print("Unable to load the dropped audio file.")
                 }
             }
         }

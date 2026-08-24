@@ -250,10 +250,9 @@ class ContentViewModel: ObservableObject {
                             self.recordings.insert(newRecording, at: 0)
                         }
 
-                        print("Transcription result: \(text)")
                     }
                 } catch {
-                    print("Error transcribing audio: \(error)")
+                    print("Audio-file transcription failed.")
                     try? FileManager.default.removeItem(at: tempURL)
                 }
 

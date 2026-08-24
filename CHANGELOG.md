@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Keep transcript text, dropped-file paths, and provider error payloads out of diagnostic logs.
+- Leave a failed targeted paste on the clipboard and show a visible recovery message instead of redirecting it into another app.
+- Simplify the source install instructions, fix README casing for case-sensitive clones, clarify Bedrock access troubleshooting, and separate deterministic tests from interactive UI tests.
 - Make the first-run shortcut truthful: new users get the permission-free key combination by default, while `Fn`/globe is a visible onboarding choice with Input Monitoring guidance and automatic hotkey activation after permission is granted.
 - Show model download sizes, percentage progress, and a clear ready state during onboarding.
 - Give WorkFlow its own macOS bundle identity while non-destructively copying preferences and History/models and securely moving provider credentials from earlier Chat and GlowScribe installs.

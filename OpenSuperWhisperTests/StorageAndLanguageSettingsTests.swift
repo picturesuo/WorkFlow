@@ -341,6 +341,24 @@ final class ClipboardRestoreTests: XCTestCase {
         XCTAssertGreaterThanOrEqual(ClipboardUtil.clipboardRestoreDelay, 1.0,
                                     "Browsers and Electron apps can service Cmd+V hundreds of ms after posting")
     }
+
+    func testMissingTargetDoesNotRedirectPasteAndKeepsTranscriptOnClipboard() {
+        let generalPasteboard = NSPasteboard.general
+        let previousContents = ClipboardUtil.saveCurrentPasteboardContents(from: generalPasteboard)
+        defer {
+            if let previousContents {
+                ClipboardUtil.restorePasteboardContents(previousContents, to: generalPasteboard)
+            } else {
+                generalPasteboard.clearContents()
+            }
+        }
+
+        let transcript = "newest dictation \(UUID().uuidString)"
+        let pasted = ClipboardUtil.insertText(transcript, targetPID: pid_t.max)
+
+        XCTAssertFalse(pasted)
+        XCTAssertEqual(generalPasteboard.string(forType: .string), transcript)
+    }
 }
 
 @MainActor

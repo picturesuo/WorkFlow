@@ -45,6 +45,7 @@ struct TranscriptCleanupOutcome: Equatable {
 
 final class TranscriptCleanupPipeline {
     static let shared = TranscriptCleanupPipeline()
+    static let safeFailureMessage = "Cleanup failed; local text was used."
 
     private let isEnabled: () -> Bool
     private let providerResolver: () throws -> any TranscriptCleanupProviding
@@ -212,8 +213,8 @@ final class TranscriptCleanupPipeline {
                 tokenEstimatorID: LocalTokenEstimator.identifier
             )
         } catch {
-            print("Transcript cleanup unavailable; using local transcript: \(error.localizedDescription)")
-            recordFailure(error.localizedDescription)
+            print(Self.safeFailureMessage)
+            recordFailure(Self.safeFailureMessage)
             return TranscriptCleanupOutcome(
                 text: localTranscript,
                 source: .rawFallback,

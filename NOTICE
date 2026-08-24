@@ -11,6 +11,11 @@ https://github.com/zachlatta/freeflow
 Copyright (c) 2026 Zach Latta
 Licensed under the MIT License.
 
+The bundled voice-activity-detection model is derived from Silero VAD:
+https://github.com/snakers4/silero-vad
+Copyright (c) 2020-present Silero Team
+Licensed under the MIT License.
+
 Amazon, AWS, Amazon Bedrock, and Amazon Nova are trademarks of Amazon.com,
 Inc. or its affiliates. WorkFlow is not affiliated with or endorsed by AWS,
 Wispr Flow, Superwhisper, OpenSuperWhisper, or FreeFlow.

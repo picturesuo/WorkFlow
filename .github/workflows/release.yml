@@ -49,8 +49,8 @@ jobs:
 
       - name: Import Developer ID certificate
         run: |
-          certificate_path="$RUNNER_TEMP/chat-release.p12"
-          keychain_path="$RUNNER_TEMP/chat-release.keychain-db"
+          certificate_path="$RUNNER_TEMP/workflow-release.p12"
+          keychain_path="$RUNNER_TEMP/workflow-release.keychain-db"
           printf '%s' "$BUILD_CERTIFICATE_BASE64" | base64 --decode > "$certificate_path"
           security create-keychain -p "$KEYCHAIN_PASSWORD" "$keychain_path"
           security set-keychain-settings -lut 21600 "$keychain_path"

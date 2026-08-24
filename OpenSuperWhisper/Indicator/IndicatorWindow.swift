@@ -10,6 +10,8 @@ enum RecordingState {
     case busy
     case noMicrophone
     case recordingFailed
+    case pasteFailed
+    case clipboardFailed
 }
 
 @MainActor
@@ -272,7 +274,14 @@ class IndicatorViewModel: ObservableObject {
                             return
                         }
                         
-                        insertText(text)
+                        guard insertText(text) else {
+                            let recoveryState: RecordingState =
+                                NSPasteboard.general.string(forType: .string) == Self.applyPostProcessing(text)
+                                ? .pasteFailed
+                                : .clipboardFailed
+                            showAutoDismissingMessage(recoveryState)
+                            return
+                        }
                         print(
                             "Final transcript source=\(cleanup.source) " +
                             "inputTokens=\(cleanup.inputTokens.map(String.init) ?? "unknown") " +
@@ -281,7 +290,7 @@ class IndicatorViewModel: ObservableObject {
                     }
                 } catch {
                     self.isFinalizing = false
-                    print("Error transcribing audio: \(error)")
+                    print("Audio transcription failed.")
                     try? FileManager.default.removeItem(at: tempURL)
                 }
                 
@@ -298,18 +307,19 @@ class IndicatorViewModel: ObservableObject {
         }
     }
     
-    func insertText(_ text: String) {
-        guard !text.isEmpty else { return }
+    @discardableResult
+    func insertText(_ text: String) -> Bool {
+        guard !text.isEmpty else { return false }
         let finalText = Self.applyPostProcessing(text)
         let prefs = AppPreferences.shared
         let appRule = TargetAppRuleStore.rule(for: pasteTarget?.bundleID)
 
         switch appRule?.pasteBehavior ?? .appDefault {
         case .never:
-            return
+            return true
         case .copyOnly:
             ClipboardUtil.copyToClipboard(finalText)
-            return
+            return true
         case .appDefault:
             break
         }
@@ -317,17 +327,17 @@ class IndicatorViewModel: ObservableObject {
         if prefs.autoPasteTranscription {
             if prefs.autoCopyToClipboard {
                 // Paste and keep in clipboard
-                ClipboardUtil.insertTextAndKeepInClipboard(finalText, targetPID: pasteTarget?.pid)
+                return ClipboardUtil.insertTextAndKeepInClipboard(finalText, targetPID: pasteTarget?.pid)
             } else {
                 // Paste but restore original clipboard (legacy behavior)
-                ClipboardUtil.insertText(finalText, targetPID: pasteTarget?.pid)
+                return ClipboardUtil.insertText(finalText, targetPID: pasteTarget?.pid)
             }
         } else if prefs.autoCopyToClipboard {
             // Only copy to clipboard, don't paste
             ClipboardUtil.copyToClipboard(finalText)
         }
         // If both are false, do nothing
-
+        return true
     }
     
     static func applyPostProcessing(_ text: String) -> String {
@@ -516,6 +526,30 @@ struct IndicatorWindow: View {
                         .frame(width: 24)
 
                     Text("Recording failed")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundColor(.orange)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+
+            case .pasteFailed:
+                HStack(spacing: 8) {
+                    Image(systemName: "doc.on.clipboard")
+                        .foregroundColor(.orange)
+                        .frame(width: 24)
+
+                    Text("Paste failed — copied instead")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundColor(.orange)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+
+            case .clipboardFailed:
+                HStack(spacing: 8) {
+                    Image(systemName: "exclamationmark.triangle")
+                        .foregroundColor(.orange)
+                        .frame(width: 24)
+
+                    Text("Paste failed — saved in History")
                         .font(.system(size: 13, weight: .semibold))
                         .foregroundColor(.orange)
                 }
