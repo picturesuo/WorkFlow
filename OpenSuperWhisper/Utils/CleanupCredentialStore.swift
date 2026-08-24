@@ -2,30 +2,26 @@ import Foundation
 import Security
 
 enum CleanupCredentialStore {
+    private static let lock = NSRecursiveLock()
     private static let service = "\(AppIdentity.bundleIdentifier).cleanup"
     private static let legacyServices = AppIdentity.legacyBundleIdentifiers.map { "\($0).cleanup" }
     private static let account = "openai-compatible"
 
     static func loadAPIKey() throws -> String? {
+        lock.lock()
+        defer { lock.unlock() }
+
         if let currentValue = try loadAPIKey(service: service) {
+            deleteLegacyAPIKeys()
             return currentValue
         }
 
-        var firstLegacyError: Error?
         for legacyService in legacyServices {
-            let legacyValue: String?
-            do {
-                legacyValue = try loadAPIKey(service: legacyService)
-            } catch {
-                if firstLegacyError == nil { firstLegacyError = error }
-                continue
-            }
-            guard let legacyValue else { continue }
+            guard let legacyValue = try loadAPIKey(service: legacyService) else { continue }
             try saveAPIKey(legacyValue)
             try? deleteAPIKey(service: legacyService)
             return legacyValue
         }
-        if let firstLegacyError { throw firstLegacyError }
         return nil
     }
 
@@ -48,6 +44,9 @@ enum CleanupCredentialStore {
     }
 
     static func saveAPIKey(_ value: String) throws {
+        lock.lock()
+        defer { lock.unlock() }
+
         let token = value.trimmingCharacters(in: .whitespacesAndNewlines)
         if token.isEmpty {
             try deleteAPIKey()
@@ -72,9 +71,18 @@ enum CleanupCredentialStore {
     }
 
     static func deleteAPIKey() throws {
+        lock.lock()
+        defer { lock.unlock() }
+
         try deleteAPIKey(service: service)
         for legacyService in legacyServices {
             try deleteAPIKey(service: legacyService)
+        }
+    }
+
+    private static func deleteLegacyAPIKeys() {
+        for legacyService in legacyServices {
+            try? deleteAPIKey(service: legacyService)
         }
     }
 

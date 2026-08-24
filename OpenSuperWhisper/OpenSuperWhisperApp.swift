@@ -107,6 +107,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
         guard !OpenSuperWhisperApp.isRunningTests else { return }
 
         setupStatusBarItem()
+        migrateLegacyCredentialsInBackground()
 
         // The WindowGroup window usually does not exist yet at this point:
         // SwiftUI creates it after applicationDidFinishLaunching, so it is
@@ -161,6 +162,22 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
 
         Task { @MainActor in
             await RecordingStore.shared.backfillMissingDurations()
+        }
+    }
+
+    private func migrateLegacyCredentialsInBackground() {
+        Task.detached(priority: .utility) {
+            do {
+                _ = try BedrockCredentialStore.loadAPIKey()
+            } catch {
+                print("WorkFlow could not migrate a legacy Bedrock credential.")
+            }
+
+            do {
+                _ = try CleanupCredentialStore.loadAPIKey()
+            } catch {
+                print("WorkFlow could not migrate a legacy cleanup credential.")
+            }
         }
     }
 

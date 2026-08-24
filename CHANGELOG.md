@@ -5,6 +5,7 @@
 - Make the first-run shortcut truthful: new users get the permission-free key combination by default, while `Fn`/globe is a visible onboarding choice with Input Monitoring guidance and automatic hotkey activation after permission is granted.
 - Show model download sizes, percentage progress, and a clear ready state during onboarding.
 - Give WorkFlow its own macOS bundle identity while non-destructively copying preferences and History/models and securely moving provider credentials from earlier Chat and GlowScribe installs.
+- Move legacy provider credentials in the background at launch and retry stale Keychain-item cleanup without blocking the app window.
 - Explain the one-time macOS permission re-grant required after the identity migration.
 - Keep the release checks covering first-run shortcut behavior and Escape protection.
 
