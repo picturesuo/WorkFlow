@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Label the main record control for VoiceOver, align Debug and test builds with the documented macOS 14 minimum, and make model/dependency attribution explicit.
 - Keep transcript text, dropped-file paths, and provider error payloads out of diagnostic logs.
 - Leave a failed targeted paste on the clipboard and show a visible recovery message instead of redirecting it into another app.
 - Simplify the source install instructions, fix README casing for case-sensitive clones, clarify Bedrock access troubleshooting, and separate deterministic tests from interactive UI tests.

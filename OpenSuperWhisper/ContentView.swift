@@ -576,6 +576,16 @@ struct ContentView: View {
                             }
                         }
                         .buttonStyle(.plain)
+                        .accessibilityLabel(
+                            viewModel.state == .decoding ? "Transcribing" :
+                                viewModel.state == .connecting ? "Preparing transcription" :
+                                viewModel.isRecording ? "Stop recording" : "Start recording"
+                        )
+                        .accessibilityHint(
+                            viewModel.isRecording
+                                ? "Stops recording and begins transcription"
+                                : "Starts a new dictation"
+                        )
                         .disabled(viewModel.transcriptionService.isLoading || viewModel.transcriptionService.isTranscribing || viewModel.transcriptionQueue.isProcessing || viewModel.state == .decoding || viewModel.microphoneService.availableMicrophones.isEmpty || meetingController.isBusy)
                         .padding(.top, 24)
                         .padding(.bottom, 16)

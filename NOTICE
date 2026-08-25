@@ -16,6 +16,20 @@ https://github.com/snakers4/silero-vad
 Copyright (c) 2020-present Silero Team
 Licensed under the MIT License.
 
+Parakeet transcription uses FluidAudio:
+https://github.com/FluidInference/FluidAudio
+Licensed under the Apache License, Version 2.0.
+
+Parakeet Core ML model files are downloaded on demand from FluidInference:
+https://huggingface.co/FluidInference/parakeet-tdt-0.6b-v3-coreml
+Based on NVIDIA Parakeet TDT and licensed under CC BY 4.0.
+
+Whisper inference, the ggml test model, and the JFK test-audio fixture come
+from whisper.cpp and its model repository:
+https://github.com/ggml-org/whisper.cpp
+https://huggingface.co/ggerganov/whisper.cpp
+Licensed under the MIT License.
+
 Amazon, AWS, Amazon Bedrock, and Amazon Nova are trademarks of Amazon.com,
 Inc. or its affiliates. WorkFlow is not affiliated with or endorsed by AWS,
-Wispr Flow, Superwhisper, OpenSuperWhisper, or FreeFlow.
+NVIDIA, FluidInference, Wispr Flow, Superwhisper, OpenSuperWhisper, or FreeFlow.
