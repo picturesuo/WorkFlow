@@ -1467,7 +1467,7 @@ struct SettingsView: View {
                                 .padding(.vertical, 10)
                                 .background(Color(.textBackgroundColor).opacity(0.5))
                                 .cornerRadius(8)
-                                .onChange(of: viewModel.modifierOnlyHotkey) { newPrimary in
+                                .onChange(of: viewModel.modifierOnlyHotkey) { _, newPrimary in
                                     if viewModel.secondaryModifierOnlyHotkey == newPrimary {
                                         viewModel.secondaryModifierOnlyHotkey = .none
                                     }
