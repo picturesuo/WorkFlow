@@ -383,6 +383,38 @@ struct ContentView: View {
         return modifier != .none
     }
 
+    private var headerStatusText: String? {
+        if viewModel.isRecording {
+            return "Listening · \(TextUtil.formatDuration(viewModel.recordingDuration))"
+        }
+        if viewModel.state == .decoding {
+            return "Transcribing…"
+        }
+        if viewModel.state == .connecting {
+            return "Connecting…"
+        }
+        if meetingController.isRecording {
+            return "Meeting recording"
+        }
+        return nil
+    }
+
+    private var dockCaptionText: String {
+        if viewModel.isRecording {
+            return "Tap to stop · \(TextUtil.formatDuration(viewModel.recordingDuration))"
+        }
+        if viewModel.state == .decoding {
+            return "Transcribing…"
+        }
+        if viewModel.state == .connecting {
+            return "Preparing…"
+        }
+        if !currentShortcutDescription.isEmpty {
+            return "\(currentShortcutDescription) to dictate anywhere"
+        }
+        return "Tap to start dictating"
+    }
+
     var body: some View {
         VStack {
             if permissionsManager.hasCompletedInitialCheck,
@@ -392,6 +424,78 @@ struct ContentView: View {
                 PermissionsView(permissionsManager: permissionsManager)
             } else {
                 VStack(spacing: 0) {
+                    // Header: brand, live status, and window controls.
+                    HStack(spacing: WFSpace.sm) {
+                        Image(systemName: "waveform")
+                            .font(.system(size: 18, weight: .semibold))
+                            .foregroundStyle(ThemePalette.brandGradient)
+
+                        Text(AppIdentity.productName)
+                            .font(.title3.weight(.semibold))
+
+                        if let headerStatusText {
+                            Text(headerStatusText)
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                                .monospacedDigit()
+                                .contentTransition(.numericText())
+                                .lineLimit(1)
+                        }
+
+                        Spacer(minLength: WFSpace.sm)
+
+                        HStack(spacing: WFSpace.sm) {
+                            ToolbarIconButton(
+                                systemImage: meetingController.isRecording ? "stop.fill" : "person.2.wave.2.fill",
+                                help: meetingController.statusLabel,
+                                accessibilityLabel: meetingController.statusLabel,
+                                tint: meetingController.isRecording ? .red : .secondary
+                            ) {
+                                if meetingController.isRecording {
+                                    Task { await meetingController.stop() }
+                                } else {
+                                    meetingTitle = MeetingSessionController.defaultTitle()
+                                    showMeetingNamePrompt = true
+                                }
+                            }
+
+                            MicrophonePickerIconView(microphoneService: viewModel.microphoneService)
+
+                            if !viewModel.recordings.isEmpty {
+                                ToolbarIconButton(
+                                    systemImage: "trash",
+                                    help: "Delete all recordings",
+                                    accessibilityLabel: "Delete all recordings"
+                                ) {
+                                    showDeleteConfirmation = true
+                                }
+                                .confirmationDialog(
+                                    "Delete All Recordings",
+                                    isPresented: $showDeleteConfirmation,
+                                    titleVisibility: .visible
+                                ) {
+                                    Button("Delete All", role: .destructive) {
+                                        viewModel.deleteAllRecordings()
+                                    }
+                                    Button("Cancel", role: .cancel) {}
+                                } message: {
+                                    Text("Are you sure you want to delete all recordings? This action cannot be undone.")
+                                }
+                                .interactiveDismissDisabled()
+                            }
+
+                            ToolbarIconButton(
+                                systemImage: "gear",
+                                help: "Settings",
+                                accessibilityLabel: "Open settings"
+                            ) {
+                                isSettingsPresented.toggle()
+                            }
+                        }
+                    }
+                    .padding(.horizontal, WFSpace.lg)
+                    .padding(.top, 28)
+
                     if permissionsManager.hasCompletedInitialCheck,
                        requiresInputMonitoring,
                        !permissionsManager.isInputMonitoringPermissionGranted {
@@ -407,13 +511,18 @@ struct ContentView: View {
                             .controlSize(.small)
                             .accessibilityLabel("Enable Input Monitoring")
                         }
-                        .padding(.horizontal, 16)
+                        .padding(.horizontal, WFSpace.md)
                         .padding(.vertical, 10)
-                        .background(Color.orange.opacity(0.12))
+                        .background(
+                            RoundedRectangle(cornerRadius: WFRadius.control, style: .continuous)
+                                .fill(Color.orange.opacity(0.12))
+                        )
+                        .padding(.horizontal, WFSpace.lg)
+                        .padding(.top, WFSpace.md)
                     }
 
                     // Search bar
-                    HStack {
+                    HStack(spacing: WFSpace.sm) {
                         Image(systemName: "magnifyingglass")
                             .foregroundColor(.secondary)
 
@@ -437,28 +546,29 @@ struct ContentView: View {
                             .buttonStyle(.plain)
                         }
                     }
-                    .padding(10)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 7)
+                    .frame(height: 32)
                     .background(ThemePalette.panelSurface(colorScheme))
+                    .clipShape(RoundedRectangle(cornerRadius: WFRadius.control, style: .continuous))
                     .overlay(
-                        RoundedRectangle(cornerRadius: 20)
+                        RoundedRectangle(cornerRadius: WFRadius.control, style: .continuous)
                             .stroke(ThemePalette.panelBorder(colorScheme), lineWidth: 1)
                     )
-                    .cornerRadius(20)
-                    .padding([.horizontal, .top])
+                    .padding(.horizontal, WFSpace.lg)
+                    .padding(.top, WFSpace.md)
 
                     ScrollView(showsIndicators: false) {
                         if viewModel.recordings.isEmpty {
-                            VStack(spacing: 16) {
+                            VStack(spacing: WFSpace.md) {
                                 if !debouncedSearchText.isEmpty {
                                     // Show "no results" for search
                                     Image(systemName: "magnifyingglass")
-                                        .font(.system(size: 40))
-                                        .foregroundColor(.secondary)
-                                        .padding(.top, 40)
+                                        .font(.system(size: 44))
+                                        .foregroundStyle(ThemePalette.brandGradient)
 
                                     Text("No results found")
                                         .font(.headline)
-                                        .foregroundColor(.secondary)
 
                                     Text("Try different search terms")
                                         .font(.subheadline)
@@ -467,53 +577,44 @@ struct ContentView: View {
                                         .padding(.horizontal)
                                 } else {
                                     // Show "start recording" tip
-                                    Image(systemName: "arrow.down.circle")
-                                        .font(.system(size: 40))
-                                        .foregroundColor(.secondary)
-                                        .padding(.top, 40)
+                                    Image(systemName: "waveform.circle")
+                                        .font(.system(size: 44))
+                                        .foregroundStyle(ThemePalette.brandGradient)
 
-                                    Text("No recordings yet")
+                                    Text("No dictations yet")
                                         .font(.headline)
-                                        .foregroundColor(.secondary)
-
-                                    Text("Tap the record button below to get started")
-                                        .font(.subheadline)
-                                        .foregroundColor(.secondary)
-                                        .multilineTextAlignment(.center)
-                                        .padding(.horizontal)
 
                                     if !currentShortcutDescription.isEmpty {
-                                        VStack(spacing: 8) {
-                                            Text("Pro Tip:")
+                                        HStack(spacing: WFSpace.xs) {
+                                            Text("Press")
                                                 .font(.subheadline)
                                                 .foregroundColor(.secondary)
-
-                                            HStack(spacing: 4) {
-                                                Text("Press")
-                                                    .font(.subheadline)
-                                                    .foregroundColor(.secondary)
-                                                Text(currentShortcutDescription)
-                                                    .font(.system(size: 16, weight: .medium))
-                                                    .padding(.horizontal, 6)
-                                                    .padding(.vertical, 3)
-                                                    .background(Color.secondary.opacity(0.2))
-                                                    .cornerRadius(6)
-                                                Text("anywhere")
-                                                    .font(.subheadline)
-                                                    .foregroundColor(.secondary)
-                                            }
-
-                                            Text("to quickly record and paste text")
+                                            KeyCapView(text: currentShortcutDescription)
+                                            Text("anywhere to dictate into any app.")
                                                 .font(.subheadline)
                                                 .foregroundColor(.secondary)
                                         }
-                                        .padding(.top, 16)
+                                        .padding(.horizontal)
+                                    } else {
+                                        Text("Press the record button below to get started.")
+                                            .font(.subheadline)
+                                            .foregroundColor(.secondary)
+                                            .multilineTextAlignment(.center)
+                                            .padding(.horizontal)
                                     }
+
+                                    HStack(spacing: WFSpace.xs) {
+                                        Image(systemName: "arrow.down.doc")
+                                        Text("Drop an audio file here to transcribe it.")
+                                    }
+                                    .font(.caption)
+                                    .foregroundColor(.secondary)
                                 }
                             }
                             .frame(maxWidth: .infinity)
+                            .padding(.top, 48)
                         } else {
-                            LazyVStack(spacing: 8) {
+                            LazyVStack(spacing: WFSpace.sm) {
                                 ForEach(viewModel.recordings) { recording in
                                     RecordingRow(
                                         recording: recording,
@@ -541,7 +642,7 @@ struct ContentView: View {
                                         .padding()
                                 }
                             }
-                            .padding(.horizontal)
+                            .padding(.horizontal, WFSpace.lg)
                             .padding(.top, 16)
                         }
                     }
@@ -559,10 +660,10 @@ struct ContentView: View {
                                     endPoint: .bottom
                                 )
                             )
-                            .frame(height: 20)
+                            .frame(height: 16)
                     }
 
-                    VStack(spacing: 16) {
+                    VStack(spacing: WFSpace.md) {
                         Button(action: {
                             if viewModel.isRecording {
                                 viewModel.startDecoding()
@@ -573,7 +674,7 @@ struct ContentView: View {
                             if viewModel.state == .decoding || viewModel.state == .connecting {
                                 ProgressView()
                                     .scaleEffect(1.0)
-                                    .frame(width: 48, height: 48)
+                                    .frame(width: 56, height: 56)
                                     .contentTransition(.symbolEffect(.replace))
                             } else {
                                 MainRecordButton(isRecording: viewModel.isRecording)
@@ -591,10 +692,16 @@ struct ContentView: View {
                                 : "Starts a new dictation"
                         )
                         .disabled(viewModel.transcriptionService.isLoading || viewModel.transcriptionService.isTranscribing || viewModel.transcriptionQueue.isProcessing || viewModel.state == .decoding || viewModel.microphoneService.availableMicrophones.isEmpty || meetingController.isBusy)
-                        .padding(.top, 24)
-                        .padding(.bottom, 16)
+                        .sensoryFeedback(.impact(weight: .light), trigger: viewModel.isRecording)
                         .animation(.spring(response: 0.3, dampingFraction: 0.7), value: viewModel.isRecording)
                         .animation(.spring(response: 0.3, dampingFraction: 0.7), value: viewModel.state)
+
+                        Text(dockCaptionText)
+                            .font(.caption)
+                            .monospacedDigit()
+                            .foregroundColor(.secondary)
+                            .contentTransition(.numericText())
+                            .multilineTextAlignment(.center)
 
                         VStack(alignment: .leading, spacing: 5) {
                             Picker("Writing mode", selection: cleanupModeBinding) {
@@ -612,120 +719,21 @@ struct ContentView: View {
                                 .fixedSize(horizontal: false, vertical: true)
                         }
                         .padding(.horizontal, 4)
-
-                        // Нижняя панель с подсказкой и кнопками управления
-                        HStack(alignment: .bottom) {
-                            VStack(alignment: .leading, spacing: 8) {
-                                // Подсказка о шорткате
-                                HStack(spacing: 6) {
-                                    Text(currentShortcutDescription)
-                                        .font(.caption)
-                                        .foregroundColor(.secondary)
-                                    Text("to show mini recorder")
-                                        .font(.caption)
-                                        .foregroundColor(.secondary)
-                                }
-                                .padding(.leading, 4)
-
-                                // Подсказка о drag-n-drop
-                                HStack(spacing: 6) {
-                                    Image(systemName: "arrow.down.doc.fill")
-                                        .foregroundColor(.secondary)
-                                        .imageScale(.medium)
-                                    Text("Drop audio file here to transcribe")
-                                        .font(.caption)
-                                        .foregroundColor(.secondary)
-                                }
-                                .padding(.leading, 4)
-                            }
-
-                            Spacer()
-
-                            HStack(spacing: 12) {
-                                Button {
-                                    if meetingController.isRecording {
-                                        Task { await meetingController.stop() }
-                                    } else {
-                                        meetingTitle = MeetingSessionController.defaultTitle()
-                                        showMeetingNamePrompt = true
-                                    }
-                                } label: {
-                                    Image(systemName: meetingController.isRecording ? "stop.fill" : "person.2.wave.2.fill")
-                                        .font(.title3)
-                                        .foregroundColor(meetingController.isRecording ? .red : .secondary)
-                                        .frame(width: 32, height: 32)
-                                        .background(ThemePalette.panelSurface(colorScheme))
-                                        .overlay(
-                                            RoundedRectangle(cornerRadius: 8)
-                                                .stroke(ThemePalette.panelBorder(colorScheme), lineWidth: 1)
-                                        )
-                                        .cornerRadius(8)
-                                }
-                                .buttonStyle(.plain)
-                                .help(meetingController.statusLabel)
-                                .accessibilityLabel(meetingController.statusLabel)
-
-                                MicrophonePickerIconView(microphoneService: viewModel.microphoneService)
-                                
-                                if !viewModel.recordings.isEmpty {
-                                    Button(action: {
-                                        showDeleteConfirmation = true
-                                    }) {
-                                        Image(systemName: "trash")
-                                            .font(.title3)
-                                            .foregroundColor(.secondary)
-                                            .frame(width: 32, height: 32)
-                                            .background(ThemePalette.panelSurface(colorScheme))
-                                            .overlay(
-                                                RoundedRectangle(cornerRadius: 8)
-                                                    .stroke(ThemePalette.panelBorder(colorScheme), lineWidth: 1)
-                                            )
-                                            .cornerRadius(8)
-                                    }
-                                    .buttonStyle(.plain)
-                                    .help("Delete all recordings")
-                                    .accessibilityLabel("Delete all recordings")
-                                    .confirmationDialog(
-                                        "Delete All Recordings",
-                                        isPresented: $showDeleteConfirmation,
-                                        titleVisibility: .visible
-                                    ) {
-                                        Button("Delete All", role: .destructive) {
-                                            viewModel.deleteAllRecordings()
-                                        }
-                                        Button("Cancel", role: .cancel) {}
-                                    } message: {
-                                        Text("Are you sure you want to delete all recordings? This action cannot be undone.")
-                                    }
-                                    .interactiveDismissDisabled()
-                                }
-                                
-                                Button(action: {
-                                    isSettingsPresented.toggle()
-                                }) {
-                                    Image(systemName: "gear")
-                                        .font(.title3)
-                                        .foregroundColor(.secondary)
-                                        .frame(width: 32, height: 32)
-                                        .background(ThemePalette.panelSurface(colorScheme))
-                                        .overlay(
-                                            RoundedRectangle(cornerRadius: 8)
-                                                .stroke(ThemePalette.panelBorder(colorScheme), lineWidth: 1)
-                                        )
-                                        .cornerRadius(8)
-                                }
-                                .buttonStyle(.plain)
-                                .help("Settings")
-                                .accessibilityLabel("Open settings")
-                            }
-                        }
                     }
-                    .padding()
+                    .frame(maxWidth: .infinity)
+                    .padding(WFSpace.lg)
+                    .background(ThemePalette.panelSurface(colorScheme))
+                    .overlay(alignment: .top) {
+                        Rectangle()
+                            .fill(ThemePalette.hairline(colorScheme))
+                            .frame(height: 1)
+                    }
                 }
             }
         }
         .frame(minWidth: 400, idealWidth: 400)
         .background(ThemePalette.windowBackground(colorScheme))
+        .background(WindowChromeConfigurator())
         .onAppear {
             viewModel.loadInitialData()
         }
@@ -755,13 +763,18 @@ struct ContentView: View {
 
             if viewModel.transcriptionService.isLoading && isPermissionsGranted {
                 ZStack {
-                    Color.black.opacity(0.3)
-                    VStack(spacing: 16) {
+                    Rectangle()
+                        .fill(.regularMaterial)
+                    VStack(spacing: WFSpace.md) {
                         ProgressView()
                             .scaleEffect(1.5)
-                        Text("Loading Whisper Model...")
-                            .foregroundColor(.white)
+                            .tint(BrandPalette.violet)
+                        Text("Loading speech model…")
                             .font(.headline)
+                            .foregroundColor(.primary)
+                        Text("This only takes a moment the first time.")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
                     }
                 }
                 .ignoresSafeArea()
@@ -822,8 +835,8 @@ struct PermissionsView: View {
 
     var body: some View {
         VStack(spacing: 20) {
-            Text("Required Permissions")
-                .font(.title)
+            Text("Permissions needed")
+                .font(.title2.weight(.semibold))
                 .padding()
 
             if didMigrateFromChat {
@@ -866,8 +879,8 @@ struct PermissionRow: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack {
-                Image(systemName: isGranted ? "checkmark.circle.fill" : "xmark.circle.fill")
-                    .foregroundColor(isGranted ? .green : .red)
+                Image(systemName: isGranted ? "checkmark.circle.fill" : "exclamationmark.circle.fill")
+                    .foregroundColor(isGranted ? .green : .orange)
 
                 Text(title)
                     .font(.headline)
@@ -888,8 +901,7 @@ struct PermissionRow: View {
                 .foregroundColor(.secondary)
         }
         .padding()
-        .background(ThemePalette.panelSurface(colorScheme))
-        .cornerRadius(10)
+        .surfaceCard()
     }
 }
 
@@ -1553,24 +1565,25 @@ struct MicrophonePickerIconView: View {
 struct MainRecordButton: View {
     let isRecording: Bool
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var pulse = false
 
     private var buttonColor: Color {
         ThemePalette.recordButtonBase(colorScheme)
     }
 
+    private var recordingGradient: LinearGradient {
+        LinearGradient(
+            colors: [Color.red.opacity(0.85), Color.red],
+            startPoint: .topLeading,
+            endPoint: .bottomTrailing
+        )
+    }
+
     var body: some View {
         Circle()
-            .fill(
-                LinearGradient(
-                    colors: [
-                        isRecording ? Color.red.opacity(0.8) : buttonColor.opacity(0.8),
-                        isRecording ? Color.red : buttonColor.opacity(0.9)
-                    ],
-                    startPoint: .topLeading,
-                    endPoint: .bottomTrailing
-                )
-            )
-            .frame(width: 48, height: 48)
+            .fill(isRecording ? AnyShapeStyle(recordingGradient) : AnyShapeStyle(ThemePalette.brandGradient))
+            .frame(width: 56, height: 56)
             .shadow(
                 color: isRecording ? .red.opacity(0.5) : buttonColor.opacity(0.3),
                 radius: 12,
@@ -1591,52 +1604,30 @@ struct MainRecordButton: View {
                         lineWidth: 1
                     )
             }
+            .overlay {
+                Image(systemName: isRecording ? "stop.fill" : "mic.fill")
+                    .font(.system(size: 20, weight: .semibold))
+                    .foregroundStyle(.white)
+                    .contentTransition(.symbolEffect(.replace))
+            }
+            .background {
+                if isRecording && !reduceMotion {
+                    Circle()
+                        .stroke(Color.red.opacity(0.35), lineWidth: 2)
+                        .frame(width: 56, height: 56)
+                        .scaleEffect(pulse ? 1.35 : 1.0)
+                        .opacity(pulse ? 0 : 1)
+                        .onAppear {
+                            pulse = false
+                            withAnimation(.easeOut(duration: 1.4).repeatForever(autoreverses: false)) {
+                                pulse = true
+                            }
+                        }
+                        .onDisappear { pulse = false }
+                }
+            }
             .scaleEffect(isRecording ? 0.9 : 1.0)
             .animation(.spring(response: 0.3, dampingFraction: 0.6), value: isRecording)
-    }
-}
-
-enum ThemePalette {
-    static func windowBackground(_ scheme: ColorScheme) -> Color {
-        scheme == .dark
-            ? Color(NSColor.underPageBackgroundColor)
-            : .white
-    }
-
-    static func panelSurface(_ scheme: ColorScheme) -> Color {
-        scheme == .dark
-            ? BrandPalette.deepViolet.opacity(0.12)
-            : BrandPalette.lavender.opacity(0.10)
-    }
-
-    static func panelBorder(_ scheme: ColorScheme) -> Color {
-        scheme == .dark
-            ? BrandPalette.violet.opacity(0.24)
-            : BrandPalette.violet.opacity(0.18)
-    }
-
-    static func cardBackground(_ scheme: ColorScheme) -> Color {
-        scheme == .dark
-            ? Color(NSColor.controlBackgroundColor)
-            : Color.white
-    }
-
-    static func cardBorder(_ scheme: ColorScheme) -> Color {
-        scheme == .dark
-            ? Color(NSColor.separatorColor)
-            : Color(red: 0.86, green: 0.88, blue: 0.92)
-    }
-
-    static func recordButtonBase(_ scheme: ColorScheme) -> Color {
-        BrandPalette.violet
-    }
-
-    static func iconAccent(_ scheme: ColorScheme) -> Color {
-        BrandPalette.violet
-    }
-
-    static func linkText(_ scheme: ColorScheme) -> Color {
-        BrandPalette.violet
     }
 }
 
