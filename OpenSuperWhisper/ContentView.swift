@@ -914,6 +914,7 @@ struct RecordingRow: View {
     @State private var showTranscription = false
     @State private var isHovered = false
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     private var isPlaying: Bool {
         audioRecorder.isPlaying && audioRecorder.currentlyPlayingURL == recording.url
@@ -1074,7 +1075,7 @@ struct RecordingRow: View {
                                 
                                 Circle()
                                     .trim(from: 0, to: CGFloat(recording.progress))
-                                    .stroke(Color.secondary, style: StrokeStyle(lineWidth: 2, lineCap: .round))
+                                    .stroke(BrandPalette.violet, style: StrokeStyle(lineWidth: 2, lineCap: .round))
                                     .rotationEffect(.degrees(-90))
                                     .animation(.linear(duration: 0.1), value: recording.progress)
                             }
@@ -1133,7 +1134,6 @@ struct RecordingRow: View {
                             .transition(.opacity.animation(.easeInOut(duration: 0.3)))
                     }
                 }
-                .padding(.horizontal, 4)
                 .padding(.top, isPending && !isRegenerating ? 4 : 8)
             } else if !isPending {
                 Text("No speech detected")
@@ -1143,24 +1143,24 @@ struct RecordingRow: View {
                     .padding(.top, 8)
             }
 
-            Divider()
+            Rectangle()
+                .fill(ThemePalette.hairline(colorScheme))
+                .frame(height: 1)
                 .padding(.horizontal, 12)
                 .padding(.vertical, 8)
 
             HStack(alignment: .center, spacing: 8) {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(recording.timestamp, style: .date)
-                        .font(.subheadline)
-                        .foregroundColor(.secondary)
-
-                    HStack(spacing: 4) {
-                        Text(recording.timestamp, style: .time)
-                        Text("·")
-                        Text(TextUtil.formatDuration(recording.duration))
-                    }
-                    .font(.caption)
-                    .foregroundColor(.secondary)
+                HStack(spacing: 4) {
+                    Text(WFDateFormat.dayLabel(recording.timestamp))
+                    Text("·")
+                    Text(recording.timestamp, style: .time)
+                    Text("·")
+                    Text(TextUtil.formatDuration(recording.duration))
                 }
+                .font(.caption)
+                .monospacedDigit()
+                .foregroundColor(.secondary)
+                .lineLimit(1)
 
                 if let cleanupBadgeLabel {
                     Text(cleanupBadgeLabel)
@@ -1168,7 +1168,7 @@ struct RecordingRow: View {
                         .foregroundColor(cleanupBadgeColor)
                         .padding(.horizontal, 7)
                         .padding(.vertical, 3)
-                        .background(cleanupBadgeColor.opacity(0.1))
+                        .background(cleanupBadgeColor.opacity(0.10))
                         .clipShape(Capsule())
                         .lineLimit(1)
                         .help(cleanupBadgeHelp)
@@ -1180,7 +1180,7 @@ struct RecordingRow: View {
                         .foregroundColor(BrandPalette.lavender)
                         .padding(.horizontal, 7)
                         .padding(.vertical, 3)
-                        .background(BrandPalette.violet.opacity(0.14))
+                        .background(BrandPalette.violet.opacity(0.10))
                         .clipShape(Capsule())
                         .lineLimit(1)
                         .help(efficiencyBadgeHelp)
@@ -1203,7 +1203,7 @@ struct RecordingRow: View {
                                 
                                 Circle()
                                     .trim(from: 0, to: CGFloat(recording.progress))
-                                    .stroke(Color.secondary, style: StrokeStyle(lineWidth: 2, lineCap: .round))
+                                    .stroke(BrandPalette.violet, style: StrokeStyle(lineWidth: 2, lineCap: .round))
                                     .rotationEffect(.degrees(-90))
                                     .animation(.linear(duration: 0.1), value: recording.progress)
                             }
@@ -1226,7 +1226,7 @@ struct RecordingRow: View {
 
                 Spacer()
 
-                HStack(spacing: 16) {
+                HStack(spacing: 12) {
                     if !isPending && recording.status != .failed && (isHovered || isPlaying) {
                         Button(action: {
                             if isPlaying {
@@ -1236,11 +1236,11 @@ struct RecordingRow: View {
                             }
                         }) {
                             Image(systemName: isPlaying ? "stop.circle.fill" : "play.circle.fill")
-                                .font(.system(size: 20))
+                                .font(.system(size: 16, weight: .medium))
                                 .foregroundColor(isPlaying ? .red : ThemePalette.iconAccent(colorScheme))
                                 .contentTransition(.symbolEffect(.replace))
                         }
-                        .buttonStyle(.plain)
+                        .buttonStyle(WFPressableStyle())
                         .accessibilityLabel(isPlaying ? "Stop recording playback" : "Play recording")
                         .transition(.opacity)
 
@@ -1251,10 +1251,10 @@ struct RecordingRow: View {
                             )
                         }) {
                             Image(systemName: "doc.on.doc.fill")
-                                .font(.system(size: 18))
+                                .font(.system(size: 16, weight: .medium))
                                 .foregroundColor(.secondary)
                         }
-                        .buttonStyle(.plain)
+                        .buttonStyle(WFPressableStyle())
                         .help("Copy entire text")
                         .accessibilityLabel("Copy entire transcription")
                         .transition(.opacity)
@@ -1265,10 +1265,10 @@ struct RecordingRow: View {
                             onRegenerate()
                         }) {
                             Image(systemName: "arrow.clockwise")
-                                .font(.system(size: 18))
+                                .font(.system(size: 16, weight: .medium))
                                 .foregroundColor(.secondary)
                         }
-                        .buttonStyle(.plain)
+                        .buttonStyle(WFPressableStyle())
                         .help("Regenerate transcription")
                         .accessibilityLabel("Regenerate transcription")
                         .transition(.opacity)
@@ -1282,10 +1282,10 @@ struct RecordingRow: View {
                             onDelete()
                         }) {
                             Image(systemName: "trash.fill")
-                                .font(.system(size: 18))
+                                .font(.system(size: 16, weight: .medium))
                                 .foregroundColor(.secondary)
                         }
-                        .buttonStyle(.plain)
+                        .buttonStyle(WFPressableStyle())
                         .accessibilityLabel("Delete transcription")
                         .transition(.opacity)
                     }
@@ -1299,14 +1299,15 @@ struct RecordingRow: View {
             .padding(.bottom, 8)
             .background(ThemePalette.cardBackground(colorScheme))
         }
-        .background(ThemePalette.cardBackground(colorScheme))
-        .cornerRadius(8)
-        .overlay(
-            RoundedRectangle(cornerRadius: 8)
-                .stroke(ThemePalette.cardBorder(colorScheme), lineWidth: 1)
-        )
+        .surfaceCard(isHovered: isHovered)
         .onHover { hovering in
-            isHovered = hovering
+            if reduceMotion {
+                isHovered = hovering
+            } else {
+                withAnimation(WFMotion.quick) {
+                    isHovered = hovering
+                }
+            }
         }
         .padding(.vertical, 4)
     }
@@ -1443,7 +1444,8 @@ struct TranscriptionView: View {
                     }
                 }
             }
-            .padding(8)
+            .padding(.horizontal, WFSpace.md)
+            .padding(.vertical, 10)
 
             if hasMoreLines {
                 Button(action: { isExpanded.toggle() }) {
@@ -1454,7 +1456,7 @@ struct TranscriptionView: View {
                     .foregroundColor(ThemePalette.linkText(colorScheme))
                     .font(.footnote)
                 }
-                .padding(.horizontal, 8)
+                .padding(.horizontal, WFSpace.md)
                 .padding(.bottom, 8)
             }
         }
