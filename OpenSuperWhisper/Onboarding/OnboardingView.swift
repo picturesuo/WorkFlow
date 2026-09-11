@@ -354,6 +354,7 @@ struct OnboardingView: View {
     @StateObject private var viewModel = OnboardingViewModel()
     @StateObject private var permissionsManager = PermissionsManager()
     @EnvironmentObject private var appState: AppState
+    @Environment(\.colorScheme) private var colorScheme
     @State private var showError = false
     @State private var errorMessage = ""
     
@@ -371,9 +372,7 @@ struct OnboardingView: View {
                     
                     Text(AppIdentity.productName)
                         .font(.system(size: 32, weight: .bold))
-                        .foregroundStyle(
-                            .white
-                        )
+                        .foregroundStyle(ThemePalette.brandGradient)
                 }
                 .padding(.bottom, 8)
                 
@@ -400,17 +399,7 @@ struct OnboardingView: View {
             }
             .padding(20)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(
-                LinearGradient(
-                    colors: [
-                        Color.white.opacity(0.05),
-                        Color.white.opacity(0.03),
-                        Color.clear
-                    ],
-                    startPoint: .topLeading,
-                    endPoint: .bottomTrailing
-                )
-            )
+            .background(ThemePalette.panelSurface(colorScheme))
             
             Divider()
             

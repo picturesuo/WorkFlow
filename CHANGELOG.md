@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Refresh the main window with a draggable header, a calmer bottom dock, keycap shortcut hints, and consistent card styling; fix the onboarding title being invisible in light mode.
 - Label the main record control for VoiceOver, align Debug and test builds with the documented macOS 14 minimum, and make model/dependency attribution explicit.
 - Keep transcript text, dropped-file paths, and provider error payloads out of diagnostic logs.
 - Leave a failed targeted paste on the clipboard and show a visible recovery message instead of redirecting it into another app.

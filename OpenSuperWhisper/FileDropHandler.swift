@@ -57,12 +57,18 @@ struct FileDropOverlay: ViewModifier {
             .overlay {
                 if handler.isDragging {
                     ZStack {
-                        Color(NSColor.windowBackgroundColor)
-                            .opacity(0.95)
+                        Rectangle()
+                            .fill(.regularMaterial)
+                        RoundedRectangle(cornerRadius: WFRadius.card, style: .continuous)
+                            .strokeBorder(
+                                BrandPalette.violet.opacity(0.5),
+                                style: StrokeStyle(lineWidth: 2, dash: [8, 6])
+                            )
+                            .padding(16)
                         VStack(spacing: 16) {
-                            Image(systemName: "arrow.down.circle")
-                                .font(.system(size: 48))
-                                .foregroundColor(.accentColor)
+                            Image(systemName: "arrow.down.doc.fill")
+                                .font(.system(size: 40))
+                                .foregroundStyle(ThemePalette.brandGradient)
                                 .symbolEffect(.bounce, value: handler.isDragging)
                             Text("Drop audio files to transcribe")
                                 .font(.headline)

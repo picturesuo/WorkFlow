@@ -457,7 +457,7 @@ struct IndicatorWindow: View {
                         .frame(width: 24)
                     
                     Text("Connecting...")
-                        .font(.system(size: 13, weight: .semibold))
+                        .font(.system(size: 13, weight: .medium))
                         .foregroundColor(.white)
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -474,7 +474,7 @@ struct IndicatorWindow: View {
                             .transition(.opacity)
                     } else {
                         Text("Recording...")
-                            .font(.system(size: 13, weight: .semibold))
+                            .font(.system(size: 13, weight: .medium))
                             .foregroundColor(.white)
                             .transition(.opacity)
                     }
@@ -490,7 +490,7 @@ struct IndicatorWindow: View {
                         .frame(width: 24)
                     
                     Text(viewModel.isFinalizing ? "Refining..." : "Transcribing...")
-                        .font(.system(size: 13, weight: .semibold))
+                        .font(.system(size: 13, weight: .medium))
                         .foregroundColor(.white)
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -568,6 +568,10 @@ struct IndicatorWindow: View {
                     rect
                         .fill(Material.thinMaterial)
                 }
+        }
+        .overlay {
+            rect
+                .strokeBorder(Color.white.opacity(0.10), lineWidth: 1)
         }
         .overlay(alignment: .bottom) {
             if viewModel.isConfirmingCancel {
