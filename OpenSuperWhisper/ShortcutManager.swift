@@ -22,6 +22,7 @@ class ShortcutManager {
     private var useMouseButtonHotkey = false
     private var lastPressDownTime: CFAbsoluteTime = 0
     private var pressConsumed = false
+    private var pressStartedRecording = false
 
     private init() {
         print("ShortcutManager init")
@@ -111,6 +112,10 @@ class ShortcutManager {
                 self?.handleKeyUp()
             }
 
+            ModifierKeyMonitor.shared.onChord = { [weak self] in
+                self?.handleChord()
+            }
+
             lastPressDownTime = 0
             pressConsumed = false
             ModifierKeyMonitor.shared.start(modifierKeys: [modifierKey, secondaryModifierKey])
@@ -155,6 +160,7 @@ class ShortcutManager {
 
         let holdToRecordEnabled = AppPreferences.shared.holdToRecord
         let isStartingRecording = activeVm == nil
+        pressStartedRecording = isStartingRecording
         let pasteTarget = isStartingRecording ? PasteTarget.captureFrontmost() : nil
 
         if activeVm == nil {
@@ -221,6 +227,31 @@ class ShortcutManager {
         }
     }
 
+    /// The trigger modifier was used as part of a shortcut (⌃C, ⌃-click,
+    /// Fn+arrow). Undo whatever this press did so stray recordings never start.
+    private func handleChord() {
+        DispatchQueue.main.async { [weak self] in
+            self?.handleChordOnMain()
+        }
+    }
+
+    @MainActor
+    private func handleChordOnMain() {
+        holdWorkItem?.cancel()
+        holdWorkItem = nil
+        holdMode = false
+        lastPressDownTime = 0
+
+        guard pressConsumed else { return }
+        pressConsumed = false
+
+        if pressStartedRecording, activeVm != nil {
+            IndicatorWindowManager.shared.stopForce()
+            activeVm = nil
+        }
+        pressStartedRecording = false
+    }
+
     private func handleKeyUp() {
         DispatchQueue.main.async { [weak self] in
             self?.handleKeyUpOnMain()
@@ -234,6 +265,7 @@ class ShortcutManager {
 
         guard pressConsumed else { return }
         pressConsumed = false
+        pressStartedRecording = false
 
         let holdToRecordEnabled = AppPreferences.shared.holdToRecord
 

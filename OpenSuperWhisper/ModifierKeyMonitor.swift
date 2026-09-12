@@ -102,10 +102,14 @@ struct ModifierKeyTriggerState {
     enum Transition: Equatable {
         case keyDown(ModifierKey)
         case keyUp(ModifierKey)
+        /// A regular key or mouse button was used while the trigger key was
+        /// held, so the press was a shortcut chord (e.g. ⌃C), not dictation.
+        case chord(ModifierKey)
     }
 
     let modifierKeys: [ModifierKey]
     private(set) var pressedKey: ModifierKey?
+    private(set) var chordDetected = false
 
     init(modifierKeys: [ModifierKey]) {
         var unique: [ModifierKey] = []
@@ -125,16 +129,28 @@ struct ModifierKeyTriggerState {
         if isPressed {
             guard pressedKey == nil else { return nil }
             pressedKey = key
+            chordDetected = false
             return .keyDown(key)
         }
 
         guard pressedKey == key else { return nil }
         pressedKey = nil
-        return .keyUp(key)
+        let wasChord = chordDetected
+        chordDetected = false
+        return wasChord ? nil : .keyUp(key)
+    }
+
+    /// Call for any non-modifier input (key down, mouse down) observed while
+    /// monitoring. Returns `.chord` the first time it happens during a press.
+    mutating func handleOtherInput() -> Transition? {
+        guard let key = pressedKey, !chordDetected else { return nil }
+        chordDetected = true
+        return .chord(key)
     }
 
     mutating func reset() {
         pressedKey = nil
+        chordDetected = false
     }
 }
 
@@ -147,6 +163,8 @@ class ModifierKeyMonitor {
 
     var onKeyDown: (() -> Void)?
     var onKeyUp: (() -> Void)?
+    /// Fired when the held trigger key turns out to be part of a shortcut chord.
+    var onChord: (() -> Void)?
 
     private init() {}
 
@@ -166,7 +184,14 @@ class ModifierKeyMonitor {
 
         triggerState = state
         
+        // Key-down and mouse-down events are observed only to notice that the
+        // trigger modifier is being used in a chord (⌃C, ⌃-click, Fn+arrow).
+        // Their key codes and contents are never read or stored.
         let eventMask = CGEventMask(1 << CGEventType.flagsChanged.rawValue)
+            | CGEventMask(1 << CGEventType.keyDown.rawValue)
+            | CGEventMask(1 << CGEventType.leftMouseDown.rawValue)
+            | CGEventMask(1 << CGEventType.rightMouseDown.rawValue)
+            | CGEventMask(1 << CGEventType.otherMouseDown.rawValue)
         
         guard let tap = CGEvent.tapCreate(
             tap: .cgSessionEventTap,
@@ -185,7 +210,11 @@ class ModifierKeyMonitor {
                     return Unmanaged.passUnretained(event)
                 }
                 
-                monitor.handleFlagsChanged(event: event)
+                if type == .flagsChanged {
+                    monitor.handleFlagsChanged(event: event)
+                } else {
+                    monitor.handleOtherInput()
+                }
                 return Unmanaged.passUnretained(event)
             },
             userInfo: Unmanaged.passUnretained(self).toOpaque()
@@ -237,8 +266,15 @@ class ModifierKeyMonitor {
             DispatchQueue.main.async {
                 self.onKeyUp?()
             }
-        case nil:
+        case .chord, nil:
             break
+        }
+    }
+
+    private func handleOtherInput() {
+        guard case .chord = triggerState.handleOtherInput() else { return }
+        DispatchQueue.main.async {
+            self.onChord?()
         }
     }
     

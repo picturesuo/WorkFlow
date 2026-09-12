@@ -1499,7 +1499,7 @@ struct SettingsView: View {
                                 .cornerRadius(8)
 
                                 permissionWarning(
-                                    message: "⚠️ This mode requires Input Monitoring permission. macOS requires this to detect single modifier key presses globally. Only modifier key events (⌘, ⌥, ⇧, ⌃, Fn) are monitored — no regular keystrokes are captured.",
+                                    message: "⚠️ This mode requires Input Monitoring permission. macOS requires this to detect single modifier key presses globally. WorkFlow reads only modifier key state (⌘, ⌥, ⇧, ⌃, Fn) and notices when another key or click happens during a press, so shortcuts like ⌃C never start dictation. Key contents are never read or stored.",
                                     isGranted: permissionsManager.isInputMonitoringPermissionGranted
                                 ) {
                                     permissionsManager.requestInputMonitoringPermissionOrOpenSystemPreferences()

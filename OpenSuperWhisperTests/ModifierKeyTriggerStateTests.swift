@@ -43,3 +43,26 @@ final class ModifierKeyTriggerStateTests: XCTestCase {
         XCTAssertNil(state.handleFlagsChanged(keyCode: ModifierKey.rightControl.keyCode, flags: .maskControl))
     }
 }
+
+final class ModifierKeyChordTests: XCTestCase {
+    private let controlCode = ModifierKey.leftControl.keyCode
+
+    func testKeyPressedDuringHoldReportsChordOnceAndSuppressesKeyUp() {
+        var state = ModifierKeyTriggerState(modifierKeys: [.leftControl])
+
+        XCTAssertEqual(state.handleFlagsChanged(keyCode: controlCode, flags: .maskControl), .keyDown(.leftControl))
+        XCTAssertEqual(state.handleOtherInput(), .chord(.leftControl))
+        XCTAssertNil(state.handleOtherInput(), "auto-repeat must not report the chord again")
+        XCTAssertNil(state.handleFlagsChanged(keyCode: controlCode, flags: []), "release after a chord is not a toggle")
+
+        // The next plain press behaves normally again.
+        XCTAssertEqual(state.handleFlagsChanged(keyCode: controlCode, flags: .maskControl), .keyDown(.leftControl))
+        XCTAssertEqual(state.handleFlagsChanged(keyCode: controlCode, flags: []), .keyUp(.leftControl))
+    }
+
+    func testOtherInputWithoutHeldTriggerIsIgnored() {
+        var state = ModifierKeyTriggerState(modifierKeys: [.leftControl, .fn])
+        XCTAssertNil(state.handleOtherInput())
+        XCTAssertFalse(state.chordDetected)
+    }
+}
