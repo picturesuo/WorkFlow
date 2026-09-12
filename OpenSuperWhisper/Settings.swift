@@ -152,6 +152,13 @@ class SettingsViewModel: ObservableObject {
         }
     }
 
+    @Published var secondaryModifierOnlyHotkey: ModifierKey {
+        didSet {
+            AppPreferences.shared.secondaryModifierOnlyHotkey = secondaryModifierOnlyHotkey.rawValue
+            NotificationCenter.default.post(name: .hotkeySettingsChanged, object: nil)
+        }
+    }
+
     @Published var mouseButtonHotkey: MouseButton {
         didSet {
             AppPreferences.shared.mouseButtonHotkey = mouseButtonHotkey.rawValue
@@ -278,6 +285,7 @@ class SettingsViewModel: ObservableObject {
         self.playSoundOnRecordStart = prefs.playSoundOnRecordStart
         self.useAsianAutocorrect = prefs.useAsianAutocorrect
         self.modifierOnlyHotkey = ModifierKey(rawValue: prefs.modifierOnlyHotkey) ?? .none
+        self.secondaryModifierOnlyHotkey = ModifierKey(rawValue: prefs.secondaryModifierOnlyHotkey) ?? .none
         self.mouseButtonHotkey = MouseButton(rawValue: prefs.mouseButtonHotkey) ?? .none
         self.holdToRecord = prefs.holdToRecord
         self.doublePressToTrigger = prefs.doublePressToTrigger
@@ -1436,6 +1444,34 @@ struct SettingsView: View {
                                 .padding(.vertical, 10)
                                 .background(Color(.textBackgroundColor).opacity(0.5))
                                 .cornerRadius(8)
+
+                                HStack {
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        Text("Secondary Modifier Key")
+                                            .font(.subheadline)
+                                        Text("Also toggles recording, e.g. Control on a keyboard without Fn")
+                                            .font(.caption)
+                                            .foregroundColor(.secondary)
+                                    }
+                                    Spacer()
+                                    Picker("", selection: $viewModel.secondaryModifierOnlyHotkey) {
+                                        ForEach(ModifierKey.allCases.filter { $0 != viewModel.modifierOnlyHotkey }) { key in
+                                            Text(key.displayName).tag(key)
+                                        }
+                                    }
+                                    .pickerStyle(.menu)
+                                    .frame(width: 200)
+                                    .accessibilityLabel("Secondary modifier key")
+                                }
+                                .padding(.horizontal, 12)
+                                .padding(.vertical, 10)
+                                .background(Color(.textBackgroundColor).opacity(0.5))
+                                .cornerRadius(8)
+                                .onChange(of: viewModel.modifierOnlyHotkey) { newPrimary in
+                                    if viewModel.secondaryModifierOnlyHotkey == newPrimary {
+                                        viewModel.secondaryModifierOnlyHotkey = .none
+                                    }
+                                }
 
                                 Text(viewModel.doublePressToTrigger
                                      ? "Double-tap to toggle recording"

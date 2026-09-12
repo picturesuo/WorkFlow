@@ -114,6 +114,12 @@ final class AppPreferences {
     /// when switching back to Single Modifier Key mode.
     @UserDefault(key: "lastModifierOnlyHotkey", defaultValue: "fn")
     var lastModifierOnlyHotkey: String
+
+    /// Optional second modifier key that also toggles recording in Single
+    /// Modifier Key mode, e.g. Fn on the built-in keyboard and Control on an
+    /// external keyboard without an Fn key. "none" disables it.
+    @UserDefault(key: "secondaryModifierOnlyHotkey", defaultValue: "none")
+    var secondaryModifierOnlyHotkey: String
     
     @UserDefault(key: "mouseButtonHotkey", defaultValue: "none")
     var mouseButtonHotkey: String

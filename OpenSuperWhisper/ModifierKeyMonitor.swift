@@ -93,13 +93,57 @@ enum ModifierKey: String, CaseIterable, Identifiable, Codable {
     }
 }
 
+/// Pure press/release tracking for one or more trigger modifier keys.
+///
+/// Any configured key can start a press. While that key is held, the other
+/// configured keys are ignored so a second key cannot inject a spurious
+/// key-up or key-down in the middle of a hold-to-record gesture.
+struct ModifierKeyTriggerState {
+    enum Transition: Equatable {
+        case keyDown(ModifierKey)
+        case keyUp(ModifierKey)
+    }
+
+    let modifierKeys: [ModifierKey]
+    private(set) var pressedKey: ModifierKey?
+
+    init(modifierKeys: [ModifierKey]) {
+        var unique: [ModifierKey] = []
+        for key in modifierKeys where key != .none && !unique.contains(key) {
+            unique.append(key)
+        }
+        self.modifierKeys = unique
+    }
+
+    var isEmpty: Bool { modifierKeys.isEmpty }
+
+    mutating func handleFlagsChanged(keyCode: UInt16, flags: CGEventFlags) -> Transition? {
+        guard let key = modifierKeys.first(where: { $0.keyCode == keyCode }) else { return nil }
+
+        let isPressed = flags.contains(key.cgEventFlag)
+
+        if isPressed {
+            guard pressedKey == nil else { return nil }
+            pressedKey = key
+            return .keyDown(key)
+        }
+
+        guard pressedKey == key else { return nil }
+        pressedKey = nil
+        return .keyUp(key)
+    }
+
+    mutating func reset() {
+        pressedKey = nil
+    }
+}
+
 class ModifierKeyMonitor {
     static let shared = ModifierKeyMonitor()
     
     private var eventTap: CFMachPort?
     private var runLoopSource: CFRunLoopSource?
-    private var selectedModifierKey: ModifierKey = .none
-    private var isModifierPressed = false
+    private var triggerState = ModifierKeyTriggerState(modifierKeys: [])
 
     var onKeyDown: (() -> Void)?
     var onKeyUp: (() -> Void)?
@@ -107,15 +151,20 @@ class ModifierKeyMonitor {
     private init() {}
 
     func start(modifierKey: ModifierKey) {
-        guard modifierKey != .none else {
+        start(modifierKeys: [modifierKey])
+    }
+
+    /// Monitors every key in `modifierKeys`; any of them toggles recording.
+    func start(modifierKeys: [ModifierKey]) {
+        let state = ModifierKeyTriggerState(modifierKeys: modifierKeys)
+        guard !state.isEmpty else {
             stop()
             return
         }
 
         stop()
 
-        selectedModifierKey = modifierKey
-        isModifierPressed = false
+        triggerState = state
         
         let eventMask = CGEventMask(1 << CGEventType.flagsChanged.rawValue)
         
@@ -151,7 +200,8 @@ class ModifierKeyMonitor {
         if let source = runLoopSource {
             CFRunLoopAddSource(CFRunLoopGetCurrent(), source, .commonModes)
             CGEvent.tapEnable(tap: tap, enable: true)
-            print("ModifierKeyMonitor: Started monitoring for \(modifierKey.displayName)")
+            let names = triggerState.modifierKeys.map(\.displayName).joined(separator: ", ")
+            print("ModifierKeyMonitor: Started monitoring for \(names)")
         }
     }
     
@@ -164,7 +214,7 @@ class ModifierKeyMonitor {
         }
         eventTap = nil
         runLoopSource = nil
-        isModifierPressed = false
+        triggerState.reset()
         print("ModifierKeyMonitor: Stopped")
     }
     
@@ -177,23 +227,18 @@ class ModifierKeyMonitor {
     
     private func handleFlagsChanged(event: CGEvent) {
         let keyCode = UInt16(event.getIntegerValueField(.keyboardEventKeycode))
-        let flags = event.flags
-        
-        guard keyCode == selectedModifierKey.keyCode else { return }
-        
-        let cgFlag = selectedModifierKey.cgEventFlag
-        let isPressed = flags.contains(cgFlag)
-        
-        if isPressed && !isModifierPressed {
-            isModifierPressed = true
+
+        switch triggerState.handleFlagsChanged(keyCode: keyCode, flags: event.flags) {
+        case .keyDown:
             DispatchQueue.main.async {
                 self.onKeyDown?()
             }
-        } else if !isPressed && isModifierPressed {
-            isModifierPressed = false
+        case .keyUp:
             DispatchQueue.main.async {
                 self.onKeyUp?()
             }
+        case nil:
+            break
         }
     }
     

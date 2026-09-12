@@ -74,6 +74,7 @@ class ShortcutManager {
     
     private func setupRecordingTrigger() {
         let modifierKey = ModifierKey(rawValue: AppPreferences.shared.modifierOnlyHotkey) ?? .none
+        let secondaryModifierKey = ModifierKey(rawValue: AppPreferences.shared.secondaryModifierOnlyHotkey) ?? .none
         let mouseButton = MouseButton(rawValue: AppPreferences.shared.mouseButtonHotkey) ?? .none
 
         // The three trigger modes are mutually exclusive. Tear all of them down
@@ -112,8 +113,9 @@ class ShortcutManager {
 
             lastPressDownTime = 0
             pressConsumed = false
-            ModifierKeyMonitor.shared.start(modifierKey: modifierKey)
-            print("ShortcutManager: Using modifier-only hotkey: \(modifierKey.displayName) (double-press: \(AppPreferences.shared.doublePressToTrigger))")
+            ModifierKeyMonitor.shared.start(modifierKeys: [modifierKey, secondaryModifierKey])
+            let secondaryDescription = secondaryModifierKey == .none ? "" : " or \(secondaryModifierKey.displayName)"
+            print("ShortcutManager: Using modifier-only hotkey: \(modifierKey.displayName)\(secondaryDescription) (double-press: \(AppPreferences.shared.doublePressToTrigger))")
         } else {
             useMouseButtonHotkey = false
             useModifierOnlyHotkey = false
