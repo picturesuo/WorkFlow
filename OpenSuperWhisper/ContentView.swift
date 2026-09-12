@@ -1478,6 +1478,7 @@ struct TranscriptionView: View {
 struct MicrophonePickerIconView: View {
     @ObservedObject var microphoneService: MicrophoneService
     @State private var showMenu = false
+    @State private var isHovered = false
     @Environment(\.colorScheme) private var colorScheme
     
     private var builtInMicrophones: [MicrophoneService.AudioDevice] {
@@ -1493,19 +1494,29 @@ struct MicrophonePickerIconView: View {
             showMenu.toggle()
         }) {
             Image(systemName: microphoneService.availableMicrophones.isEmpty ? "mic.slash" : "mic.fill")
-                .font(.title3)
-                .foregroundColor(.secondary)
-                .frame(width: 32, height: 32)
-                .background(ThemePalette.panelSurface(colorScheme))
+                .font(.system(size: 14, weight: .medium))
+                .foregroundStyle(isHovered ? Color.primary : Color.secondary)
+                .frame(width: 30, height: 30)
+                .background(
+                    RoundedRectangle(cornerRadius: WFRadius.control, style: .continuous)
+                        .fill(isHovered
+                              ? BrandPalette.violet.opacity(0.14)
+                              : ThemePalette.panelSurface(colorScheme))
+                )
                 .overlay(
-                    RoundedRectangle(cornerRadius: 8)
+                    RoundedRectangle(cornerRadius: WFRadius.control, style: .continuous)
                         .stroke(ThemePalette.panelBorder(colorScheme), lineWidth: 1)
                 )
-                .cornerRadius(8)
+                .contentShape(RoundedRectangle(cornerRadius: WFRadius.control, style: .continuous))
         }
-        .buttonStyle(.plain)
+        .buttonStyle(WFPressableStyle())
+        .onHover { hovering in
+            withAnimation(WFMotion.quick) {
+                isHovered = hovering
+            }
+        }
         .help(microphoneService.currentMicrophone?.displayName ?? "Select microphone")
-        .popover(isPresented: $showMenu, arrowEdge: .top) {
+        .popover(isPresented: $showMenu, arrowEdge: .bottom) {
             VStack(alignment: .leading, spacing: 0) {
                 if microphoneService.availableMicrophones.isEmpty {
                     Text("No microphones available")
