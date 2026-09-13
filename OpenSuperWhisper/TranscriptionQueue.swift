@@ -44,7 +44,7 @@ class TranscriptionQueue: ObservableObject {
         cancelledRecordingIds.insert(recordingId)
 
         if currentRecordingId == recordingId {
-            transcriptionService.cancelTranscription()
+            transcriptionService.cancelTranscription(requestID: recordingId)
             currentTranscriptionTask?.cancel()
         }
     }
@@ -70,28 +70,49 @@ class TranscriptionQueue: ObservableObject {
         }
     }
 
+    /// Older pending rows can point at a temp file already moved to their owned
+    /// audio path before interruption. Recover that exact path, never another recording.
+    nonisolated static func recoverPendingAudioSource(sourceURL: URL?, savedAudioURL: URL) -> URL? {
+        let fileManager = FileManager.default
+        if let sourceURL, fileManager.fileExists(atPath: sourceURL.path) {
+            return sourceURL
+        }
+        return fileManager.fileExists(atPath: savedAudioURL.path) ? savedAudioURL : nil
+    }
+
     private func cleanupMissingFiles() async {
         let pendingRecordings = recordingStore.getPendingRecordings()
-
-        let recordingsToDelete = await Task.detached(priority: .utility) {
-            var toDelete: [Recording] = []
-            for recording in pendingRecordings {
-                guard let sourceURLString = recording.sourceFileURL,
-                      !sourceURLString.isEmpty else {
-                    toDelete.append(recording)
-                    continue
+        let recoveredSources = await Task.detached(priority: .utility) {
+            pendingRecordings.map { recording in
+                let sourceURL = recording.sourceFileURL.flatMap { path in
+                    path.isEmpty ? nil : URL(fileURLWithPath: path)
                 }
+                return (recording, Self.recoverPendingAudioSource(
+                    sourceURL: sourceURL, savedAudioURL: recording.url
+                ))
+            }
+        }.value
 
-                let sourceURL = URL(fileURLWithPath: sourceURLString)
-                if !FileManager.default.fileExists(atPath: sourceURL.path) {
-                    toDelete.append(recording)
+        for (recording, sourceURL) in recoveredSources {
+            guard let sourceURL else {
+                await recordingStore.updateRecordingProgressOnlySync(
+                    recording.id,
+                    transcription: recording.transcription.isEmpty
+                        ? "Audio file not found. This recording could not resume."
+                        : recording.transcription,
+                    progress: 0,
+                    status: .failed,
+                    isRegeneration: false
+                )
+                continue
+            }
+            if sourceURL.path != recording.sourceFileURL {
+                do {
+                    try await recordingStore.updateSourceFileURL(recording.id, sourceURL: sourceURL.path)
+                } catch {
+                    await recordingStore.updateRecordingStatusOnly(recording.id, progress: 0, status: .failed)
                 }
             }
-            return toDelete
-        }.value
-        
-        for recording in recordingsToDelete {
-            recordingStore.deleteRecording(recording)
         }
     }
 
@@ -194,6 +215,16 @@ class TranscriptionQueue: ObservableObject {
         }
     }
 
+    /// Cancellation comes from committed History deletion. If an awaited copy
+    /// finishes after that deletion, remove the newly recreated owned audio too.
+    private func discardCancelledOutput(_ recording: Recording) async -> Bool {
+        guard isRecordingCancelled(recording.id) || Task.isCancelled else { return false }
+        await Task.detached(priority: .utility) {
+            try? FileManager.default.removeItem(at: recording.url)
+        }.value
+        return true
+    }
+
     private func processRecording(_ recording: Recording) async {
         if isRecordingCancelled(recording.id) {
             clearCancellation(recording.id)
@@ -257,7 +288,7 @@ class TranscriptionQueue: ObservableObject {
                 }
 
                 let settings = Settings()
-                let text = try await transcriptionService.transcribeAudio(url: sourceURL, settings: settings)
+                let text = try await transcriptionService.transcribeAudio(url: sourceURL, settings: settings, requestID: recording.id)
 
                 if isRecordingCancelled(recording.id) || Task.isCancelled {
                     return
@@ -268,10 +299,10 @@ class TranscriptionQueue: ObservableObject {
                     sourceURL: sourceURL,
                     mode: recording.mode
                 ) {
+                    try await recordingStore.deleteRecordingSync(recording)
                     await Task.detached(priority: .utility) {
                         try? FileManager.default.removeItem(at: sourceURL)
                     }.value
-                    await recordingStore.deleteRecordingSync(recording)
                     return
                 }
 
@@ -296,6 +327,12 @@ class TranscriptionQueue: ObservableObject {
                     }
                 }.value
 
+                if await discardCancelledOutput(recording) { return }
+                // Commit the new source before remote cleanup; startup also recovers
+                // the narrow move/DB-write interruption window from recording.url.
+                try await recordingStore.updateSourceFileURL(recording.id, sourceURL: finalURL.path)
+                if await discardCancelledOutput(recording) { return }
+
                 if recording.mode == .meeting,
                    text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                     await recordingStore.updateRecordingProgressOnlySync(
@@ -315,6 +352,7 @@ class TranscriptionQueue: ObservableObject {
                         cleanupOverride: true,
                         cleanupModeOverride: recording.cleanupMode
                     )
+                    if await discardCancelledOutput(recording) { return }
                     await recordingStore.completeRecording(
                         recording.id,
                         transcription: cleanup.text,
@@ -339,16 +377,16 @@ class TranscriptionQueue: ObservableObject {
                     )
                 }
 
+                _ = await discardCancelledOutput(recording)
             } catch {
-                if !isRecordingCancelled(recording.id) && !Task.isCancelled {
-                    await recordingStore.updateRecordingProgressOnlySync(
-                        recording.id,
-                        transcription: "Failed to transcribe: \(error.localizedDescription)",
-                        progress: 0.0,
-                        status: .failed,
-                        isRegeneration: false
-                    )
-                }
+                if await discardCancelledOutput(recording) { return }
+                await recordingStore.updateRecordingProgressOnlySync(
+                    recording.id,
+                    transcription: "Failed to transcribe: \(error.localizedDescription)",
+                    progress: 0.0,
+                    status: .failed,
+                    isRegeneration: false
+                )
             }
         }
 

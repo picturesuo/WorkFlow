@@ -66,7 +66,9 @@ Each successful cleanup stores a local estimate of the source and final text siz
 
 Resize the main window to give longer transcripts more room. History keeps recording actions visible and separates dates and durations from cleanup details. The compact recording bar shows the current state, shortcut, and writing mode while leaving more space for transcripts.
 
-Search stays active when recordings update. A newer search replaces any older request, and a failed history load offers a retry. History remains available while the speech model loads; recording becomes available when the model is ready.
+Search stays active when recordings update and treats punctuation such as `%` and `_` literally. A newer search replaces any older request, refreshes retain the loaded history depth, and a failed history load offers a retry. History remains available while the speech model loads; recording becomes available when the model is ready.
+
+Deleting recordings commits the history change before stopping matching playback and removing saved audio. A failed database deletion keeps the audio and shows an error. Pending recordings are canceled when deleted, and interrupted queue processing recovers audio already moved into its saved location. If the audio is missing, the item remains in History with a failure status.
 
 ## Cleanup choices
 
@@ -113,10 +115,11 @@ xcodebuild test \
   -skip-testing:OpenSuperWhisperTests/ClipboardUtilPasteIntegrationTests \
   -skip-testing:OpenSuperWhisperTests/ClipboardUtilKeyboardLayoutTests \
   -skip-testing:OpenSuperWhisperTests/KeyboardLayoutProviderTests \
+  -skip-testing:OpenSuperWhisperTests/IndicatorWindowGeometryTests/testWindowKeepsPanelSizeAfterPresent \
   CODE_SIGNING_ALLOWED=NO
 ```
 
-This runs the unit-test target without the three integration suites that launch TextEdit or switch the system keyboard layout. Run those suites separately in an interactive macOS session with foreground approval. The separate UI-test target also needs an interactive session and is intentionally excluded from headless and agent runs.
+This runs the unit-test target without the three integration suites that launch TextEdit or switch the system keyboard layout, and without the indicator test that presents a visible panel. Run those checks separately in an interactive macOS session with foreground approval. The separate UI-test target also needs an interactive session and is intentionally excluded from headless and agent runs.
 
 The internal Xcode target remains `OpenSuperWhisper` so the fork retains a reviewable history. The app, executable, and bundle identity are WorkFlow. Upgrades copy preferences and History/models forward from earlier Chat or GlowScribe installations without deleting the old data, and securely move provider credentials into WorkFlow's Keychain identity. Because macOS does not migrate privacy grants between bundle identifiers, an existing user must approve Microphone, Accessibility, and—when using a modifier-only shortcut—Input Monitoring once more.
 

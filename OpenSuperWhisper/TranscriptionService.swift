@@ -13,32 +13,42 @@ class TranscriptionService: ObservableObject {
     @Published private(set) var conversionProgress: Float = 0.0
     
     private final class TranscriptionTaskBox {
+        let requestID: UUID
+        let token: UUID
         let task: Task<String, Error>
-        init(_ task: Task<String, Error>) { self.task = task }
+        var engine: (any TranscriptionEngine)?
+
+        init(requestID: UUID, token: UUID, task: Task<String, Error>) {
+            self.requestID = requestID
+            self.token = token
+            self.task = task
+        }
     }
     
     private var currentEngine: TranscriptionEngine?
     private var engineLoadTask: Task<any TranscriptionEngine, Error>?
     private var engineLoadGeneration: UInt64 = 0
     private var transcriptionTask: TranscriptionTaskBox? = nil
-    private var isCancelled = false
     
     init() {
         loadEngine()
     }
     
-    func cancelTranscription() {
-        isCancelled = true
-        currentEngine?.cancelTranscription()
-        transcriptionTask?.task.cancel()
-        transcriptionTask = nil
-        
-        isTranscribing = false
-        currentSegment = ""
-        progress = 0.0
-        isCancelled = false
+    /// Supplies an already loaded engine without starting model downloads.
+    init(engine: any TranscriptionEngine) {
+        currentEngine = engine
     }
-    
+
+    func cancelTranscription(requestID: UUID) {
+        guard let request = transcriptionTask, request.requestID == requestID else { return }
+        request.engine?.cancelTranscription()
+        request.task.cancel()
+        currentSegment = ""
+        progress = 0
+        // Keep the reservation until the engine actually returns. Starting another
+        // transcription while cancellation unwinds would reuse its live context.
+    }
+
     private func loadEngine() {
         let selectedEngine = AppPreferences.shared.selectedEngine
         print("Loading engine: \(selectedEngine)")
@@ -88,98 +98,82 @@ class TranscriptionService: ObservableObject {
         }
     }
     
-    func transcribeAudio(url: URL, settings: Settings) async throws -> String {
-        // Serialize access to the engine: a whisper context must not process
-        // two transcriptions concurrently (indicator flow and queue flow can
-        // both reach this point due to async busy checks).
+    func transcribeAudio(url: URL, settings: Settings, requestID: UUID = UUID()) async throws -> String {
+        try Task.checkCancellation()
         while let existing = transcriptionTask {
             _ = try? await existing.task.value
+            // Cancelling a queued caller must not let it enter the engine after
+            // the unrelated active request finishes.
+            try Task.checkCancellation()
             if transcriptionTask === existing {
                 transcriptionTask = nil
             }
         }
-        
-        progress = 0.0
-        conversionProgress = 0.0
+
+        // Reserve before the task can suspend in readyEngine(), including the
+        // first transcription while a model is still loading.
+        let token = UUID()
+        let task = Task {
+            try await performTranscription(url: url, settings: settings, token: token)
+        }
+        transcriptionTask = TranscriptionTaskBox(requestID: requestID, token: token, task: task)
+        return try await withTaskCancellationHandler {
+            try await task.value
+        } onCancel: {
+            task.cancel()
+        }
+    }
+
+    private func performTranscription(url: URL, settings: Settings, token: UUID) async throws -> String {
+        defer {
+            // Cleanup runs before waiters resume and cannot clear a newer request.
+            if transcriptionTask?.token == token {
+                isTranscribing = false
+                isConverting = false
+                currentSegment = ""
+                transcriptionTask = nil
+            }
+        }
+        try Task.checkCancellation()
+        progress = 0
+        conversionProgress = 0
         isConverting = true
         isTranscribing = true
         transcribedText = ""
         currentSegment = ""
-        isCancelled = false
-        
-        defer {
-            Task { @MainActor in
-                self.isTranscribing = false
-                self.isConverting = false
-                self.currentSegment = ""
-                if !self.isCancelled {
-                    self.progress = 1.0
-                }
-                self.transcriptionTask = nil
-            }
-        }
-        
+
         let engine = try await readyEngine()
-        
-        // Setup progress callback for engines
-        if let whisperEngine = engine as? WhisperEngine {
-            whisperEngine.onProgressUpdate = { [weak self] newProgress in
-                Task { @MainActor in
-                    guard let self = self, !self.isCancelled else { return }
-                    self.progress = newProgress
-                }
-            }
-        } else if let fluidEngine = engine as? FluidAudioEngine {
-            fluidEngine.onProgressUpdate = { [weak self] newProgress in
-                Task { @MainActor in
-                    guard let self = self, !self.isCancelled else { return }
-                    self.progress = newProgress
-                }
+        try Task.checkCancellation()
+        transcriptionTask?.engine = engine
+
+        let reportProgress: (Float) -> Void = { [weak self] newProgress in
+            Task { @MainActor in
+                guard let self, let request = self.transcriptionTask,
+                      request.token == token, !request.task.isCancelled else { return }
+                self.progress = newProgress
             }
         }
-        
-        let task = Task.detached(priority: .userInitiated) { [weak self] in
+        if let whisperEngine = engine as? WhisperEngine {
+            whisperEngine.onProgressUpdate = reportProgress
+        } else if let fluidEngine = engine as? FluidAudioEngine {
+            fluidEngine.onProgressUpdate = reportProgress
+        }
+
+        let engineTask = Task.detached(priority: .userInitiated) {
             try Task.checkCancellation()
-            
-            let cancelled = await MainActor.run {
-                guard let self = self else { return true }
-                return self.isCancelled
-            }
-            
-            guard !cancelled else {
-                throw CancellationError()
-            }
-            
             let result = try await engine.transcribeAudio(url: url, settings: settings)
-            
             try Task.checkCancellation()
-            
-            let finalCancelled = await MainActor.run {
-                guard let self = self else { return true }
-                return self.isCancelled
-            }
-            
-            await MainActor.run {
-                guard let self = self, !self.isCancelled else { return }
-                self.transcribedText = result
-                self.progress = 1.0
-            }
-            
-            guard !finalCancelled else {
-                throw CancellationError()
-            }
-            
             return result
         }
-        
-        transcriptionTask = TranscriptionTaskBox(task)
-        
-        do {
-            return try await task.value
-        } catch is CancellationError {
-            isCancelled = true
-            throw TranscriptionError.processingFailed
+        let result = try await withTaskCancellationHandler {
+            try await engineTask.value
+        } onCancel: {
+            engineTask.cancel()
         }
+        try Task.checkCancellation()
+        transcribedText = result
+        progress = 1
+        return result
     }
 
     /// Waits for the newest load only. If the user changes engines while an

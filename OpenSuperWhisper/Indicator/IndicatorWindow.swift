@@ -17,7 +17,7 @@ enum RecordingState {
 @MainActor
 protocol IndicatorViewDelegate: AnyObject {
     
-    func didFinishDecoding()
+    func didFinishDecoding(_ viewModel: IndicatorViewModel)
 }
 
 @MainActor
@@ -45,6 +45,7 @@ class IndicatorViewModel: ObservableObject {
     private let cleanupPipeline: TranscriptCleanupPipeline
     private let latestDictationGate: LatestDictationGate
     private var dictationGeneration: UInt64?
+    private var recorderSessionID: UUID?
     private let pasteTarget: PasteTarget?
     
     init(
@@ -61,7 +62,8 @@ class IndicatorViewModel: ObservableObject {
         recorder.$isConnecting
             .receive(on: RunLoop.main)
             .sink { [weak self] isConnecting in
-                guard let self = self else { return }
+                guard let self, let sessionID = self.recorderSessionID,
+                      self.recorder.ownsRecordingSession(sessionID) else { return }
                 if isConnecting {
                     self.state = .connecting
                     self.stopBlinking()
@@ -72,7 +74,8 @@ class IndicatorViewModel: ObservableObject {
         recorder.$isRecording
             .receive(on: RunLoop.main)
             .sink { [weak self] isRecording in
-                guard let self = self else { return }
+                guard let self, let sessionID = self.recorderSessionID,
+                      self.recorder.ownsRecordingSession(sessionID) else { return }
                 if isRecording {
                     self.state = .recording
                     self.startBlinking()
@@ -95,7 +98,8 @@ class IndicatorViewModel: ObservableObject {
         hideTimer?.invalidate()
         hideTimer = Timer.scheduledTimer(withTimeInterval: 2.0, repeats: false) { [weak self] _ in
             Task { @MainActor in
-                self?.delegate?.didFinishDecoding()
+                guard let self else { return }
+                self.delegate?.didFinishDecoding(self)
             }
         }
     }
@@ -123,11 +127,14 @@ class IndicatorViewModel: ObservableObject {
         // animation. The recorder resolves the real state on its own queue and
         // publishes isConnecting/isRecording, which the sinks above translate
         // into .connecting/.recording.
-        guard recorder.startRecording(completion: { [weak self] startError in
+        let sessionID = UUID()
+        guard recorder.startRecording(sessionID: sessionID, completion: { [weak self] startError in
             guard startError != nil else { return }
             Task { @MainActor in
-                self?.stopBlinking()
-                self?.showAutoDismissingMessage(.recordingFailed)
+                guard let self, self.recorderSessionID == sessionID else { return }
+                self.recorderSessionID = nil
+                self.stopBlinking()
+                self.showAutoDismissingMessage(.recordingFailed)
             }
         }) else {
             showBusyMessage()
@@ -136,6 +143,7 @@ class IndicatorViewModel: ObservableObject {
 
         // Starting a newer recording immediately retires every older async
         // transcription/cleanup result, even before this recording is stopped.
+        recorderSessionID = sessionID
         dictationGeneration = latestDictationGate.begin()
         state = .recording
         startBlinking()
@@ -178,8 +186,9 @@ class IndicatorViewModel: ObservableObject {
         // A second stop request (double hotkey press, hold-mode key-up) must not
         // restart decoding or hide the window while transcription is in flight.
         guard state == .recording || state == .connecting else { return }
-        
         resetCancelConfirmation()
+        guard let sessionID = recorderSessionID else { return }
+        recorderSessionID = nil
         stopBlinking()
         
         if isTranscriptionBusy {
@@ -187,7 +196,7 @@ class IndicatorViewModel: ObservableObject {
             // and put it into the queue instead of deleting it.
             Task { [weak self] in
                 guard let self = self else { return }
-                if let tempURL = await self.recorder.stopRecording() {
+                if let tempURL = await self.recorder.stopRecording(sessionID: sessionID) {
                     let rule = TargetAppRuleStore.rule(for: self.pasteTarget?.bundleID)
                     await self.transcriptionQueue.addFileToQueue(
                         url: tempURL,
@@ -209,7 +218,7 @@ class IndicatorViewModel: ObservableObject {
             guard let self = self else { return }
             let generation = self.dictationGeneration ?? self.latestDictationGate.begin()
             
-            if let tempURL = await self.recorder.stopRecording() {
+            if let tempURL = await self.recorder.stopRecording(sessionID: sessionID) {
                 do {
                     print("start decoding...")
                     let duration = await AudioUtil.audioDuration(url: tempURL)
@@ -232,7 +241,7 @@ class IndicatorViewModel: ObservableObject {
                         guard !text.isEmpty else {
                             try? FileManager.default.removeItem(at: tempURL)
                             print("Cleanup produced an empty dictation; discarded")
-                            self.delegate?.didFinishDecoding()
+                            self.delegate?.didFinishDecoding(self)
                             return
                         }
 
@@ -270,7 +279,7 @@ class IndicatorViewModel: ObservableObject {
                         // session finishing late cannot paste over a newer dictation.
                         guard self.latestDictationGate.claimIfCurrent(generation) else {
                             print("Saved stale or already-pasted dictation generation \(generation) without pasting")
-                            self.delegate?.didFinishDecoding()
+                            self.delegate?.didFinishDecoding(self)
                             return
                         }
                         
@@ -295,13 +304,13 @@ class IndicatorViewModel: ObservableObject {
                 }
                 
                 await MainActor.run {
-                    self.delegate?.didFinishDecoding()
+                    self.delegate?.didFinishDecoding(self)
                 }
             } else {
                 print("!!! Not found record url !!!")
                 
                 await MainActor.run {
-                    self.delegate?.didFinishDecoding()
+                    self.delegate?.didFinishDecoding(self)
                 }
             }
         }
@@ -378,7 +387,9 @@ class IndicatorViewModel: ObservableObject {
     func cancelRecording() {
         hideTimer?.invalidate()
         hideTimer = nil
-        recorder.cancelRecording()
+        guard let sessionID = recorderSessionID else { return }
+        recorderSessionID = nil
+        recorder.cancelRecording(sessionID: sessionID)
     }
 }
 

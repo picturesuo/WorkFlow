@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Protect active meetings and newer recordings from rejected or stale dictation shortcuts, and return canceled microphone connections to the ready state.
+- Keep older dictation completions from hiding a newer recording, and isolate queued transcription cancellation from other active dictations.
+- Preserve queued audio across interrupted saves, keep missing-audio items visible as failures, and cancel pending work after committed history deletion.
+- Commit history deletion before removing audio, stop playback for deleted items, and show an error if deletion fails.
+- Retain loaded history depth during refresh, search punctuation literally, and limit recording-clock and playback updates to the controls that need them.
 - Redesign the resizable main window with a clear History heading, compact recording controls, visible recording actions, and metadata that wraps at narrow widths; fix the onboarding title being invisible in light mode.
 - Keep active searches when history updates, ignore stale search responses, and make failed history loads retryable.
 - Give new dictations and imports unique audio filenames, and refuse to overwrite an existing recording when saving.

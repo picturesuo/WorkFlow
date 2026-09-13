@@ -137,6 +137,49 @@ final class RecordingHistoryTests: XCTestCase {
             status: .completed, progress: 1
         )
     }
+
+    func testRefreshKeepsLoadedDepthAndPaginationContinuesWithoutDuplicates() async throws {
+        let loader = ControlledHistoryLoader()
+        let history = RecordingHistoryModel(pageSize: 2, loader: loader.load)
+        let first = [recording("one"), recording("two")]
+        let second = [recording("three"), recording("four")]
+        let firstTask = history.refresh()
+        let firstRequest = await loader.nextRequest()
+        firstRequest.succeed(first)
+        await firstTask.value
+        let secondTask = try XCTUnwrap(history.loadMore())
+        let secondRequest = await loader.nextRequest()
+        secondRequest.succeed(second)
+        await secondTask.value
+
+        let refreshTask = history.refresh()
+        let refreshRequest = await loader.nextRequest()
+        XCTAssertEqual(refreshRequest.offset, 0)
+        XCTAssertEqual(refreshRequest.limit, 4, "A background completion must not drop the second page")
+        XCTAssertEqual(history.recordings, first + second)
+        refreshRequest.succeed(first + second)
+        await refreshTask.value
+        XCTAssertEqual(history.recordings, first + second)
+
+        let nextTask = try XCTUnwrap(history.loadMore())
+        let nextRequest = await loader.nextRequest()
+        XCTAssertEqual(nextRequest.offset, 4)
+        XCTAssertEqual(nextRequest.limit, 2)
+        let last = recording("five")
+        nextRequest.succeed([last])
+        await nextTask.value
+        XCTAssertEqual(history.recordings, first + second + [last])
+        XCTAssertEqual(Set(history.recordings.map(\.id)).count, 5)
+        XCTAssertFalse(history.canLoadMore)
+
+        let searchTask = history.search(query: "new query")
+        let searchRequest = await loader.nextRequest()
+        XCTAssertEqual(searchRequest.offset, 0)
+        XCTAssertEqual(searchRequest.limit, 2, "A new search starts at the normal page size")
+        searchRequest.succeed([])
+        await searchTask.value
+    }
+
 }
 
 /// Requests complete only when the test decides, including after cancellation.

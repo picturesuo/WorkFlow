@@ -286,7 +286,14 @@ class IndicatorWindowManager: IndicatorViewDelegate {
         }
     }
     
-    func didFinishDecoding() {
+    func didFinishDecoding(_ completedViewModel: IndicatorViewModel) {
+        Self.finishDecoding(from: completedViewModel, current: viewModel, hide: hide)
+    }
+
+    /// Completion can arrive after another indicator has taken over the window.
+    /// Keep the routing independent of AppKit so delayed callbacks are testable.
+    static func finishDecoding(from completed: AnyObject, current: AnyObject?, hide: () -> Void) {
+        guard completed === current else { return }
         hide()
     }
 }

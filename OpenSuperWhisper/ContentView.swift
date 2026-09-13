@@ -23,12 +23,14 @@ final class RecordingHistoryModel: ObservableObject {
 
     private let loader: Loader
     private let pageSize: Int
+    private var initialPageLimit: Int
     private var nextOffset = 0
     private var generation = UUID()
     private var loadTask: Task<Void, Never>?
 
     init(pageSize: Int = 100, loader: @escaping Loader) {
         self.pageSize = pageSize
+        self.initialPageLimit = pageSize
         self.loader = loader
     }
 
@@ -36,6 +38,7 @@ final class RecordingHistoryModel: ObservableObject {
     func search(query: String) -> Task<Void, Never> {
         self.query = query
         recordings = []
+        nextOffset = 0
         return refresh()
     }
 
@@ -45,6 +48,7 @@ final class RecordingHistoryModel: ObservableObject {
         generation = UUID()
         loadTask?.cancel()
         isLoadingMore = false
+        initialPageLimit = max(pageSize, max(recordings.count, nextOffset))
         nextOffset = 0
         canLoadMore = true
         return loadMore()!
@@ -58,6 +62,7 @@ final class RecordingHistoryModel: ObservableObject {
         let requestGeneration = generation
         let requestQuery = query
         let offset = nextOffset
+        let limit = offset == 0 ? initialPageLimit : pageSize
 
         let task = Task { [weak self] in
             guard let self else { return }
@@ -70,7 +75,7 @@ final class RecordingHistoryModel: ObservableObject {
             }
 
             do {
-                let page = try await self.loader(requestQuery, self.pageSize, offset)
+                let page = try await self.loader(requestQuery, limit, offset)
                 guard self.generation == requestGeneration else { return }
                 if offset == 0 {
                     self.recordings = page
@@ -78,7 +83,7 @@ final class RecordingHistoryModel: ObservableObject {
                     self.recordings.append(contentsOf: page)
                 }
                 self.nextOffset = offset + page.count
-                self.canLoadMore = page.count == self.pageSize
+                self.canLoadMore = page.count == limit
             } catch {
                 guard self.generation == requestGeneration else { return }
                 self.errorMessage = "History couldn't load. Try again."
@@ -109,12 +114,11 @@ class ContentViewModel: ObservableObject {
     var isLoadingMore: Bool { history.isLoadingMore }
     var canLoadMore: Bool { history.canLoadMore }
     var historyError: String? { history.errorMessage }
-    @Published var recordingDuration: TimeInterval = 0
+    @Published private(set) var recordingStartedAt: Date?
     @Published var microphoneService = MicrophoneService.shared
     @Published var recordingError: String?
+    @Published var historyDeletionError: String?
     
-    private var recordingStartTime: Date?
-    private var durationTimer: Timer?
     private var cancellables = Set<AnyCancellable>()
     
     init() {
@@ -122,32 +126,32 @@ class ContentViewModel: ObservableObject {
             .sink { [weak self] _ in self?.objectWillChange.send() }
             .store(in: &cancellables)
 
-        recorder.$isConnecting
+        recorder.$isRecording.combineLatest(recorder.$isConnecting)
             .receive(on: RunLoop.main)
-            .sink { [weak self] isConnecting in
-                guard let self = self else { return }
-                if isConnecting && self.state != .decoding {
-                    self.state = .connecting
-                    self.stopDurationTimer()
-                    self.recordingDuration = 0
-                }
+            .sink { [weak self] _ in
+                guard let self else { return }
+                // Both flags publish in the same main-queue block. Read the
+                // settled pair rather than an intermediate Combine emission.
+                self.updateRecorderState(
+                    isRecording: self.recorder.isRecording,
+                    isConnecting: self.recorder.isConnecting
+                )
             }
             .store(in: &cancellables)
-        
-        recorder.$isRecording
-            .receive(on: RunLoop.main)
-            .sink { [weak self] isRecording in
-                guard let self = self else { return }
-                if isRecording && self.state != .decoding {
-                    self.state = .recording
-                    self.startDurationTimerIfNeeded()
-                } else if !isRecording && self.state == .recording {
-                    self.state = .idle
-                    self.stopDurationTimer()
-                    self.recordingDuration = 0
-                }
-            }
-            .store(in: &cancellables)
+    }
+
+    func updateRecorderState(isRecording: Bool, isConnecting: Bool) {
+        guard state != .decoding else { return }
+        if isRecording {
+            if state != .recording { state = .recording }
+            markRecordingStartedIfNeeded()
+        } else if isConnecting {
+            if state != .connecting { state = .connecting }
+            resetRecordingStart()
+        } else if state == .recording || state == .connecting {
+            state = .idle
+            resetRecordingStart()
+        }
     }
     
     func loadInitialData() {
@@ -184,15 +188,23 @@ class ContentViewModel: ObservableObject {
     }
     
     func deleteRecording(_ recording: Recording) {
-        recordingStore.deleteRecording(recording)
-        if let index = recordings.firstIndex(where: { $0.id == recording.id }) {
-            recordings.remove(at: index)
+        Task {
+            do {
+                try await recordingStore.deleteRecordingSync(recording)
+            } catch {
+                historyDeletionError = "The recording could not be deleted. Your saved audio was kept. Please try again."
+            }
         }
     }
     
     func deleteAllRecordings() {
-        recordingStore.deleteAllRecordings()
-        recordings.removeAll()
+        Task {
+            do {
+                try await recordingStore.deleteAllRecordingsSync()
+            } catch {
+                historyDeletionError = "History could not be deleted. Your saved audio was kept. Please try again."
+            }
+        }
     }
 
     var isRecording: Bool {
@@ -205,13 +217,10 @@ class ContentViewModel: ObservableObject {
 
         if microphoneService.isActiveMicrophoneRequiresConnection() {
             state = .connecting
-            stopDurationTimer()
-            recordingDuration = 0
+            resetRecordingStart()
         } else {
             state = .recording
-            recordingStartTime = Date()
-            recordingDuration = 0
-            startDurationTimerIfNeeded()
+            recordingStartedAt = Date()
         }
         
         guard recorder.startRecording(completion: { [weak self] startError in
@@ -219,21 +228,20 @@ class ContentViewModel: ObservableObject {
             Task { @MainActor in
                 guard let self else { return }
                 self.state = .idle
-                self.stopDurationTimer()
-                self.recordingDuration = 0
+                self.resetRecordingStart()
                 self.recordingError = startError
             }
         }) else {
             state = .idle
-            stopDurationTimer()
-            recordingDuration = 0
+            resetRecordingStart()
             return
         }
     }
 
     func startDecoding() {
+        guard state != .decoding else { return }
         state = .decoding
-        stopDurationTimer()
+        resetRecordingStart()
         
         IndicatorWindowManager.shared.hide()
 
@@ -294,41 +302,24 @@ class ContentViewModel: ObservableObject {
 
                 await MainActor.run {
                     self.state = .idle
-                    self.recordingDuration = 0
                 }
             } else {
                 await MainActor.run {
                     self.state = .idle
-                    self.recordingDuration = 0
                 }
             }
         }
     }
 
-    private func stopDurationTimer() {
-        durationTimer?.invalidate()
-        durationTimer = nil
-        recordingStartTime = nil
-    }
-    
-    private func startDurationTimerIfNeeded() {
-        guard durationTimer == nil else { return }
-        if recordingStartTime == nil {
-            recordingStartTime = Date()
-            recordingDuration = 0
-        }
-        durationTimer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [weak self] _ in
-            guard let self = self else { return }
-            let startTime = Date()
-            Task { @MainActor in
-                if let recordingStartTime = self.recordingStartTime {
-                    self.recordingDuration = startTime.timeIntervalSince(recordingStartTime)
-                }
-            }
-        }
-        RunLoop.main.add(durationTimer!, forMode: .common)
+    private func resetRecordingStart() {
+        if recordingStartedAt != nil { recordingStartedAt = nil }
     }
 
+    private func markRecordingStartedIfNeeded() {
+        if recordingStartedAt == nil {
+            recordingStartedAt = Date()
+        }
+    }
 }
 
 struct ContentView: View {
@@ -619,6 +610,17 @@ struct ContentView: View {
         } message: {
             Text(viewModel.recordingError ?? "The microphone could not start.")
         }
+        .alert(
+            "Couldn’t delete recordings",
+            isPresented: Binding(
+                get: { viewModel.historyDeletionError != nil },
+                set: { if !$0 { viewModel.historyDeletionError = nil } }
+            )
+        ) {
+            Button("OK") { viewModel.historyDeletionError = nil }
+        } message: {
+            Text(viewModel.historyDeletionError ?? "Please try again.")
+        }
         .onReceive(NotificationCenter.default.publisher(for: .openSettings)) { _ in
             isSettingsPresented = true
         }
@@ -714,7 +716,7 @@ private struct DictationControls: View {
         if meetingController.isRecording { return .meeting }
         if viewModel.state == .decoding { return .transcribing }
         // Stopping dictation must remain available even when another service becomes busy.
-        if viewModel.isRecording { return .recording(viewModel.recordingDuration) }
+        if viewModel.isRecording { return .recording(0) }
         if viewModel.state == .connecting || viewModel.state == .recording { return .connecting }
         if transcriptionService.isLoading { return .loadingModel }
         if transcriptionService.isTranscribing || transcriptionQueue.isProcessing { return .processingQueue }
@@ -723,6 +725,17 @@ private struct DictationControls: View {
     }
 
     var body: some View {
+        if status.isRecording, let startedAt = viewModel.recordingStartedAt {
+            // Only the dock ticks. The history does not depend on elapsed time.
+            TimelineView(.periodic(from: startedAt, by: 1)) { context in
+                dock(status: .recording(max(0, context.date.timeIntervalSince(startedAt))))
+            }
+        } else {
+            dock(status: status)
+        }
+    }
+
+    private func dock(status: DictationDockStatus) -> some View {
         DictationDock(status: status, shortcut: shortcut, cleanupMode: $cleanupMode) {
             if viewModel.isRecording {
                 viewModel.startDecoding()
@@ -894,11 +907,8 @@ struct RecordingRow: View {
     let searchQuery: String
     let onDelete: () -> Void
     let onRegenerate: () -> Void
-    @ObservedObject private var audioRecorder = AudioRecorder.shared
-
-    private var isPlaying: Bool {
-        audioRecorder.isPlaying && audioRecorder.currentlyPlayingURL == recording.url
-    }
+    private let audioRecorder = AudioRecorder.shared
+    @State private var isPlaying = false
 
     var body: some View {
         RecordingCard(
@@ -916,12 +926,14 @@ struct RecordingRow: View {
                 NSPasteboard.general.clearContents()
                 NSPasteboard.general.setString(recording.transcription, forType: .string)
             },
-            onDelete: {
-                if isPlaying { audioRecorder.stopPlaying() }
-                onDelete()
-            },
+            onDelete: onDelete,
             onRegenerate: onRegenerate
         )
+        .onReceive(
+            audioRecorder.$isPlaying.combineLatest(audioRecorder.$currentlyPlayingURL)
+                .map { playing, url in playing && url == recording.url }
+                .removeDuplicates()
+        ) { isPlaying = $0 }
     }
 }
 
