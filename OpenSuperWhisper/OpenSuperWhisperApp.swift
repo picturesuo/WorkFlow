@@ -29,13 +29,12 @@ struct OpenSuperWhisperApp: App {
                     ContentView()
                 }
             }
-            .frame(width: 450)
-            .frame(minHeight: 400, maxHeight: 900)
+            .frame(minWidth: 440, idealWidth: 560, minHeight: 460)
             .environmentObject(appState)
             .tint(BrandPalette.violet)
         }
         .windowStyle(.hiddenTitleBar)
-        .defaultSize(width: 450, height: 650)
+        .defaultSize(width: 560, height: 720)
         .windowResizability(.contentMinSize)
         .commands {
             CommandGroup(replacing: .newItem) {}
@@ -492,8 +491,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
     private func adoptMainWindow(_ window: NSWindow) {
         mainWindow = window
         window.delegate = self
-        window.minSize = NSSize(width: 450, height: 400)
-        window.maxSize = NSSize(width: 450, height: 900)
+        window.minSize = NSSize(width: 440, height: 460)
 
         if hideMainWindowAtLaunch {
             hideMainWindowAtLaunch = false
@@ -535,8 +533,4 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
     }
 }
 
-extension AppDelegate: NSWindowDelegate {
-    func windowWillResize(_ sender: NSWindow, to frameSize: NSSize) -> NSSize {
-        return NSSize(width: 450, height: frameSize.height)
-    }
-}
+extension AppDelegate: NSWindowDelegate {}

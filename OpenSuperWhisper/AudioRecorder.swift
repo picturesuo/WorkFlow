@@ -18,6 +18,12 @@ class AudioRecorder: NSObject, ObservableObject {
     /// Extra audio captured after a stop request, so the tail of the last word
     /// (released together with the hotkey) is not clipped.
     static let stopTailDuration: TimeInterval = 0.25
+
+    /// Sessions can overlap while the previous recording captures its final
+    /// word. Wall-clock seconds are not unique enough for either audio path.
+    static func recordingFileName(id: UUID = UUID()) -> String {
+        "\(id.uuidString).wav"
+    }
     
     // Serializes all recording state mutations (start/stop/cancel/connection monitoring)
     // so a stop arriving right after a start can never overtake it.
@@ -184,8 +190,7 @@ class AudioRecorder: NSObject, ObservableObject {
     }
     
     private func performStart(activeMic: MicrophoneService.AudioDevice?, monitorConnection: Bool) -> String? {
-        let timestamp = Int(Date().timeIntervalSince1970)
-        let fileURL = temporaryDirectory.appendingPathComponent("\(timestamp).wav")
+        let fileURL = temporaryDirectory.appendingPathComponent(Self.recordingFileName())
         currentRecordingURL = fileURL
         
         print("Starting audio recording.")
@@ -344,9 +349,6 @@ class AudioRecorder: NSObject, ObservableObject {
             try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         }
 
-        if FileManager.default.fileExists(atPath: finalURL.path) {
-            try FileManager.default.removeItem(at: finalURL)
-        }
         try FileManager.default.moveItem(at: tempURL, to: finalURL)
     }
     

@@ -776,18 +776,13 @@ class RecordingStore: ObservableObject {
         }
     }
     
-    nonisolated func searchRecordingsAsync(query: String, limit: Int = 100, offset: Int = 0) async -> [Recording] {
-        do {
-            return try await dbQueue.read { db in
-                try Recording
-                    .filter(Recording.Columns.transcription.like("%\(query)%").collating(.nocase))
-                    .order(Recording.Columns.timestamp.desc)
-                    .limit(limit, offset: offset)
-                    .fetchAll(db)
-            }
-        } catch {
-            print("Failed to search recordings.")
-            return []
+    nonisolated func searchRecordingsAsync(query: String, limit: Int = 100, offset: Int = 0) async throws -> [Recording] {
+        try await dbQueue.read { db in
+            try Recording
+                .filter(Recording.Columns.transcription.like("%\(query)%").collating(.nocase))
+                .order(Recording.Columns.timestamp.desc)
+                .limit(limit, offset: offset)
+                .fetchAll(db)
         }
     }
 }

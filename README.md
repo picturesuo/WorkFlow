@@ -31,6 +31,7 @@ Requirements: Apple Silicon, macOS 14 or newer, Xcode, Homebrew, Rust, and Git. 
 - Choose the bottom-left `Fn`/globe key, another modifier, or the permission-free `Option`+backtick shortcut.
 - Parakeet v3 runs locally by default; Whisper remains available.
 - A single app-wide generation gate prevents a slower, older dictation from pasting over the newest one.
+- Unique audio filenames keep rapid dictations and batch imports from overwriting one another.
 - The recorder starts before accessibility-position lookup, and transcription waits for cold model loading instead of dropping the first request.
 - Personal vocabulary and per-app cleanup, style, and paste rules are deterministic.
 - Meeting recordings go to named History items and never auto-paste.
@@ -60,6 +61,12 @@ Choose a mode in the main window or the WorkFlow menu-bar menu before dictating:
 - **Everyday** removes speech artifacts while preserving natural tone and detail.
 
 Each successful cleanup stores a local estimate of the source and final text size. History shows the result per dictation, and **Settings → Cleanup** compares Technical with Homework and Everyday for the current month. The comparison uses source tokens ÷ final tokens and a geometric mean across dictations. These are clearly labeled local estimates; provider-reported billing tokens and costs remain separate.
+
+## History and recording controls
+
+Resize the main window to give longer transcripts more room. History keeps recording actions visible and separates dates and durations from cleanup details. The compact recording bar shows the current state, shortcut, and writing mode while leaving more space for transcripts.
+
+Search stays active when recordings update. A newer search replaces any older request, and a failed history load offers a retry. History remains available while the speech model loads; recording becomes available when the model is ready.
 
 ## Cleanup choices
 
@@ -103,10 +110,13 @@ xcodebuild test \
   -derivedDataPath build \
   -destination 'platform=macOS,arch=arm64' \
   -only-testing:OpenSuperWhisperTests \
+  -skip-testing:OpenSuperWhisperTests/ClipboardUtilPasteIntegrationTests \
+  -skip-testing:OpenSuperWhisperTests/ClipboardUtilKeyboardLayoutTests \
+  -skip-testing:OpenSuperWhisperTests/KeyboardLayoutProviderTests \
   CODE_SIGNING_ALLOWED=NO
 ```
 
-This runs the complete deterministic unit-test target. The separate UI-test target needs an interactive macOS session and is intentionally excluded from headless and agent runs.
+This runs the unit-test target without the three integration suites that launch TextEdit or switch the system keyboard layout. Run those suites separately in an interactive macOS session with foreground approval. The separate UI-test target also needs an interactive session and is intentionally excluded from headless and agent runs.
 
 The internal Xcode target remains `OpenSuperWhisper` so the fork retains a reviewable history. The app, executable, and bundle identity are WorkFlow. Upgrades copy preferences and History/models forward from earlier Chat or GlowScribe installations without deleting the old data, and securely move provider credentials into WorkFlow's Keychain identity. Because macOS does not migrate privacy grants between bundle identifiers, an existing user must approve Microphone, Accessibility, and—when using a modifier-only shortcut—Input Monitoring once more.
 

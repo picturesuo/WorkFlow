@@ -106,8 +106,8 @@ class TranscriptionQueue: ObservableObject {
             let durationInSeconds = await AudioUtil.audioDuration(url: url)
 
             let timestamp = Date()
-            let fileName = "\(Int(timestamp.timeIntervalSince1970)).wav"
             let id = UUID()
+            let fileName = AudioRecorder.recordingFileName(id: id)
 
             let recording = Recording(
                 id: id,

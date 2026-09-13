@@ -2,7 +2,10 @@
 
 ## Unreleased
 
-- Refresh the main window with a draggable header, a calmer bottom dock, keycap shortcut hints, and consistent card styling; fix the onboarding title being invisible in light mode.
+- Redesign the resizable main window with a clear History heading, compact recording controls, visible recording actions, and metadata that wraps at narrow widths; fix the onboarding title being invisible in light mode.
+- Keep active searches when history updates, ignore stale search responses, and make failed history loads retryable.
+- Give new dictations and imports unique audio filenames, and refuse to overwrite an existing recording when saving.
+- Keep history usable during model loading, separate meeting and dictation controls, show recording/save failures, and preserve short multiline transcripts in full.
 - Label the main record control for VoiceOver, align Debug and test builds with the documented macOS 14 minimum, and make model/dependency attribution explicit.
 - Keep transcript text, dropped-file paths, and provider error payloads out of diagnostic logs.
 - Leave a failed targeted paste on the clipboard and show a visible recovery message instead of redirecting it into another app.

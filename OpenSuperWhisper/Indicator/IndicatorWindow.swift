@@ -237,8 +237,8 @@ class IndicatorViewModel: ObservableObject {
                         }
 
                         let timestamp = Date()
-                        let fileName = "\(Int(timestamp.timeIntervalSince1970)).wav"
                         let recordingId = UUID()
+                        let fileName = AudioRecorder.recordingFileName(id: recordingId)
                         let newRecording = Recording(
                             id: recordingId,
                             timestamp: timestamp,

@@ -28,25 +28,25 @@ enum WFMotion {
 enum ThemePalette {
     static func windowBackground(_ scheme: ColorScheme) -> Color {
         scheme == .dark
-            ? Color(NSColor.underPageBackgroundColor)
-            : Color(red: 0.976, green: 0.973, blue: 0.988)
+            ? Color(red: 0.105, green: 0.105, blue: 0.12)
+            : Color(red: 0.965, green: 0.965, blue: 0.975)
     }
 
     static func panelSurface(_ scheme: ColorScheme) -> Color {
         scheme == .dark
-            ? BrandPalette.deepViolet.opacity(0.12)
-            : BrandPalette.lavender.opacity(0.10)
+            ? Color.white.opacity(0.04)
+            : Color.black.opacity(0.025)
     }
 
     static func panelBorder(_ scheme: ColorScheme) -> Color {
         scheme == .dark
-            ? BrandPalette.violet.opacity(0.24)
-            : BrandPalette.violet.opacity(0.18)
+            ? Color.white.opacity(0.08)
+            : Color.black.opacity(0.08)
     }
 
     static func cardBackground(_ scheme: ColorScheme) -> Color {
         scheme == .dark
-            ? Color(NSColor.controlBackgroundColor)
+            ? Color(red: 0.145, green: 0.145, blue: 0.165)
             : Color.white
     }
 
@@ -57,23 +57,19 @@ enum ThemePalette {
     }
 
     static func cardShadow(_ scheme: ColorScheme) -> Color {
-        scheme == .dark ? .clear : Color.black.opacity(0.06)
+        scheme == .dark ? .clear : Color.black.opacity(0.025)
     }
 
     static func hairline(_ scheme: ColorScheme) -> Color {
         scheme == .dark ? Color.white.opacity(0.10) : Color.black.opacity(0.08)
     }
 
-    static func recordButtonBase(_ scheme: ColorScheme) -> Color {
-        BrandPalette.violet
-    }
-
     static func iconAccent(_ scheme: ColorScheme) -> Color {
-        BrandPalette.violet
+        scheme == .dark ? BrandPalette.lavender : BrandPalette.violet
     }
 
     static func linkText(_ scheme: ColorScheme) -> Color {
-        BrandPalette.violet
+        scheme == .dark ? BrandPalette.lavender : BrandPalette.violet
     }
 
     static var brandGradient: LinearGradient {
@@ -94,7 +90,7 @@ struct WFPressableStyle: ButtonStyle {
         configuration.label
             .scaleEffect(configuration.isPressed && !reduceMotion ? 0.96 : 1.0)
             .opacity(configuration.isPressed ? 0.9 : 1.0)
-            .animation(WFMotion.quick, value: configuration.isPressed)
+            .animation(reduceMotion ? nil : WFMotion.quick, value: configuration.isPressed)
     }
 }
 
@@ -134,46 +130,14 @@ struct ToolbarIconButton: View {
                     RoundedRectangle(cornerRadius: WFRadius.control, style: .continuous)
                         .fill(isHovered
                               ? BrandPalette.violet.opacity(0.14)
-                              : ThemePalette.panelSurface(colorScheme))
-                )
-                .overlay(
-                    RoundedRectangle(cornerRadius: WFRadius.control, style: .continuous)
-                        .stroke(ThemePalette.panelBorder(colorScheme), lineWidth: 1)
+                              : Color.clear)
                 )
                 .contentShape(RoundedRectangle(cornerRadius: WFRadius.control, style: .continuous))
         }
         .buttonStyle(WFPressableStyle())
-        .onHover { hovering in
-            withAnimation(WFMotion.quick) {
-                isHovered = hovering
-            }
-        }
+        .onHover { isHovered = $0 }
         .help(help)
         .accessibilityLabel(accessibilityLabel)
-    }
-}
-
-// MARK: - Key cap
-
-struct KeyCapView: View {
-    let text: String
-    @Environment(\.colorScheme) private var colorScheme
-
-    var body: some View {
-        Text(text)
-            .font(.system(size: 13, weight: .semibold, design: .rounded))
-            .monospacedDigit()
-            .padding(.horizontal, 8)
-            .padding(.vertical, 4)
-            .background(
-                RoundedRectangle(cornerRadius: 6, style: .continuous)
-                    .fill(ThemePalette.cardBackground(colorScheme))
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: 6, style: .continuous)
-                    .stroke(ThemePalette.hairline(colorScheme), lineWidth: 1)
-            )
-            .shadow(color: ThemePalette.hairline(colorScheme), radius: 0, y: 1.5)
     }
 }
 
