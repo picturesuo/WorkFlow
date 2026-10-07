@@ -154,7 +154,8 @@ enum CleanupGuardError: LocalizedError, Equatable {
 enum CleanupGuard {
     /// - Parameter allowsNumberFormatting: Set only for custom filters, which
     ///   may ask for a number style. It accepts a digit form only when that exact
-    ///   value is spelled out in the source, so a changed value still fails.
+    ///   value, clock time, or digit sequence is spelled out in the source, so a
+    ///   changed value or a reordered digit still fails.
     static func postprocess(
         _ value: String,
         source: String,
@@ -202,13 +203,17 @@ enum CleanupGuard {
         var sourceNumbers = numericTokens(in: trimmedSource)
         let cleanedNumbers = numericTokens(in: cleaned)
         if allowsNumberFormatting {
-            sourceNumbers.formUnion(SpokenNumberParser.values(in: trimmedSource))
+            let spoken = SpokenNumberParser.parse(trimmedSource)
+            sourceNumbers.formUnion(spoken.values)
             let unexplained = cleanedNumbers.subtracting(sourceNumbers)
             // A spoken range ("five to ten") may be written as "5-10" only when
-            // every endpoint is itself a value from the source.
+            // every endpoint is itself a value from the source, and spoken
+            // digits ("five five five one two three four") may be grouped with
+            // hyphens ("555-1234") only in their spoken order.
             guard unexplained.allSatisfy({ token in
                 let parts = token.split(separator: "-", omittingEmptySubsequences: false).map(String.init)
-                return parts.count > 1 && parts.allSatisfy(sourceNumbers.contains)
+                return (parts.count > 1 && parts.allSatisfy(sourceNumbers.contains))
+                    || spoken.digitSequences.contains(parts.joined())
             }) else {
                 throw CleanupGuardError.unsafeRewrite
             }

@@ -4,35 +4,30 @@ import XCTest
 @testable import OpenSuperWhisper
 
 /// Renders the custom filter views without opening, activating, or capturing a
-/// window. Fixtures are synthetic and never touch the user's History.
+/// window. Fixtures are synthetic, live in a throwaway defaults suite, and
+/// never touch the user's preferences or History.
 @MainActor
 final class CustomCleanupFilterLayoutTests: XCTestCase {
-    private var savedValues: [String: Any] = [:]
-    private let keys = [
-        CustomCleanupFilterStore.dataKey,
-        CustomCleanupFilterStore.selectedIDKey,
-        CustomCleanupFilterStore.modeKey
-    ]
+    private var defaults: UserDefaults!
+    private var suiteName: String!
 
     override func setUp() {
         super.setUp()
-        for key in keys {
-            savedValues[key] = UserDefaults.standard.object(forKey: key)
-        }
+        suiteName = "CustomCleanupFilterLayoutTests-\(UUID().uuidString)"
+        defaults = UserDefaults(suiteName: suiteName)
     }
 
     override func tearDown() {
-        for key in keys {
-            UserDefaults.standard.set(savedValues[key], forKey: key)
-        }
+        defaults.removePersistentDomain(forName: suiteName)
         super.tearDown()
     }
 
     func testFilterCardWithSavedFiltersAndEditor() throws {
         let digits = CustomCleanupFilterStore.examples[0]
         let hyphens = CustomCleanupFilterStore.examples[2]
-        CustomCleanupFilterStore.save([digits, hyphens])
-        CustomCleanupFilterStore.select(.custom(digits.id))
+        CustomCleanupFilterStore.save([digits, hyphens], to: defaults)
+        CustomCleanupFilterStore.select(.custom(digits.id), in: defaults)
+        XCTAssertEqual(CustomCleanupFilterStore.currentSelection(in: defaults), .custom(digits.id))
 
         let draft = CustomCleanupFilter(name: "Technical with words", baseMode: .technical, instructions: "")
         for (name, view) in [
@@ -56,6 +51,7 @@ final class CustomCleanupFilterLayoutTests: XCTestCase {
             .frame(width: width)
             .background(Color(.windowBackgroundColor))
             .environment(\.colorScheme, scheme)
+            .defaultAppStorage(defaults)
         let host = NSHostingView(rootView: content)
         let size = host.fittingSize
         XCTAssertGreaterThan(size.height, 20)

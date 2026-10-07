@@ -196,16 +196,33 @@ final class CustomCleanupPromptTests: XCTestCase {
 
 final class CustomFilterNumberGuardTests: XCTestCase {
     func testSpokenNumberParserFindsSpelledOutValues() {
-        let values = SpokenNumberParser.values(
-            in: "twenty-five chairs, three hundred and two plates, one thousand two hundred people, two point five hours, the twenty first floor, five ten, and nineteen eighty four"
-        )
+        let values = SpokenNumberParser.parse(
+            "twenty-five chairs, three hundred and two plates, one thousand two hundred people, two point five hours, the twenty first floor, five ten, and nineteen eighty four"
+        ).values
         for expected in ["25", "302", "1200", "2.5", "21", "5", "10", "1984"] {
             XCTAssertTrue(values.contains(expected), "Missing \(expected) in \(values)")
         }
         XCTAssertFalse(values.contains("510"))
-        XCTAssertTrue(SpokenNumberParser.values(in: "no numbers here").isEmpty)
-        XCTAssertTrue(SpokenNumberParser.values(in: "twenty twenty six").contains("2026"))
-        XCTAssertTrue(SpokenNumberParser.values(in: "a hundred and five").contains("105"))
+        XCTAssertEqual(SpokenNumberParser.parse("no numbers here"), SpokenNumbers())
+        XCTAssertTrue(SpokenNumberParser.parse("twenty twenty six").values.contains("2026"))
+        XCTAssertTrue(SpokenNumberParser.parse("a hundred and five").values.contains("105"))
+    }
+
+    func testSpokenNumberParserFindsClockFormsAndDigitSequences() {
+        let clock = SpokenNumberParser.parse("meet at five thirty, twelve fifteen, seven o'clock, or nine oh five").values
+        for expected in ["5:30", "12:15", "7:00", "9:05"] {
+            XCTAssertTrue(clock.contains(expected), "Missing \(expected) in \(clock)")
+        }
+        XCTAssertFalse(SpokenNumberParser.parse("twenty five thirty").values.contains("25:30"))
+        XCTAssertFalse(SpokenNumberParser.parse("five sixty").values.contains("5:60"))
+        XCTAssertFalse(SpokenNumberParser.parse("five thirty").values.contains("5:45"))
+
+        let digits = SpokenNumberParser.parse("code four seven two one, then call five five five one two three four")
+        XCTAssertEqual(digits.digitSequences, ["4721", "5551234"])
+        XCTAssertFalse(digits.values.contains("4721"))
+        XCTAssertTrue(SpokenNumberParser.parse("one twenty five").digitSequences.isEmpty)
+        XCTAssertTrue(SpokenNumberParser.parse("four and seven").digitSequences.isEmpty)
+        XCTAssertTrue(SpokenNumberParser.parse("two point oh five").values.contains("2.05"))
     }
 
     func testCustomFilterMayWriteSpokenNumbersAsDigitsWithoutChangingValues() throws {
@@ -241,6 +258,39 @@ final class CustomFilterNumberGuardTests: XCTestCase {
         XCTAssertThrowsError(try CleanupGuard.postprocess(
             "About 25 hours.",
             source: "about two point five hours",
+            allowsNumberFormatting: true
+        ))
+    }
+
+    func testCustomFilterMayWriteSpokenClockTimesAndDigitSequences() throws {
+        let time = "um, let's meet at five thirty or seven o'clock"
+        XCTAssertEqual(
+            try CleanupGuard.postprocess("Let's meet at 5:30 or 7:00.", source: time, allowsNumberFormatting: true),
+            "Let's meet at 5:30 or 7:00."
+        )
+        XCTAssertThrowsError(try CleanupGuard.postprocess("Let's meet at 5:30 or 7:00.", source: time))
+        XCTAssertThrowsError(try CleanupGuard.postprocess("Let's meet at 5:45.", source: time, allowsNumberFormatting: true))
+        XCTAssertThrowsError(try CleanupGuard.postprocess("Let's meet at 17:30.", source: time, allowsNumberFormatting: true))
+
+        let phone = "my extension is four seven two one and the office is five five five one two three four"
+        XCTAssertEqual(
+            try CleanupGuard.postprocess(
+                "My extension is 4721 and the office is 555-1234.",
+                source: phone,
+                allowsNumberFormatting: true
+            ),
+            "My extension is 4721 and the office is 555-1234."
+        )
+        XCTAssertThrowsError(try CleanupGuard.postprocess("My extension is 4721.", source: phone))
+        for changed in ["4271", "4721-555", "1234-555", "555-5555", "47 21", "472", "4721 and 9"] {
+            XCTAssertThrowsError(
+                try CleanupGuard.postprocess("Call \(changed).", source: phone, allowsNumberFormatting: true),
+                "Accepted \(changed)"
+            )
+        }
+        XCTAssertThrowsError(try CleanupGuard.postprocess(
+            "About 2.5 hours.",
+            source: "about two five hours",
             allowsNumberFormatting: true
         ))
     }
@@ -413,6 +463,22 @@ final class CustomFilterProviderTransportTests: XCTestCase {
         let result = await pipeline(provider).finalize(source)
         XCTAssertEqual(result.source, .openAICompatible)
         XCTAssertEqual(result.text, cleaned)
+    }
+
+    func testClockTimeFromDigitsFilterKeepsProviderCleanup() async throws {
+        let spoken = "Um, let's meet at five thirty."
+        let written = "Let's meet at 5:30."
+        CleanupURLProtocol.handler = { request in
+            Self.response(request, #"{"choices":[{"message":{"role":"assistant","content":"\#(written)"}}]}"#)
+        }
+        let provider = OpenAIChatCleanupService(
+            providerID: .openAICompatible, baseURL: "https://example.com/v1", modelID: "fast-model",
+            apiKey: "compatible-test", timeout: 1, session: session
+        )
+        let result = await pipeline(provider).finalize(spoken)
+        XCTAssertEqual(result.source, .openAICompatible)
+        XCTAssertEqual(result.text, written)
+        XCTAssertEqual(result.customFilterName, "Everyday with digits")
     }
 
     func testAzureUsesV1EndpointApiKeyHeaderAndDeploymentName() async throws {

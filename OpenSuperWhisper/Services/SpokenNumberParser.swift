@@ -1,17 +1,38 @@
 import Foundation
 
-/// Finds the numeric values that English number words in a transcript spell
-/// out, such as "twenty five" → 25 or "two point five" → 2.5. Cleanup uses the
-/// result only to accept a custom filter's digit formatting when the value
-/// already exists in the source; unusual phrasings simply yield nothing, so the
-/// cleanup guard keeps falling back to the local transcript for them.
+struct SpokenNumbers: Equatable {
+    /// Numeric values the words spell out, such as "25", "2.5", "1984", and
+    /// unambiguous clock forms such as "5:30" or "5:00".
+    var values: Set<String> = []
+    /// Contiguous runs of single digit words in spoken order, such as
+    /// "four seven two one" → "4721". Codes and phone numbers keep their digit
+    /// order, so a regrouped or reordered form never matches.
+    var digitSequences: Set<String> = []
+}
+
+/// Finds the numbers that English number words in a transcript spell out.
+/// Cleanup uses the result only to accept a custom filter's digit formatting
+/// when the value already exists in the source; unusual phrasings simply yield
+/// nothing, so the cleanup guard keeps falling back to the local transcript
+/// for them.
 enum SpokenNumberParser {
     private enum Kind {
         case none, unit, teen, tens, hundred, scale
     }
 
+    private struct Segment {
+        let value: Int
+        let smallOnly: Bool
+        let start: Int
+        let end: Int
+
+        var isTwoDigit: Bool { smallOnly && (10...99).contains(value) }
+        var isDigit: Bool { smallOnly && value < 10 && end - start == 1 }
+        var isHour: Bool { smallOnly && (1...23).contains(value) }
+    }
+
     private static let units: [String: Int] = [
-        "zero": 0, "one": 1, "two": 2, "three": 3, "four": 4, "five": 5,
+        "zero": 0, "oh": 0, "one": 1, "two": 2, "three": 3, "four": 4, "five": 5,
         "six": 6, "seven": 7, "eight": 8, "nine": 9
     ]
     private static let teens: [String: Int] = [
@@ -34,13 +55,13 @@ enum SpokenNumberParser {
         "sixtieth": 60, "seventieth": 70, "eightieth": 80, "ninetieth": 90
     ]
 
-    static func values(in text: String) -> Set<String> {
+    static func parse(_ text: String) -> SpokenNumbers {
         let words = text.lowercased()
             .components(separatedBy: CharacterSet.letters.inverted)
             .filter { !$0.isEmpty }
 
-        var results = Set<String>()
-        var segments: [(value: Int, isTwoDigit: Bool, start: Int, end: Int)] = []
+        var numbers = SpokenNumbers()
+        var segments: [Segment] = []
         var start: Int?
         var total = 0
         var current = 0
@@ -51,8 +72,8 @@ enum SpokenNumberParser {
         func flush(at index: Int) {
             guard inNumber else { return }
             let value = total + current
-            results.insert(String(value))
-            segments.append((value, smallOnly && (10...99).contains(value), start ?? index, index))
+            numbers.values.insert(String(value))
+            segments.append(Segment(value: value, smallOnly: smallOnly, start: start ?? index, end: index))
             start = nil
             total = 0
             current = 0
@@ -132,8 +153,8 @@ enum SpokenNumberParser {
                     digits += String(digit)
                     cursor += 1
                 }
-                results.insert(String(whole))
-                results.insert("\(whole).\(digits)")
+                numbers.values.insert(String(whole))
+                numbers.values.insert("\(whole).\(digits)")
                 total = 0
                 current = 0
                 kind = .none
@@ -150,11 +171,46 @@ enum SpokenNumberParser {
         }
         flush(at: index)
 
-        // Spoken years and codes pair two-digit groups: "twenty twenty six" → 2026.
-        for (first, second) in zip(segments, segments.dropFirst())
-        where first.isTwoDigit && second.isTwoDigit && second.start == first.end {
-            results.insert(String(format: "%d%02d", first.value, second.value))
+        for (first, second) in zip(segments, segments.dropFirst()) where second.start == first.end {
+            // Spoken years and codes pair two-digit groups: "twenty twenty six" → 2026.
+            if first.isTwoDigit, second.isTwoDigit {
+                numbers.values.insert(String(format: "%d%02d", first.value, second.value))
+            }
+            // "five thirty" → 5:30.
+            if first.isHour, second.isTwoDigit, second.value < 60 {
+                numbers.values.insert(String(format: "%d:%02d", first.value, second.value))
+            }
         }
-        return results
+
+        for (offset, hour) in segments.enumerated() where hour.isHour {
+            // "five o'clock" → 5:00.
+            if hour.end < words.count,
+               words[hour.end] == "oclock" || (words[hour.end] == "o" && hour.end + 1 < words.count && words[hour.end + 1] == "clock") {
+                numbers.values.insert(String(format: "%d:00", hour.value))
+            }
+            // "five oh five" → 5:05.
+            if offset + 2 < segments.count {
+                let zero = segments[offset + 1]
+                let minute = segments[offset + 2]
+                if zero.isDigit, zero.value == 0, zero.start == hour.end, minute.isDigit, minute.start == zero.end {
+                    numbers.values.insert(String(format: "%d:0%d", hour.value, minute.value))
+                }
+            }
+        }
+
+        var run = ""
+        var runEnd = -1
+        for segment in segments {
+            if segment.isDigit, segment.start == runEnd {
+                run += String(segment.value)
+            } else {
+                if run.count > 1 { numbers.digitSequences.insert(run) }
+                run = segment.isDigit ? String(segment.value) : ""
+            }
+            runEnd = segment.end
+        }
+        if run.count > 1 { numbers.digitSequences.insert(run) }
+
+        return numbers
     }
 }
