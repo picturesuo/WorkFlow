@@ -323,6 +323,22 @@ final class CustomFilterNumberGuardTests: XCTestCase {
             "Codes:\n- 4721\n- 902\n- 25", source: codes, mode: .technical, allowsNumberFormatting: true
         ))
 
+        let areaCode = "my number is area code five five five number one two three four"
+        for grouped in ["555-1234", "555 1234", "(555) 1234", "(555) 123-4"] {
+            XCTAssertEqual(
+                try CleanupGuard.postprocess("My number is \(grouped).", source: areaCode, allowsNumberFormatting: true),
+                "My number is \(grouped).",
+                "Rejected \(grouped)"
+            )
+        }
+        XCTAssertThrowsError(try CleanupGuard.postprocess("My number is 555-1234.", source: areaCode))
+        for changed in ["555-1235", "555-1324", "555-123", "55-51234", "5551234", "555-12-34"] {
+            XCTAssertThrowsError(
+                try CleanupGuard.postprocess("My number is \(changed).", source: areaCode, allowsNumberFormatting: true),
+                "Accepted \(changed)"
+            )
+        }
+
         let longPhone = "um, call five five five one two three four five six seven"
         XCTAssertEqual(
             try CleanupGuard.postprocess("Call (555) 123-4567.", source: longPhone, allowsNumberFormatting: true),
@@ -550,6 +566,28 @@ final class CustomFilterProviderTransportTests: XCTestCase {
             XCTAssertEqual(result.source, .rawFallback, written)
             XCTAssertEqual(result.text, spoken)
         }
+    }
+
+    func testHyphenJoinedIndependentSequencesKeepProviderCleanup() async throws {
+        let spoken = "Um, my number is area code five five five number one two three four."
+        let provider = OpenAIChatCleanupService(
+            providerID: .openAICompatible, baseURL: "https://example.com/v1", modelID: "fast-model",
+            apiKey: "compatible-test", timeout: 1, session: session
+        )
+        for written in ["My number is 555-1234.", "My number is (555) 1234.", "My number is 555 1234."] {
+            CleanupURLProtocol.handler = { request in
+                Self.response(request, #"{"choices":[{"message":{"role":"assistant","content":"\#(written)"}}]}"#)
+            }
+            let result = await pipeline(provider).finalize(spoken)
+            XCTAssertEqual(result.source, .openAICompatible, written)
+            XCTAssertEqual(result.text, written)
+        }
+        CleanupURLProtocol.handler = { request in
+            Self.response(request, #"{"choices":[{"message":{"role":"assistant","content":"My number is 555-1235."}}]}"#)
+        }
+        let result = await pipeline(provider).finalize(spoken)
+        XCTAssertEqual(result.source, .rawFallback)
+        XCTAssertEqual(result.text, spoken)
     }
 
     func testTechnicalBulletListOfCodesKeepsProviderCleanup() async throws {

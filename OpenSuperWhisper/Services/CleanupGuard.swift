@@ -217,7 +217,7 @@ enum CleanupGuard {
             func isExplained(_ token: String) -> Bool {
                 if sourceNumbers.contains(token) || isSequence([token]) { return true }
                 let parts = token.split(separator: "-", omittingEmptySubsequences: false).map(String.init)
-                return parts.count > 1 && parts.allSatisfy(sourceNumbers.contains)
+                return parts.count > 1 && parts.allSatisfy { sourceNumbers.contains($0) || isSequence([$0]) }
             }
             for run in numericRuns(in: cleaned) {
                 guard run.allSatisfy(isExplained) || isSequence(run) else {
