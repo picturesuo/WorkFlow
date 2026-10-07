@@ -2,11 +2,13 @@ import Foundation
 
 struct SpokenNumbers: Equatable {
     /// Numeric values the words spell out, such as "25", "2.5", "1984", and
-    /// unambiguous clock forms such as "5:30" or "5:00".
+    /// unambiguous clock forms such as "5:30" or "5:00". A digit spoken as
+    /// part of a sequence, or the whole part of a decimal, is not a value of
+    /// its own.
     var values: Set<String> = []
     /// Contiguous runs of single digit words in spoken order, such as
     /// "four seven two one" → "4721". Codes and phone numbers keep their digit
-    /// order, so a regrouped or reordered form never matches.
+    /// order, so a reordered form never matches, even one digit per group.
     var digitSequences: Set<String> = []
 }
 
@@ -71,9 +73,7 @@ enum SpokenNumberParser {
 
         func flush(at index: Int) {
             guard inNumber else { return }
-            let value = total + current
-            numbers.values.insert(String(value))
-            segments.append(Segment(value: value, smallOnly: smallOnly, start: start ?? index, end: index))
+            segments.append(Segment(value: total + current, smallOnly: smallOnly, start: start ?? index, end: index))
             start = nil
             total = 0
             current = 0
@@ -153,7 +153,7 @@ enum SpokenNumberParser {
                     digits += String(digit)
                     cursor += 1
                 }
-                numbers.values.insert(String(whole))
+                if digits.allSatisfy({ $0 == "0" }) { numbers.values.insert(String(whole)) }
                 numbers.values.insert("\(whole).\(digits)")
                 total = 0
                 current = 0
@@ -170,6 +170,30 @@ enum SpokenNumberParser {
             index += 1
         }
         flush(at: index)
+
+        var runMembers = Set<Int>()
+        var run: [Int] = []
+        func closeRun() {
+            if run.count > 1 {
+                numbers.digitSequences.insert(run.map { String(segments[$0].value) }.joined())
+                runMembers.formUnion(run)
+            }
+            run = []
+        }
+        for (offset, segment) in segments.enumerated() {
+            if segment.isDigit, let last = run.last, segments[last].end == segment.start {
+                run.append(offset)
+            } else {
+                closeRun()
+                // A leading "oh" is the interjection ("oh, five chairs"), not a digit.
+                if segment.isDigit, words[segment.start] != "oh" { run = [offset] }
+            }
+        }
+        closeRun()
+
+        for (offset, segment) in segments.enumerated() where !runMembers.contains(offset) {
+            numbers.values.insert(String(segment.value))
+        }
 
         for (first, second) in zip(segments, segments.dropFirst()) where second.start == first.end {
             // Spoken years and codes pair two-digit groups: "twenty twenty six" → 2026.
@@ -197,19 +221,6 @@ enum SpokenNumberParser {
                 }
             }
         }
-
-        var run = ""
-        var runEnd = -1
-        for segment in segments {
-            if segment.isDigit, segment.start == runEnd {
-                run += String(segment.value)
-            } else {
-                if run.count > 1 { numbers.digitSequences.insert(run) }
-                run = segment.isDigit ? String(segment.value) : ""
-            }
-            runEnd = segment.end
-        }
-        if run.count > 1 { numbers.digitSequences.insert(run) }
 
         return numbers
     }

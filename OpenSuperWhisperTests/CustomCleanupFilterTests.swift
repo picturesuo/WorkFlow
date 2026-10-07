@@ -217,9 +217,12 @@ final class CustomFilterNumberGuardTests: XCTestCase {
         XCTAssertFalse(SpokenNumberParser.parse("five sixty").values.contains("5:60"))
         XCTAssertFalse(SpokenNumberParser.parse("five thirty").values.contains("5:45"))
 
-        let digits = SpokenNumberParser.parse("code four seven two one, then call five five five one two three four")
+        let digits = SpokenNumberParser.parse("code four seven two one, then call five five five one two three four and five chairs")
         XCTAssertEqual(digits.digitSequences, ["4721", "5551234"])
-        XCTAssertFalse(digits.values.contains("4721"))
+        XCTAssertEqual(digits.values, ["5"])
+        XCTAssertEqual(SpokenNumberParser.parse("oh five chairs"), SpokenNumbers(values: ["0", "5"]))
+        XCTAssertEqual(SpokenNumberParser.parse("two point five hours").values, ["2.5"])
+        XCTAssertEqual(SpokenNumberParser.parse("five point oh").values, ["5", "5.0"])
         XCTAssertTrue(SpokenNumberParser.parse("one twenty five").digitSequences.isEmpty)
         XCTAssertTrue(SpokenNumberParser.parse("four and seven").digitSequences.isEmpty)
         XCTAssertTrue(SpokenNumberParser.parse("two point oh five").values.contains("2.05"))
@@ -260,6 +263,27 @@ final class CustomFilterNumberGuardTests: XCTestCase {
             source: "about two point five hours",
             allowsNumberFormatting: true
         ))
+        XCTAssertThrowsError(try CleanupGuard.postprocess(
+            "About 2 hours.",
+            source: "about two point five hours",
+            allowsNumberFormatting: true
+        ))
+        XCTAssertEqual(
+            try CleanupGuard.postprocess(
+                "Bring 2 chairs for about 2.5 hours.",
+                source: "bring two chairs for about two point five hours",
+                allowsNumberFormatting: true
+            ),
+            "Bring 2 chairs for about 2.5 hours."
+        )
+        XCTAssertEqual(
+            try CleanupGuard.postprocess("Exactly 5.", source: "exactly five point oh", allowsNumberFormatting: true),
+            "Exactly 5."
+        )
+        XCTAssertEqual(
+            try CleanupGuard.postprocess("Allow 5-7 minutes.", source: "allow five to seven minutes", allowsNumberFormatting: true),
+            "Allow 5-7 minutes."
+        )
     }
 
     func testCustomFilterMayWriteSpokenClockTimesAndDigitSequences() throws {
@@ -292,8 +316,8 @@ final class CustomFilterNumberGuardTests: XCTestCase {
             )
         }
         for changed in [
-            "4271", "4721-555", "1234-555", "555-5555", "472", "47 2", "47 21 5", "4721 555123",
-            "47 and 21", "4721 and 9", "47, 21", "(555) 123"
+            "4271", "4-2-7-1", "4 2 7 1", "4721-555", "1234-555", "555-5555", "5-5-5-1-3-2-4", "472", "47 2",
+            "47 21 5", "4721 555123", "47 and 21", "4721 and 9", "47, 21", "(555) 123", "4 and 7"
         ] {
             XCTAssertThrowsError(
                 try CleanupGuard.postprocess("Call \(changed).", source: phone, allowsNumberFormatting: true),
@@ -558,7 +582,7 @@ final class CustomFilterProviderTransportTests: XCTestCase {
             XCTAssertEqual(result.source, .openAICompatible, written)
             XCTAssertEqual(result.text, written)
         }
-        for written in ["Call (555) 123-4568.", "Call (555) 123.", "Call 555 123 4567 8."] {
+        for written in ["Call (555) 123-4568.", "Call (555) 123.", "Call 555 123 4567 8.", "Call 5-5-5-1-3-2-4-5-6-7."] {
             CleanupURLProtocol.handler = { request in
                 Self.response(request, #"{"choices":[{"message":{"role":"assistant","content":"\#(written)"}}]}"#)
             }

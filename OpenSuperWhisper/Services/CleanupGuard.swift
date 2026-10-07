@@ -211,7 +211,9 @@ enum CleanupGuard {
             // spaces, parentheses, or hyphens are also accepted when together
             // they reproduce one complete spoken sequence ("five five five one
             // two three four" → "(555) 1234"); partial groups never merge
-            // across prose or across different source numbers.
+            // across prose or across different source numbers. Digits spoken
+            // inside a sequence are not source values on their own, so a
+            // reordered sequence fails even when written one digit per group.
             func isSequence(_ tokens: [String]) -> Bool {
                 let joined = tokens.joined()
                 return joined.allSatisfy { $0.isNumber || $0 == "-" }
