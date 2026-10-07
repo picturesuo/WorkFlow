@@ -210,23 +210,40 @@ enum CleanupGuard {
             // ("five to ten" → "5-10"). Adjacent groups separated only by
             // spaces, parentheses, or hyphens are also accepted when together
             // they reproduce one complete spoken run ("five five five one two
-            // three four" → "(555) 1234"). Partial groups are not merged
-            // across prose, punctuation, or different source numbers, and a
-            // digit word inside a run is not a source value on its own, so a
-            // run written one digit per group must keep its spoken order
-            // unless those digits were also spoken separately.
-            func isSequence(_ tokens: [String]) -> Bool {
+            // three four" → "(555) 1234"). A complete run may also keep some
+            // members as their original number words, contiguous and in spoken
+            // order ("two three bedroom" → "2 three-bedroom"). Partial groups
+            // are not merged across prose, punctuation, or different source
+            // numbers, and a digit word inside a run is not a source value on
+            // its own, so a run written one digit per group must keep its
+            // spoken order unless those digits were also spoken separately.
+            func digitsOnly(_ tokens: [String]) -> String? {
                 let joined = tokens.joined()
-                return joined.allSatisfy { $0.isNumber || $0 == "-" }
-                    && spoken.digitSequences.contains(joined.filter(\.isNumber))
+                return joined.allSatisfy { $0.isNumber || $0 == "-" } ? joined.filter(\.isNumber) : nil
+            }
+            func isSequence(_ tokens: [String]) -> Bool {
+                digitsOnly(tokens).map(spoken.digitSequences.contains) ?? false
             }
             func isExplained(_ token: String) -> Bool {
                 if sourceNumbers.contains(token) || isSequence([token]) { return true }
                 let parts = token.split(separator: "-", omittingEmptySubsequences: false).map(String.init)
                 return parts.count > 1 && parts.allSatisfy { sourceNumbers.contains($0) || isSequence([$0]) }
             }
+            func isRunWithSpokenMembers(_ run: [(token: String, range: Range<String.Index>)]) -> Bool {
+                guard let core = digitsOnly(run.map { $0.token }) else { return false }
+                let before = spokenDigits(in: cleaned, before: run[0].range.lowerBound)
+                let after = spokenDigits(in: cleaned, after: run[run.count - 1].range.upperBound)
+                for left in 0...before.count {
+                    for right in 0...after.count where left + right > 0 {
+                        let candidate = before.prefix(left).reversed().joined() + core + after.prefix(right).joined()
+                        if spoken.digitSequences.contains(candidate) { return true }
+                    }
+                }
+                return false
+            }
             for run in numericRuns(in: cleaned) {
-                guard run.allSatisfy(isExplained) || isSequence(run) else {
+                let tokens = run.map { $0.token }
+                guard tokens.allSatisfy(isExplained) || isSequence(tokens) || isRunWithSpokenMembers(run) else {
                     throw CleanupGuardError.unsafeRewrite
                 }
             }
@@ -252,19 +269,48 @@ enum CleanupGuard {
 
     /// Groups numeric tokens separated only by spaces, parentheses, or hyphens,
     /// so "(555) 123-4567" is one run while "4721 and 9" is two.
-    private static func numericRuns(in value: String) -> [[String]] {
-        var runs: [[String]] = []
+    private static func numericRuns(in value: String) -> [[(token: String, range: Range<String.Index>)]] {
+        var runs: [[(token: String, range: Range<String.Index>)]] = []
         var previousEnd: String.Index?
         for match in numericMatches(in: value) {
             if let previousEnd,
                value[previousEnd..<match.range.lowerBound].allSatisfy({ $0.isWhitespace || "()-".contains($0) }) {
-                runs[runs.count - 1].append(match.token)
+                runs[runs.count - 1].append(match)
             } else {
-                runs.append([match.token])
+                runs.append([match])
             }
             previousEnd = match.range.upperBound
         }
         return runs
+    }
+
+    /// Digits of the number words that follow or precede a position with only
+    /// spaces or hyphens between them, nearest first, so "2 three-bedroom"
+    /// yields ["3"] after the "2".
+    private static func spokenDigits(in text: String, after index: String.Index) -> [String] {
+        var digits: [String] = []
+        var cursor = index
+        while true {
+            let wordStart = text[cursor...].firstIndex { !($0.isWhitespace || $0 == "-") } ?? text.endIndex
+            let wordEnd = text[wordStart...].firstIndex { !$0.isLetter } ?? text.endIndex
+            guard wordStart > cursor, wordEnd > wordStart,
+                  let digit = SpokenNumberParser.digit(forWord: String(text[wordStart..<wordEnd])) else { return digits }
+            digits.append(digit)
+            cursor = wordEnd
+        }
+    }
+
+    private static func spokenDigits(in text: String, before index: String.Index) -> [String] {
+        var digits: [String] = []
+        var cursor = index
+        while true {
+            let wordEnd = text[..<cursor].lastIndex { !($0.isWhitespace || $0 == "-") }.map { text.index(after: $0) } ?? text.startIndex
+            let wordStart = text[..<wordEnd].lastIndex { !$0.isLetter }.map { text.index(after: $0) } ?? text.startIndex
+            guard wordEnd < cursor, wordStart < wordEnd,
+                  let digit = SpokenNumberParser.digit(forWord: String(text[wordStart..<wordEnd])) else { return digits }
+            digits.append(digit)
+            cursor = wordStart
+        }
     }
 
     private static func numericMatches(in value: String) -> [(token: String, range: Range<String.Index>)] {

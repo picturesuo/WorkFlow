@@ -400,6 +400,40 @@ final class CustomFilterNumberGuardTests: XCTestCase {
         )
         XCTAssertThrowsError(try CleanupGuard.postprocess("Call 5551234.", source: pausedPhone, allowsNumberFormatting: true))
 
+        for (source, written) in [
+            ("I need two three bedroom apartments", "I need 2 three-bedroom apartments."),
+            ("I need two three bedroom apartments", "I need two 3-bedroom apartments."),
+            ("take three five minute breaks", "Take 3 five-minute breaks."),
+            ("we have two four year olds", "We have 2 four-year-olds."),
+            ("book one two hour meeting", "Book 1 two-hour meeting."),
+            ("oh five chairs should do", "Oh 5 chairs should do."),
+            ("five, two three bedroom units", "5, 2 three-bedroom units."),
+            ("two three four bedroom units", "2 three four-bedroom units.")
+        ] {
+            XCTAssertEqual(
+                try CleanupGuard.postprocess(written, source: source, allowsNumberFormatting: true),
+                written,
+                "Rejected \(written)"
+            )
+            XCTAssertThrowsError(try CleanupGuard.postprocess(written, source: source), "Built-in accepted \(written)")
+        }
+        for (source, written) in [
+            ("I need two three bedroom apartments", "I need 3 two-bedroom apartments."),
+            ("I need two three bedroom apartments", "I need 2, three-bedroom apartments."),
+            ("I need two three bedroom apartments", "I need 2 bedroom apartments."),
+            ("I need two three bedroom apartments", "I need 2 three bedroom 3 apartments."),
+            ("two three four bedroom units", "2 three bedroom units."),
+            ("my extension is four seven two one", "My extension is 7 four two one."),
+            ("my extension is four seven two one", "My extension is four 2 seven one."),
+            ("five, two three bedroom units", "5 2 three-bedroom units."),
+            ("oh five chairs should do", "Oh, 5 chairs should do.")
+        ] {
+            XCTAssertThrowsError(
+                try CleanupGuard.postprocess(written, source: source, allowsNumberFormatting: true),
+                "Accepted \(written)"
+            )
+        }
+
         let areaCode = "my number is area code five five five number one two three four"
         for grouped in ["555-1234", "555 1234", "(555) 1234", "(555) 123-4"] {
             XCTAssertEqual(
@@ -665,6 +699,30 @@ final class CustomFilterProviderTransportTests: XCTestCase {
         let result = await pipeline(provider).finalize(spoken)
         XCTAssertEqual(result.source, .rawFallback)
         XCTAssertEqual(result.text, spoken)
+    }
+
+    func testDigitRunWithSpokenMembersKeepsProviderCleanup() async throws {
+        let spoken = "Um, I need two three bedroom apartments."
+        let provider = OpenAIChatCleanupService(
+            providerID: .openAICompatible, baseURL: "https://example.com/v1", modelID: "fast-model",
+            apiKey: "compatible-test", timeout: 1, session: session
+        )
+        for written in ["I need 2 three-bedroom apartments.", "I need two 3-bedroom apartments."] {
+            CleanupURLProtocol.handler = { request in
+                Self.response(request, #"{"choices":[{"message":{"role":"assistant","content":"\#(written)"}}]}"#)
+            }
+            let result = await pipeline(provider).finalize(spoken)
+            XCTAssertEqual(result.source, .openAICompatible, written)
+            XCTAssertEqual(result.text, written)
+        }
+        for written in ["I need 3 two-bedroom apartments.", "I need 2 bedroom apartments."] {
+            CleanupURLProtocol.handler = { request in
+                Self.response(request, #"{"choices":[{"message":{"role":"assistant","content":"\#(written)"}}]}"#)
+            }
+            let result = await pipeline(provider).finalize(spoken)
+            XCTAssertEqual(result.source, .rawFallback, written)
+            XCTAssertEqual(result.text, spoken)
+        }
     }
 
     func testTechnicalBulletListOfCodesKeepsProviderCleanup() async throws {

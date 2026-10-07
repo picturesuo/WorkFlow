@@ -57,6 +57,11 @@ enum SpokenNumberParser {
         "sixtieth": 60, "seventieth": 70, "eightieth": 80, "ninetieth": 90
     ]
 
+    /// The digit a single number word stands for ("three" → "3", "oh" → "0").
+    static func digit(forWord word: String) -> String? {
+        units[word.lowercased()].map(String.init)
+    }
+
     static func parse(_ text: String) -> SpokenNumbers {
         var words: [String] = []
         var boundaryBefore: [Bool] = []
