@@ -5,6 +5,7 @@ struct TranscriptCleanupOutcome: Equatable {
         case bedrock
         case ollama
         case openAICompatible = "openai_compatible"
+        case azureOpenAI = "azure_openai"
         case rawFallback
         case budgetLimited = "budget_limited"
         case disabled
@@ -16,6 +17,9 @@ struct TranscriptCleanupOutcome: Equatable {
     let outputTokens: Int?
     let modelID: String?
     let cleanupMode: CleanupMode?
+    /// Set only when a saved custom filter shaped this cleanup.
+    let customFilterName: String?
+    let customFilterInstructions: String?
     let rawTokenEstimate: Int?
     let finalTokenEstimate: Int?
     let tokenEstimatorID: String?
@@ -27,6 +31,8 @@ struct TranscriptCleanupOutcome: Equatable {
         outputTokens: Int?,
         modelID: String?,
         cleanupMode: CleanupMode? = nil,
+        customFilterName: String? = nil,
+        customFilterInstructions: String? = nil,
         rawTokenEstimate: Int? = nil,
         finalTokenEstimate: Int? = nil,
         tokenEstimatorID: String? = nil
@@ -37,9 +43,37 @@ struct TranscriptCleanupOutcome: Equatable {
         self.outputTokens = outputTokens
         self.modelID = modelID
         self.cleanupMode = cleanupMode
+        self.customFilterName = customFilterName
+        self.customFilterInstructions = customFilterInstructions
         self.rawTokenEstimate = rawTokenEstimate
         self.finalTokenEstimate = finalTokenEstimate
         self.tokenEstimatorID = tokenEstimatorID
+    }
+
+    init(
+        text: String,
+        source: Source,
+        inputTokens: Int?,
+        outputTokens: Int?,
+        modelID: String?,
+        filter: CleanupFilterSnapshot,
+        rawTokenEstimate: Int?,
+        finalTokenEstimate: Int?,
+        tokenEstimatorID: String?
+    ) {
+        self.init(
+            text: text,
+            source: source,
+            inputTokens: inputTokens,
+            outputTokens: outputTokens,
+            modelID: modelID,
+            cleanupMode: filter.mode,
+            customFilterName: filter.customName,
+            customFilterInstructions: filter.customInstructions,
+            rawTokenEstimate: rawTokenEstimate,
+            finalTokenEstimate: finalTokenEstimate,
+            tokenEstimatorID: tokenEstimatorID
+        )
     }
 }
 
@@ -52,7 +86,7 @@ final class TranscriptCleanupPipeline {
     private let vocabularyProvider: () -> [VocabularyEntry]
     private let appRuleProvider: (String?) -> TargetAppRule?
     private let bedrockBudgetProvider: () async -> BedrockBudgetStatus?
-    private let cleanupModeProvider: () -> CleanupMode
+    private let filterProvider: () -> CleanupFilterSnapshot
 
     init(
         isEnabled: @escaping () -> Bool = { AppPreferences.shared.bedrockCleanupEnabled },
@@ -71,8 +105,8 @@ final class TranscriptCleanupPipeline {
             let spent = (try? await RecordingStore.shared.bedrockUsage(since: monthStart).estimatedCostUSD) ?? 0
             return BedrockBudgetStatus(spentUSD: spent, limitUSD: prefs.bedrockMonthlyBudgetUSD)
         },
-        cleanupModeProvider: @escaping () -> CleanupMode = {
-            CleanupMode(rawValue: AppPreferences.shared.cleanupMode) ?? .everyday
+        filterProvider: @escaping () -> CleanupFilterSnapshot = {
+            CustomCleanupFilterStore.currentSnapshot()
         }
     ) {
         self.isEnabled = isEnabled
@@ -80,7 +114,7 @@ final class TranscriptCleanupPipeline {
         self.vocabularyProvider = vocabularyProvider
         self.appRuleProvider = appRuleProvider
         self.bedrockBudgetProvider = bedrockBudgetProvider
-        self.cleanupModeProvider = cleanupModeProvider
+        self.filterProvider = filterProvider
     }
 
     convenience init(
@@ -110,10 +144,7 @@ final class TranscriptCleanupPipeline {
             },
             vocabularyProvider: { [] },
             appRuleProvider: { _ in nil },
-            bedrockBudgetProvider: { nil },
-            cleanupModeProvider: {
-                CleanupMode(rawValue: AppPreferences.shared.cleanupMode) ?? .everyday
-            }
+            bedrockBudgetProvider: { nil }
         )
     }
 
@@ -121,12 +152,12 @@ final class TranscriptCleanupPipeline {
         _ rawTranscript: String,
         targetBundleID: String? = nil,
         cleanupOverride: Bool? = nil,
-        cleanupModeOverride: CleanupMode? = nil
+        filterOverride: CleanupFilterSnapshot? = nil
     ) async -> TranscriptCleanupOutcome {
         let vocabulary = vocabularyProvider()
         let localTranscript = VocabularyRewriter.apply(rawTranscript, entries: vocabulary)
         let rawTokenEstimate = LocalTokenEstimator.estimate(rawTranscript)
-        let cleanupMode = cleanupModeOverride ?? cleanupModeProvider()
+        let filter = filterOverride ?? filterProvider()
         let appRule = appRuleProvider(targetBundleID)
         let cleanupEnabled: Bool
         if let cleanupOverride {
@@ -170,14 +201,14 @@ final class TranscriptCleanupPipeline {
                     inputTokens: nil,
                     outputTokens: nil,
                     modelID: AppPreferences.shared.bedrockModelID,
-                    cleanupMode: cleanupMode,
+                    filter: filter,
                     rawTokenEstimate: rawTokenEstimate,
                     finalTokenEstimate: LocalTokenEstimator.estimate(localTranscript),
                     tokenEstimatorID: LocalTokenEstimator.identifier
                 )
             }
             let systemPrompt = CleanupPromptBuilder.systemPrompt(
-                mode: cleanupMode,
+                filter: filter,
                 instruction: appRule?.cleanupInstruction
             )
             let chunks = TranscriptChunker.chunks(localTranscript)
@@ -186,7 +217,7 @@ final class TranscriptCleanupPipeline {
                 let result = try await provider.clean(
                     transcript: chunk.text,
                     systemPrompt: systemPrompt,
-                    cleanupMode: cleanupMode
+                    filter: filter
                 )
                 cleanedTranscript += result.text + chunk.separatorAfter
                 if let value = result.inputTokens {
@@ -207,7 +238,7 @@ final class TranscriptCleanupPipeline {
                 inputTokens: hasInputTokens ? inputTokens : nil,
                 outputTokens: hasOutputTokens ? outputTokens : nil,
                 modelID: modelID,
-                cleanupMode: cleanupMode,
+                filter: filter,
                 rawTokenEstimate: rawTokenEstimate,
                 finalTokenEstimate: LocalTokenEstimator.estimate(finalText),
                 tokenEstimatorID: LocalTokenEstimator.identifier
@@ -221,7 +252,7 @@ final class TranscriptCleanupPipeline {
                 inputTokens: hasInputTokens ? inputTokens : nil,
                 outputTokens: hasOutputTokens ? outputTokens : nil,
                 modelID: modelID,
-                cleanupMode: cleanupMode,
+                filter: filter,
                 rawTokenEstimate: rawTokenEstimate,
                 finalTokenEstimate: LocalTokenEstimator.estimate(localTranscript),
                 tokenEstimatorID: LocalTokenEstimator.identifier

@@ -32,6 +32,10 @@ struct Recording: Identifiable, Codable, FetchableRecord, PersistableRecord, Equ
     var cleanupRequested: Bool = false
     var targetBundleID: String? = nil
     var cleanupMode: CleanupMode? = nil
+    /// The saved custom filter captured for this recording, if any. Queued
+    /// recordings keep the instructions so later edits cannot change them.
+    var cleanupFilterName: String? = nil
+    var cleanupFilterInstructions: String? = nil
     var rawTokenEstimate: Int? = nil
     var finalTokenEstimate: Int? = nil
     var tokenEstimatorID: String? = nil
@@ -43,6 +47,7 @@ struct Recording: Identifiable, Codable, FetchableRecord, PersistableRecord, Equ
         case cleanupSource, cleanupInputTokens, cleanupOutputTokens, cleanupModelID
         case title, mode, cleanupRequested, targetBundleID
         case cleanupMode, rawTokenEstimate, finalTokenEstimate, tokenEstimatorID
+        case cleanupFilterName, cleanupFilterInstructions
     }
 
     static func == (lhs: Recording, rhs: Recording) -> Bool {
@@ -59,6 +64,8 @@ struct Recording: Identifiable, Codable, FetchableRecord, PersistableRecord, Equ
                lhs.cleanupRequested == rhs.cleanupRequested &&
                lhs.targetBundleID == rhs.targetBundleID &&
                lhs.cleanupMode == rhs.cleanupMode &&
+               lhs.cleanupFilterName == rhs.cleanupFilterName &&
+               lhs.cleanupFilterInstructions == rhs.cleanupFilterInstructions &&
                lhs.rawTokenEstimate == rhs.rawTokenEstimate &&
                lhs.finalTokenEstimate == rhs.finalTokenEstimate &&
                lhs.tokenEstimatorID == rhs.tokenEstimatorID &&
@@ -106,6 +113,8 @@ struct Recording: Identifiable, Codable, FetchableRecord, PersistableRecord, Equ
         static let cleanupRequested = Column(CodingKeys.cleanupRequested)
         static let targetBundleID = Column(CodingKeys.targetBundleID)
         static let cleanupMode = Column(CodingKeys.cleanupMode)
+        static let cleanupFilterName = Column(CodingKeys.cleanupFilterName)
+        static let cleanupFilterInstructions = Column(CodingKeys.cleanupFilterInstructions)
         static let rawTokenEstimate = Column(CodingKeys.rawTokenEstimate)
         static let finalTokenEstimate = Column(CodingKeys.finalTokenEstimate)
         static let tokenEstimatorID = Column(CodingKeys.tokenEstimatorID)
@@ -293,6 +302,20 @@ class RecordingStore: ObservableObject {
             }
         }
         
+        migrator.registerMigration("v8_add_custom_cleanup_filter") { db in
+            let columnNames = try db.columns(in: Recording.databaseTableName).map(\.name)
+            if !columnNames.contains("cleanupFilterName") {
+                try db.alter(table: Recording.databaseTableName) { t in
+                    t.add(column: "cleanupFilterName", .text)
+                }
+            }
+            if !columnNames.contains("cleanupFilterInstructions") {
+                try db.alter(table: Recording.databaseTableName) { t in
+                    t.add(column: "cleanupFilterInstructions", .text)
+                }
+            }
+        }
+
         try migrator.migrate(dbQueue)
     }
     
@@ -341,7 +364,7 @@ class RecordingStore: ObservableObject {
                 summary.localCleanedDictations += 1
                 summary.inputTokens += recording.cleanupInputTokens ?? 0
                 summary.outputTokens += recording.cleanupOutputTokens ?? 0
-            case .openAICompatible:
+            case .openAICompatible, .azureOpenAI:
                 summary.cleanedDictations += 1
                 summary.unpricedDictations += 1
                 summary.inputTokens += recording.cleanupInputTokens ?? 0
@@ -373,12 +396,15 @@ class RecordingStore: ObservableObject {
                 .fetchAll(db)
         }
         let samples = recentRecordings.compactMap { recording -> TokenEfficiencySample? in
+            // Built-in averages stay pure: custom filters change output length
+            // by design, so their samples are not mixed into a base mode.
             guard recording.tokenEstimatorID == LocalTokenEstimator.identifier,
+                  recording.cleanupFilterName == nil,
                   let mode = recording.cleanupMode,
                   let sourceTokens = recording.rawTokenEstimate,
                   let finalTokens = recording.finalTokenEstimate else { return nil }
             switch recording.cleanupSource {
-            case .bedrock, .ollama, .openAICompatible:
+            case .bedrock, .ollama, .openAICompatible, .azureOpenAI:
                 return TokenEfficiencySample(
                     mode: mode,
                     sourceTokens: sourceTokens,
@@ -501,6 +527,8 @@ class RecordingStore: ObservableObject {
                 updated.cleanupOutputTokens = cleanup.outputTokens
                 updated.cleanupModelID = cleanup.modelID
                 updated.cleanupMode = cleanup.cleanupMode
+                updated.cleanupFilterName = cleanup.customFilterName
+                updated.cleanupFilterInstructions = cleanup.customFilterInstructions
                 updated.rawTokenEstimate = cleanup.rawTokenEstimate
                 updated.finalTokenEstimate = cleanup.finalTokenEstimate
                 updated.tokenEstimatorID = cleanup.tokenEstimatorID
@@ -561,6 +589,8 @@ class RecordingStore: ObservableObject {
                         Recording.Columns.cleanupOutputTokens.set(to: cleanup.outputTokens),
                         Recording.Columns.cleanupModelID.set(to: cleanup.modelID),
                         Recording.Columns.cleanupMode.set(to: cleanup.cleanupMode?.rawValue),
+                        Recording.Columns.cleanupFilterName.set(to: cleanup.customFilterName),
+                        Recording.Columns.cleanupFilterInstructions.set(to: cleanup.customFilterInstructions),
                         Recording.Columns.rawTokenEstimate.set(to: cleanup.rawTokenEstimate),
                         Recording.Columns.finalTokenEstimate.set(to: cleanup.finalTokenEstimate),
                         Recording.Columns.tokenEstimatorID.set(to: cleanup.tokenEstimatorID)

@@ -1,35 +1,45 @@
 import Foundation
 import Security
 
+/// Each key-based provider owns a separate Keychain account, so one provider's
+/// key is never sent to another provider's endpoint.
+enum CleanupCredentialAccount: String {
+    case openAICompatible = "openai-compatible"
+    case azureOpenAI = "azure-openai"
+
+    /// Only the OpenAI-compatible key predates the WorkFlow rename.
+    var migratesLegacyIdentities: Bool { self == .openAICompatible }
+}
+
 enum CleanupCredentialStore {
     private static let lock = NSRecursiveLock()
     private static let service = "\(AppIdentity.bundleIdentifier).cleanup"
     private static let legacyServices = AppIdentity.legacyBundleIdentifiers.map { "\($0).cleanup" }
-    private static let account = "openai-compatible"
 
-    static func loadAPIKey() throws -> String? {
+    static func loadAPIKey(for account: CleanupCredentialAccount = .openAICompatible) throws -> String? {
         lock.lock()
         defer { lock.unlock() }
 
-        if let currentValue = try loadAPIKey(service: service) {
-            deleteLegacyAPIKeys()
+        if let currentValue = try loadAPIKey(service: service, account: account) {
+            if account.migratesLegacyIdentities { deleteLegacyAPIKeys(account: account) }
             return currentValue
         }
 
+        guard account.migratesLegacyIdentities else { return nil }
         for legacyService in legacyServices {
-            guard let legacyValue = try loadAPIKey(service: legacyService) else { continue }
-            try saveAPIKey(legacyValue)
-            try? deleteAPIKey(service: legacyService)
+            guard let legacyValue = try loadAPIKey(service: legacyService, account: account) else { continue }
+            try saveAPIKey(legacyValue, for: account)
+            try? deleteAPIKey(service: legacyService, account: account)
             return legacyValue
         }
         return nil
     }
 
-    private static func loadAPIKey(service: String) throws -> String? {
+    private static func loadAPIKey(service: String, account: CleanupCredentialAccount) throws -> String? {
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,
-            kSecAttrAccount as String: account,
+            kSecAttrAccount as String: account.rawValue,
             kSecReturnData as String: true,
             kSecMatchLimit as String: kSecMatchLimitOne
         ]
@@ -43,19 +53,19 @@ enum CleanupCredentialStore {
         return value
     }
 
-    static func saveAPIKey(_ value: String) throws {
+    static func saveAPIKey(_ value: String, for account: CleanupCredentialAccount = .openAICompatible) throws {
         lock.lock()
         defer { lock.unlock() }
 
         let token = value.trimmingCharacters(in: .whitespacesAndNewlines)
         if token.isEmpty {
-            try deleteAPIKey()
+            try deleteAPIKey(for: account)
             return
         }
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,
-            kSecAttrAccount as String: account
+            kSecAttrAccount as String: account.rawValue
         ]
         let attributes: [String: Any] = [
             kSecValueData as String: Data(token.utf8),
@@ -70,27 +80,28 @@ enum CleanupCredentialStore {
         guard addStatus == errSecSuccess else { throw BedrockCredentialStoreError.keychain(addStatus) }
     }
 
-    static func deleteAPIKey() throws {
+    static func deleteAPIKey(for account: CleanupCredentialAccount = .openAICompatible) throws {
         lock.lock()
         defer { lock.unlock() }
 
-        try deleteAPIKey(service: service)
+        try deleteAPIKey(service: service, account: account)
+        guard account.migratesLegacyIdentities else { return }
         for legacyService in legacyServices {
-            try deleteAPIKey(service: legacyService)
+            try deleteAPIKey(service: legacyService, account: account)
         }
     }
 
-    private static func deleteLegacyAPIKeys() {
+    private static func deleteLegacyAPIKeys(account: CleanupCredentialAccount) {
         for legacyService in legacyServices {
-            try? deleteAPIKey(service: legacyService)
+            try? deleteAPIKey(service: legacyService, account: account)
         }
     }
 
-    private static func deleteAPIKey(service: String) throws {
+    private static func deleteAPIKey(service: String, account: CleanupCredentialAccount) throws {
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,
-            kSecAttrAccount as String: account
+            kSecAttrAccount as String: account.rawValue
         ]
         let status = SecItemDelete(query as CFDictionary)
         guard status == errSecSuccess || status == errSecItemNotFound else {

@@ -427,7 +427,7 @@ final class ProviderPipelineTests: XCTestCase {
             providerResolver: { provider },
             vocabularyProvider: { [] },
             appRuleProvider: { _ in nil },
-            cleanupModeProvider: { .technical }
+            filterProvider: { .builtIn(.technical) }
         )
 
         let result = await pipeline.finalize("Um, run the tests and then show me the short status.")
@@ -505,18 +505,22 @@ final class ProviderPipelineTests: XCTestCase {
     }
 }
 
-private final class FakeCleanupProvider: TranscriptCleanupProviding {
+final class FakeCleanupProvider: TranscriptCleanupProviding {
     let providerID: CleanupProviderID = .ollama
     private(set) var callCount = 0
     private(set) var lastCleanupMode: CleanupMode?
+    private(set) var lastFilter: CleanupFilterSnapshot?
+    private(set) var lastSystemPrompt: String?
 
     func clean(
         transcript: String,
         systemPrompt: String,
-        cleanupMode: CleanupMode
+        filter: CleanupFilterSnapshot
     ) async throws -> CleanupProviderResult {
         callCount += 1
-        lastCleanupMode = cleanupMode
+        lastCleanupMode = filter.mode
+        lastFilter = filter
+        lastSystemPrompt = systemPrompt
         return CleanupProviderResult(text: transcript, inputTokens: nil, outputTokens: nil, modelID: "fake")
     }
 }
@@ -528,7 +532,7 @@ private final class FakeBedrockCleanupProvider: TranscriptCleanupProviding {
     func clean(
         transcript: String,
         systemPrompt: String,
-        cleanupMode: CleanupMode
+        filter: CleanupFilterSnapshot
     ) async throws -> CleanupProviderResult {
         callCount += 1
         return CleanupProviderResult(
@@ -546,7 +550,7 @@ private final class SensitiveFailingCleanupProvider: TranscriptCleanupProviding 
     func clean(
         transcript: String,
         systemPrompt: String,
-        cleanupMode: CleanupMode
+        filter: CleanupFilterSnapshot
     ) async throws -> CleanupProviderResult {
         throw SensitiveProviderError(message: "provider echoed: \(transcript)")
     }
@@ -564,7 +568,7 @@ private final class PartiallyFailingCleanupProvider: TranscriptCleanupProviding 
     func clean(
         transcript: String,
         systemPrompt: String,
-        cleanupMode: CleanupMode
+        filter: CleanupFilterSnapshot
     ) async throws -> CleanupProviderResult {
         callCount += 1
         if callCount > 1 {
@@ -579,7 +583,7 @@ private final class PartiallyFailingCleanupProvider: TranscriptCleanupProviding 
     }
 }
 
-private final class CleanupURLProtocol: URLProtocol {
+final class CleanupURLProtocol: URLProtocol {
     static var handler: ((URLRequest) throws -> (HTTPURLResponse, Data))?
 
     override class func canInit(with request: URLRequest) -> Bool { true }

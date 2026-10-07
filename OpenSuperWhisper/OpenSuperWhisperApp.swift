@@ -297,18 +297,32 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
 
         let cleanupModeItem = NSMenuItem(title: "Writing Mode", action: nil, keyEquivalent: "")
         let cleanupModeMenu = NSMenu()
-        let currentCleanupMode = CleanupMode(rawValue: AppPreferences.shared.cleanupMode) ?? .everyday
-        for mode in CleanupMode.allCases {
+        let customFilters = CustomCleanupFilterStore.load()
+        let currentSelection = CustomCleanupFilterStore.currentSelection(filters: customFilters)
+        func addWritingItem(_ title: String, selection: CleanupFilterSelection, toolTip: String) {
             let item = NSMenuItem(
-                title: mode.displayName,
+                title: title,
                 action: #selector(selectCleanupMode(_:)),
                 keyEquivalent: ""
             )
             item.target = self
-            item.representedObject = mode.rawValue
-            item.state = mode == currentCleanupMode ? .on : .off
-            item.toolTip = mode.description
+            item.representedObject = selection.tag
+            item.state = selection == currentSelection ? .on : .off
+            item.toolTip = toolTip
             cleanupModeMenu.addItem(item)
+        }
+        for mode in CleanupMode.allCases {
+            addWritingItem(mode.displayName, selection: .builtIn(mode), toolTip: mode.description)
+        }
+        if !customFilters.isEmpty {
+            cleanupModeMenu.addItem(.separator())
+            for filter in customFilters {
+                addWritingItem(
+                    filter.name,
+                    selection: .custom(filter.id),
+                    toolTip: "Based on \(filter.baseMode.displayName): \(filter.instructions)"
+                )
+            }
         }
         cleanupModeItem.submenu = cleanupModeMenu
         menu.addItem(cleanupModeItem)
@@ -409,9 +423,9 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
     }
 
     @objc private func selectCleanupMode(_ sender: NSMenuItem) {
-        guard let rawValue = sender.representedObject as? String,
-              CleanupMode(rawValue: rawValue) != nil else { return }
-        AppPreferences.shared.cleanupMode = rawValue
+        guard let tag = sender.representedObject as? String,
+              let selection = CleanupFilterSelection(tag: tag) else { return }
+        CustomCleanupFilterStore.select(selection)
         NotificationCenter.default.post(name: .cleanupModeChanged, object: nil)
     }
 

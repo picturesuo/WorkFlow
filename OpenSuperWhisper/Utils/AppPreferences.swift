@@ -184,6 +184,19 @@ final class AppPreferences {
     @UserDefault(key: "openAICompatibleTimeoutSeconds", defaultValue: 10.0)
     var openAICompatibleTimeoutSeconds: Double
 
+    // Azure OpenAI v1 settings. The API key is stored separately in Keychain.
+    @UserDefault(key: "azureOpenAIEndpoint", defaultValue: "")
+    var azureOpenAIEndpoint: String
+
+    @UserDefault(key: "azureOpenAIDeployment", defaultValue: "")
+    var azureOpenAIDeployment: String
+
+    @UserDefault(key: "azureOpenAITimeoutSeconds", defaultValue: 10.0)
+    var azureOpenAITimeoutSeconds: Double
+
+    @UserDefault(key: "azureOpenAIReasoningDeployment", defaultValue: false)
+    var azureOpenAIReasoningDeployment: Bool
+
     @OptionalUserDefault(key: "personalVocabularyData")
     var personalVocabularyData: Data?
 

@@ -228,12 +228,12 @@ class IndicatorViewModel: ObservableObject {
                         try? FileManager.default.removeItem(at: tempURL)
                         print("No speech detected, dictation discarded")
                     } else {
-                        let cleanupMode = CleanupMode(rawValue: AppPreferences.shared.cleanupMode) ?? .everyday
+                        let filter = CustomCleanupFilterStore.currentSnapshot()
                         self.isFinalizing = true
                         let cleanup = await self.cleanupPipeline.finalize(
                             rawText,
                             targetBundleID: self.pasteTarget?.bundleID,
-                            cleanupModeOverride: cleanupMode
+                            filterOverride: filter
                         )
                         self.isFinalizing = false
 
@@ -264,6 +264,8 @@ class IndicatorViewModel: ObservableObject {
                             cleanupRequested: cleanup.source != .disabled,
                             targetBundleID: self.pasteTarget?.bundleID,
                             cleanupMode: cleanup.cleanupMode,
+                            cleanupFilterName: cleanup.customFilterName,
+                            cleanupFilterInstructions: cleanup.customFilterInstructions,
                             rawTokenEstimate: cleanup.rawTokenEstimate,
                             finalTokenEstimate: cleanup.finalTokenEstimate,
                             tokenEstimatorID: cleanup.tokenEstimatorID

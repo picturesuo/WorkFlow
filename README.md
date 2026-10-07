@@ -8,7 +8,7 @@
   Choose <kbd>Fn</kbd> or a keyboard shortcut, speak, and keep working.
 </p>
 
-WorkFlow is an open-source, macOS-only dictation and meeting-transcription app. Speech recognition stays on your Mac with Parakeet or Whisper. An optional cleanup pass removes fillers, resolves self-corrections, and repairs punctuation through Amazon Bedrock, free local Ollama, or an OpenAI-compatible API.
+WorkFlow is an open-source, macOS-only dictation and meeting-transcription app. Speech recognition stays on your Mac with Parakeet or Whisper. An optional cleanup pass removes fillers, resolves self-corrections, and repairs punctuation through Amazon Bedrock, Azure OpenAI, free local Ollama, or an OpenAI-compatible API.
 
 WorkFlow is independently designed and is not affiliated with Wispr Flow, Superwhisper, or OpenSuperWhisper.
 
@@ -35,8 +35,9 @@ Requirements: Apple Silicon, macOS 14 or newer, Xcode, Homebrew, Rust, and Git. 
 - The recorder starts before accessibility-position lookup, and transcription waits for cold model loading instead of dropping the first request.
 - Personal vocabulary and per-app cleanup, style, and paste rules are deterministic.
 - Meeting recordings go to named History items and never auto-paste.
-- Bedrock, local Ollama, and OpenAI-compatible cleanup all share the same literal-editing safety contract.
+- Bedrock, Azure OpenAI, local Ollama, and OpenAI-compatible cleanup all share the same literal-editing safety contract.
 - Homework, Technical, and Everyday modes give long-form explanation, compact agent commands, and natural prose separate rewriting contracts.
+- Saved custom filters build on one of those modes with your own plain-language preferences, such as digits instead of spelled-out numbers.
 - History records estimated source/final tokens and Cleanup settings compares each mode's normalized token efficiency.
 - Failed, slow, overlong, or assistant-style cleanup falls back to usable local text.
 - API credentials live in macOS Keychain; audio never goes to a cleanup provider.
@@ -59,6 +60,12 @@ Choose a mode in the main window or the WorkFlow menu-bar menu before dictating:
 - **Homework** preserves every stated idea and develops compressed reasoning into complete prose. It is intentionally not concise.
 - **Technical** produces compact, unambiguous instructions for computers and coding agents while retaining constraints, paths, flags, and acceptance criteria.
 - **Everyday** removes speech artifacts while preserving natural tone and detail.
+
+### Custom filters
+
+Open **Settings → Cleanup → Custom filters** and choose **New filter**. Pick the built-in mode to start from, name the filter, and describe what to change in plain language, for example "Write all numbers as digits and hyphenate compound modifiers." Starting points for **Everyday with digits**, **Everyday with words**, and **More hyphens** are included. Saved filters appear with the built-in modes in the main window, the menu-bar **Writing Mode** menu, and Cleanup settings.
+
+A filter adds bounded style preferences to its base mode; it never replaces the shared safety rules. The base mode's length limits, fallback timeout, vocabulary, per-app rules, and provider stay in effect. A filter may rewrite a spelled-out number as digits only when that exact value appears in what you said, so "twenty five" can become "25" but never "26"; anything WorkFlow cannot verify falls back to the local transcript. Each dictation captures the selected filter when it is processed, so editing or switching filters cannot change a request already underway. History labels the result with the filter's name. Deleting the selected filter returns to its base mode. Custom-filter results are not mixed into the built-in modes' efficiency averages.
 
 Each successful cleanup stores a local estimate of the source and final text size. History shows the result per dictation, and **Settings → Cleanup** compares Technical with Homework and Everyday for the current month. The comparison uses source tokens ÷ final tokens and a geometric mean across dictations. These are clearly labeled local estimates; provider-reported billing tokens and costs remain separate.
 
@@ -91,6 +98,17 @@ The key is saved only in macOS Keychain. For production or shared machines, pref
 The AWS US on-demand catalog listed Nova Micro at **$0.035 per million input tokens** and **$0.14 per million output tokens** on August 21, 2026. A typical cleanup using 200 input and 40 output tokens is about **$0.0000126**. At 100 such dictations every day, the estimate is about **$0.04/month**.
 
 WorkFlow records returned token counts and displays per-dictation and monthly estimates. Its monthly stop applies to models for which WorkFlow has verified pricing and takes effect after the estimate reaches the configured amount, so one final request can exceed it slightly. Unknown/custom model prices are clearly labeled unknown. Estimates exclude taxes, discounts, free tiers, and future AWS price changes; confirm the [current Bedrock pricing](https://aws.amazon.com/bedrock/pricing/).
+
+### Azure OpenAI
+
+WorkFlow calls the [Azure OpenAI v1 API](https://learn.microsoft.com/en-us/azure/foundry/openai/api-version-lifecycle), so no dated `api-version` is needed.
+
+1. In [Microsoft Foundry](https://ai.azure.com), deploy a small chat model such as `gpt-4.1-nano` and note the deployment name.
+2. In WorkFlow, select **Azure OpenAI** and enter the resource endpoint (`https://YOUR-RESOURCE.openai.azure.com` or `https://YOUR-RESOURCE.services.ai.azure.com`) and the deployment name.
+3. Paste the resource key into the secure field and choose **Save & Test**. The key is sent only in the `api-key` header to that HTTPS endpoint and is saved in Keychain only after a successful test, separately from every other provider's key.
+4. Turn on **Reasoning model deployment** only for o-series or GPT-5 deployments; WorkFlow then omits `temperature` and leaves extra completion headroom for reasoning tokens.
+
+Usage bills to your Azure subscription. Whether credits or promotions apply is between you and Microsoft; WorkFlow records token counts but does not estimate Azure prices, and the Bedrock monthly stop does not apply.
 
 ### Ollama or another API
 

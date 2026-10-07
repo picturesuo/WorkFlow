@@ -73,8 +73,9 @@ final class BedrockCleanupService {
         apiKey: String,
         configuration: BedrockCleanupConfiguration,
         systemPrompt: String = BedrockCleanupService.systemPrompt,
-        cleanupMode: CleanupMode = .everyday
+        filter: CleanupFilterSnapshot = .builtIn(.everyday)
     ) async throws -> BedrockCleanupResponse {
+        let cleanupMode = filter.mode
         let raw = transcript.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !raw.isEmpty else {
             return BedrockCleanupResponse(text: "", inputTokens: 0, outputTokens: 0)
@@ -137,7 +138,12 @@ final class BedrockCleanupService {
 
         let cleaned: String
         do {
-            cleaned = try CleanupGuard.postprocess(first, source: raw, mode: cleanupMode)
+            cleaned = try CleanupGuard.postprocess(
+                first,
+                source: raw,
+                mode: cleanupMode,
+                allowsNumberFormatting: filter.isCustom
+            )
         } catch CleanupGuardError.emptyResponse {
             throw BedrockCleanupError.emptyResponse
         } catch CleanupGuardError.unsafeRewrite {

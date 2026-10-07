@@ -31,7 +31,13 @@ final class OpenAIChatCleanupService: TranscriptCleanupProviding {
     let modelID: String
     let apiKey: String?
     let timeout: TimeInterval
+    /// Azure reasoning deployments (o-series, gpt-5 family) reject
+    /// `temperature`; they get a low reasoning effort and extra completion
+    /// headroom because reasoning tokens count against the completion limit.
+    let usesReasoningParameters: Bool
     private let session: URLSession
+
+    static let reasoningTokenHeadroom = 1_024
 
     init(
         providerID: CleanupProviderID,
@@ -39,6 +45,7 @@ final class OpenAIChatCleanupService: TranscriptCleanupProviding {
         modelID: String,
         apiKey: String?,
         timeout: TimeInterval,
+        usesReasoningParameters: Bool = false,
         session: URLSession? = nil
     ) {
         self.providerID = providerID
@@ -46,6 +53,7 @@ final class OpenAIChatCleanupService: TranscriptCleanupProviding {
         self.modelID = modelID
         self.apiKey = apiKey
         self.timeout = timeout
+        self.usesReasoningParameters = usesReasoningParameters
         self.session = session ?? Self.sharedSession
     }
 
@@ -60,8 +68,9 @@ final class OpenAIChatCleanupService: TranscriptCleanupProviding {
     func clean(
         transcript: String,
         systemPrompt: String,
-        cleanupMode: CleanupMode = .everyday
+        filter: CleanupFilterSnapshot = .builtIn(.everyday)
     ) async throws -> CleanupProviderResult {
+        let cleanupMode = filter.mode
         let raw = transcript.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !raw.isEmpty else {
             return CleanupProviderResult(text: "", inputTokens: 0, outputTokens: 0, modelID: modelID)
@@ -69,7 +78,9 @@ final class OpenAIChatCleanupService: TranscriptCleanupProviding {
 
         let model = modelID.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !model.isEmpty else {
-            throw OpenAIChatCleanupError.invalidConfiguration("Enter a model name first.")
+            throw OpenAIChatCleanupError.invalidConfiguration(
+                providerID == .azureOpenAI ? "Enter a deployment name first." : "Enter a model name first."
+            )
         }
         let endpoint = try endpointURL()
         var request = URLRequest(url: endpoint)
@@ -77,7 +88,13 @@ final class OpenAIChatCleanupService: TranscriptCleanupProviding {
         request.timeoutInterval = max(0.5, timeout)
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         if let apiKey = apiKey?.trimmingCharacters(in: .whitespacesAndNewlines), !apiKey.isEmpty {
-            request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
+            if providerID == .azureOpenAI {
+                request.setValue(apiKey, forHTTPHeaderField: "api-key")
+            } else {
+                request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
+            }
+        } else if providerID == .azureOpenAI {
+            throw CleanupProviderError.missingCredential("Azure OpenAI")
         }
 
         let messages = [
@@ -92,6 +109,20 @@ final class OpenAIChatCleanupService: TranscriptCleanupProviding {
                     messages: messages,
                     stream: false,
                     options: .init(temperature: 0, numPredict: maxTokens)
+                )
+            )
+        } else if providerID == .azureOpenAI {
+            // The v1 API takes the deployment name as `model`. `max_tokens` is
+            // deprecated there and rejected by reasoning models.
+            request.httpBody = try JSONEncoder().encode(
+                AzureOpenAIRequest(
+                    model: model,
+                    messages: messages,
+                    temperature: usesReasoningParameters ? nil : 0,
+                    maxCompletionTokens: usesReasoningParameters
+                        ? maxTokens + Self.reasoningTokenHeadroom
+                        : maxTokens,
+                    reasoningEffort: usesReasoningParameters ? "low" : nil
                 )
             )
         } else {
@@ -139,7 +170,12 @@ final class OpenAIChatCleanupService: TranscriptCleanupProviding {
         }
 
         do {
-            let cleaned = try CleanupGuard.postprocess(value, source: raw, mode: cleanupMode)
+            let cleaned = try CleanupGuard.postprocess(
+                value,
+                source: raw,
+                mode: cleanupMode,
+                allowsNumberFormatting: filter.isCustom
+            )
             return CleanupProviderResult(
                 text: cleaned,
                 inputTokens: inputTokens,
@@ -154,6 +190,9 @@ final class OpenAIChatCleanupService: TranscriptCleanupProviding {
     }
 
     private func endpointURL() throws -> URL {
+        if providerID == .azureOpenAI {
+            return try Self.azureChatCompletionsURL(endpoint: baseURL)
+        }
         let trimmed = baseURL.trimmingCharacters(in: .whitespacesAndNewlines)
         guard var components = URLComponents(string: trimmed),
               let scheme = components.scheme?.lowercased(),
@@ -181,6 +220,51 @@ final class OpenAIChatCleanupService: TranscriptCleanupProviding {
     }
 }
 
+extension OpenAIChatCleanupService {
+    static let azureEndpointHelp = "Enter your Azure resource endpoint, for example https://YOUR-RESOURCE.openai.azure.com."
+
+    /// Builds the Azure OpenAI v1 chat completions URL from a resource
+    /// endpoint. The v1 API needs no dated `api-version`, so dated deployment
+    /// URLs and query strings are rejected rather than silently rewritten.
+    static func azureChatCompletionsURL(endpoint: String) throws -> URL {
+        let trimmed = endpoint.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard var components = URLComponents(string: trimmed),
+              components.host?.isEmpty == false,
+              components.user == nil,
+              components.password == nil,
+              components.fragment == nil else {
+            throw OpenAIChatCleanupError.invalidConfiguration(azureEndpointHelp)
+        }
+        guard components.scheme?.lowercased() == "https" else {
+            throw OpenAIChatCleanupError.invalidConfiguration("Azure OpenAI endpoints must use HTTPS.")
+        }
+        var path = components.path
+        while path.hasSuffix("/") { path.removeLast() }
+        guard components.query == nil, !path.lowercased().contains("/deployments/") else {
+            throw OpenAIChatCleanupError.invalidConfiguration(
+                "Use the resource endpoint only. WorkFlow calls the Azure OpenAI v1 API, so no deployment path or api-version is needed."
+            )
+        }
+        let lowered = path.lowercased()
+        if lowered.hasSuffix("/openai/v1/chat/completions") {
+            // Already a full v1 chat completions URL.
+        } else if lowered.hasSuffix("/openai/v1") {
+            path += "/chat/completions"
+        } else if lowered.hasSuffix("/openai") {
+            path += "/v1/chat/completions"
+        } else if lowered.isEmpty {
+            path = "/openai/v1/chat/completions"
+        } else {
+            throw OpenAIChatCleanupError.invalidConfiguration(azureEndpointHelp)
+        }
+        components.path = path
+        guard let url = components.url else {
+            throw OpenAIChatCleanupError.invalidConfiguration(azureEndpointHelp)
+        }
+        return url
+    }
+}
+
 private struct ChatMessage: Codable {
     let role: String
     let content: String
@@ -195,6 +279,20 @@ private struct OpenAIRequest: Encodable {
     enum CodingKeys: String, CodingKey {
         case model, messages, temperature
         case maxTokens = "max_tokens"
+    }
+}
+
+private struct AzureOpenAIRequest: Encodable {
+    let model: String
+    let messages: [ChatMessage]
+    let temperature: Double?
+    let maxCompletionTokens: Int
+    let reasoningEffort: String?
+
+    enum CodingKeys: String, CodingKey {
+        case model, messages, temperature
+        case maxCompletionTokens = "max_completion_tokens"
+        case reasoningEffort = "reasoning_effort"
     }
 }
 
