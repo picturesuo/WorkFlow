@@ -204,11 +204,14 @@ enum CleanupGuard {
         if allowsNumberFormatting {
             let spoken = SpokenNumberParser.parse(trimmedSource)
             sourceNumbers.formUnion(spoken.values)
-            // A spoken range ("five to ten") may be written as "5-10" only when
-            // every endpoint is itself a value from the source. Spoken digits
-            // ("five five five one two three four") may be grouped with spaces,
-            // parentheses, or hyphens ("555-1234", "(555) 1234") only when the
-            // adjacent groups together reproduce one complete spoken sequence.
+            // Each number group is accepted on its own when it is a source
+            // value, a complete spoken digit sequence ("four seven two one" →
+            // "4721"), or a hyphen range whose every part is one of those
+            // ("five to ten" → "5-10"). Adjacent groups separated only by
+            // spaces, parentheses, or hyphens are also accepted when together
+            // they reproduce one complete spoken sequence ("five five five one
+            // two three four" → "(555) 1234"); partial groups never merge
+            // across prose or across different source numbers.
             func isSequence(_ tokens: [String]) -> Bool {
                 let joined = tokens.joined()
                 return joined.allSatisfy { $0.isNumber || $0 == "-" }
