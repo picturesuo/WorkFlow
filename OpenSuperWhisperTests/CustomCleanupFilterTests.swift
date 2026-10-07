@@ -723,6 +723,24 @@ final class CustomFilterProviderTransportTests: XCTestCase {
             XCTAssertEqual(result.source, .rawFallback, written)
             XCTAssertEqual(result.text, spoken)
         }
+
+        // A code written one digit per group must keep its spoken order even
+        // when some members stay as number words.
+        let code = "Um, my extension is four seven two one."
+        for written in ["My extension is 7 four two one.", "My extension is four 2 seven one."] {
+            CleanupURLProtocol.handler = { request in
+                Self.response(request, #"{"choices":[{"message":{"role":"assistant","content":"\#(written)"}}]}"#)
+            }
+            let result = await pipeline(provider).finalize(code)
+            XCTAssertEqual(result.source, .rawFallback, written)
+            XCTAssertEqual(result.text, code)
+        }
+        CleanupURLProtocol.handler = { request in
+            Self.response(request, #"{"choices":[{"message":{"role":"assistant","content":"My extension is 4 seven two one."}}]}"#)
+        }
+        let kept = await pipeline(provider).finalize(code)
+        XCTAssertEqual(kept.source, .openAICompatible)
+        XCTAssertEqual(kept.text, "My extension is 4 seven two one.")
     }
 
     func testTechnicalBulletListOfCodesKeepsProviderCleanup() async throws {
