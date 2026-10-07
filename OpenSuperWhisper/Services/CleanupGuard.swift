@@ -209,16 +209,18 @@ enum CleanupGuard {
             // ("five five five one two three four") may be grouped with spaces,
             // parentheses, or hyphens ("555-1234", "(555) 1234") only when the
             // adjacent groups together reproduce one complete spoken sequence.
+            func isSequence(_ tokens: [String]) -> Bool {
+                let joined = tokens.joined()
+                return joined.allSatisfy { $0.isNumber || $0 == "-" }
+                    && spoken.digitSequences.contains(joined.filter(\.isNumber))
+            }
             func isExplained(_ token: String) -> Bool {
-                if sourceNumbers.contains(token) { return true }
+                if sourceNumbers.contains(token) || isSequence([token]) { return true }
                 let parts = token.split(separator: "-", omittingEmptySubsequences: false).map(String.init)
                 return parts.count > 1 && parts.allSatisfy(sourceNumbers.contains)
             }
             for run in numericRuns(in: cleaned) {
-                let joined = run.joined()
-                let isSequence = joined.allSatisfy { $0.isNumber || $0 == "-" }
-                    && spoken.digitSequences.contains(joined.filter(\.isNumber))
-                guard run.allSatisfy(isExplained) || isSequence else {
+                guard run.allSatisfy(isExplained) || isSequence(run) else {
                     throw CleanupGuardError.unsafeRewrite
                 }
             }

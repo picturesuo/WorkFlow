@@ -282,14 +282,17 @@ final class CustomFilterNumberGuardTests: XCTestCase {
             "My extension is 4721 and the office is 555-1234."
         )
         XCTAssertThrowsError(try CleanupGuard.postprocess("My extension is 4721.", source: phone))
-        for regrouped in ["47 21", "47-21", "47 21, 555 1234", "(555) 1234", "4-7-2-1"] {
+        for regrouped in [
+            "47 21", "47-21", "47 21, 555 1234", "(555) 1234", "4-7-2-1", "4721 5551234", "4721 (555-1234)",
+            "4721\n- 555-1234"
+        ] {
             XCTAssertNoThrow(
                 try CleanupGuard.postprocess("Call \(regrouped).", source: phone, allowsNumberFormatting: true),
                 "Rejected \(regrouped)"
             )
         }
         for changed in [
-            "4271", "4721-555", "1234-555", "555-5555", "472", "47 2", "47 21 5", "4721 5551234",
+            "4271", "4721-555", "1234-555", "555-5555", "472", "47 2", "47 21 5", "4721 555123",
             "47 and 21", "4721 and 9", "47, 21", "(555) 123"
         ] {
             XCTAssertThrowsError(
@@ -297,6 +300,28 @@ final class CustomFilterNumberGuardTests: XCTestCase {
                 "Accepted \(changed)"
             )
         }
+
+        let mixed = "meet at five thirty, code four seven two one, twenty five chairs"
+        XCTAssertEqual(
+            try CleanupGuard.postprocess("Meet at 5:30 (4721) 25 chairs.", source: mixed, allowsNumberFormatting: true),
+            "Meet at 5:30 (4721) 25 chairs."
+        )
+        XCTAssertThrowsError(try CleanupGuard.postprocess("Meet at 5:30 (4721) 25 chairs.", source: mixed))
+        XCTAssertThrowsError(try CleanupGuard.postprocess("Meet at 5:30 (4712) 25 chairs.", source: mixed, allowsNumberFormatting: true))
+
+        let codes = "codes four seven two one and nine oh two one oh, then twenty five"
+        let list = "Codes:\n- 4721\n- 90210\n- 25"
+        XCTAssertEqual(
+            try CleanupGuard.postprocess(list, source: codes, mode: .technical, allowsNumberFormatting: true),
+            list
+        )
+        XCTAssertThrowsError(try CleanupGuard.postprocess(list, source: codes, mode: .technical))
+        XCTAssertThrowsError(try CleanupGuard.postprocess(
+            "Codes:\n- 4721\n- 90211\n- 25", source: codes, mode: .technical, allowsNumberFormatting: true
+        ))
+        XCTAssertThrowsError(try CleanupGuard.postprocess(
+            "Codes:\n- 4721\n- 902\n- 25", source: codes, mode: .technical, allowsNumberFormatting: true
+        ))
 
         let longPhone = "um, call five five five one two three four five six seven"
         XCTAssertEqual(
@@ -525,6 +550,32 @@ final class CustomFilterProviderTransportTests: XCTestCase {
             XCTAssertEqual(result.source, .rawFallback, written)
             XCTAssertEqual(result.text, spoken)
         }
+    }
+
+    func testTechnicalBulletListOfCodesKeepsProviderCleanup() async throws {
+        let spoken = "Um, the codes are four seven two one and nine oh two one oh."
+        let written = "Codes:\n- 4721\n- 90210"
+        let provider = OpenAIChatCleanupService(
+            providerID: .openAICompatible, baseURL: "https://example.com/v1", modelID: "fast-model",
+            apiKey: "compatible-test", timeout: 1, session: session
+        )
+        let pipeline = TranscriptCleanupPipeline(
+            isEnabled: { true },
+            providerResolver: { provider },
+            vocabularyProvider: { [] },
+            appRuleProvider: { _ in nil },
+            bedrockBudgetProvider: { nil },
+            filterProvider: {
+                CleanupFilterSnapshot(mode: .technical, customName: "Technical with digits", customInstructions: "Write every number as digits.")
+            }
+        )
+        CleanupURLProtocol.handler = { request in
+            Self.response(request, #"{"choices":[{"message":{"role":"assistant","content":"Codes:\n- 4721\n- 90210"}}]}"#)
+        }
+        let result = await pipeline.finalize(spoken)
+        XCTAssertEqual(result.source, .openAICompatible)
+        XCTAssertEqual(result.text, written)
+        XCTAssertEqual(result.cleanupMode, .technical)
     }
 
     func testAzureUsesV1EndpointApiKeyHeaderAndDeploymentName() async throws {
