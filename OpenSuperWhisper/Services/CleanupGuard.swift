@@ -201,24 +201,29 @@ enum CleanupGuard {
         }
 
         var sourceNumbers = numericTokens(in: trimmedSource)
-        let cleanedNumbers = numericTokens(in: cleaned)
         if allowsNumberFormatting {
             let spoken = SpokenNumberParser.parse(trimmedSource)
             sourceNumbers.formUnion(spoken.values)
-            let unexplained = cleanedNumbers.subtracting(sourceNumbers)
             // A spoken range ("five to ten") may be written as "5-10" only when
-            // every endpoint is itself a value from the source, and spoken
-            // digits ("five five five one two three four") may be grouped with
-            // hyphens ("555-1234") only in their spoken order.
-            guard unexplained.allSatisfy({ token in
+            // every endpoint is itself a value from the source. Spoken digits
+            // ("five five five one two three four") may be grouped with spaces,
+            // parentheses, or hyphens ("555-1234", "(555) 1234") only when the
+            // adjacent groups together reproduce one complete spoken sequence.
+            func isExplained(_ token: String) -> Bool {
+                if sourceNumbers.contains(token) { return true }
                 let parts = token.split(separator: "-", omittingEmptySubsequences: false).map(String.init)
-                return (parts.count > 1 && parts.allSatisfy(sourceNumbers.contains))
-                    || spoken.digitSequences.contains(parts.joined())
-            }) else {
-                throw CleanupGuardError.unsafeRewrite
+                return parts.count > 1 && parts.allSatisfy(sourceNumbers.contains)
+            }
+            for run in numericRuns(in: cleaned) {
+                let joined = run.joined()
+                let isSequence = joined.allSatisfy { $0.isNumber || $0 == "-" }
+                    && spoken.digitSequences.contains(joined.filter(\.isNumber))
+                guard run.allSatisfy(isExplained) || isSequence else {
+                    throw CleanupGuardError.unsafeRewrite
+                }
             }
         } else {
-            guard cleanedNumbers.isSubset(of: sourceNumbers) else {
+            guard numericTokens(in: cleaned).isSubset(of: sourceNumbers) else {
                 throw CleanupGuardError.unsafeRewrite
             }
         }
@@ -234,13 +239,34 @@ enum CleanupGuard {
     }
 
     private static func numericTokens(in value: String) -> Set<String> {
+        Set(numericMatches(in: value).map { $0.token })
+    }
+
+    /// Groups numeric tokens separated only by spaces, parentheses, or hyphens,
+    /// so "(555) 123-4567" is one run while "4721 and 9" is two.
+    private static func numericRuns(in value: String) -> [[String]] {
+        var runs: [[String]] = []
+        var previousEnd: String.Index?
+        for match in numericMatches(in: value) {
+            if let previousEnd,
+               value[previousEnd..<match.range.lowerBound].allSatisfy({ $0.isWhitespace || "()-".contains($0) }) {
+                runs[runs.count - 1].append(match.token)
+            } else {
+                runs.append([match.token])
+            }
+            previousEnd = match.range.upperBound
+        }
+        return runs
+    }
+
+    private static func numericMatches(in value: String) -> [(token: String, range: Range<String.Index>)] {
         // Separators only belong to a number when followed by another digit,
         // so sentence punctuation ("at 5" → "at 5.") does not create a false mismatch.
         let pattern = try! NSRegularExpression(pattern: #"\d+(?:[.,:/-]\d+)*"#)
         let range = NSRange(value.startIndex..<value.endIndex, in: value)
-        return Set(pattern.matches(in: value, range: range).compactMap { match in
-            Range(match.range, in: value).map { canonicalNumericToken(String(value[$0])) }
-        })
+        return pattern.matches(in: value, range: range).compactMap { match in
+            Range(match.range, in: value).map { (token: canonicalNumericToken(String(value[$0])), range: $0) }
+        }
     }
 
     private static func canonicalNumericToken(_ token: String) -> String {

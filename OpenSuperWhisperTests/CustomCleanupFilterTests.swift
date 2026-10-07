@@ -282,9 +282,31 @@ final class CustomFilterNumberGuardTests: XCTestCase {
             "My extension is 4721 and the office is 555-1234."
         )
         XCTAssertThrowsError(try CleanupGuard.postprocess("My extension is 4721.", source: phone))
-        for changed in ["4271", "4721-555", "1234-555", "555-5555", "47 21", "472", "4721 and 9"] {
+        for regrouped in ["47 21", "47-21", "47 21, 555 1234", "(555) 1234", "4-7-2-1"] {
+            XCTAssertNoThrow(
+                try CleanupGuard.postprocess("Call \(regrouped).", source: phone, allowsNumberFormatting: true),
+                "Rejected \(regrouped)"
+            )
+        }
+        for changed in [
+            "4271", "4721-555", "1234-555", "555-5555", "472", "47 2", "47 21 5", "4721 5551234",
+            "47 and 21", "4721 and 9", "47, 21", "(555) 123"
+        ] {
             XCTAssertThrowsError(
                 try CleanupGuard.postprocess("Call \(changed).", source: phone, allowsNumberFormatting: true),
+                "Accepted \(changed)"
+            )
+        }
+
+        let longPhone = "um, call five five five one two three four five six seven"
+        XCTAssertEqual(
+            try CleanupGuard.postprocess("Call (555) 123-4567.", source: longPhone, allowsNumberFormatting: true),
+            "Call (555) 123-4567."
+        )
+        XCTAssertThrowsError(try CleanupGuard.postprocess("Call (555) 123-4567.", source: longPhone))
+        for changed in ["(555) 123-4568", "(555) 321-4567", "(555) 123-45678", "(555) 123-456", "555 123 4567 and 8"] {
+            XCTAssertThrowsError(
+                try CleanupGuard.postprocess("Call \(changed).", source: longPhone, allowsNumberFormatting: true),
                 "Accepted \(changed)"
             )
         }
@@ -479,6 +501,30 @@ final class CustomFilterProviderTransportTests: XCTestCase {
         XCTAssertEqual(result.source, .openAICompatible)
         XCTAssertEqual(result.text, written)
         XCTAssertEqual(result.customFilterName, "Everyday with digits")
+    }
+
+    func testRegroupedPhoneNumberFromDigitsFilterKeepsProviderCleanup() async throws {
+        let spoken = "Um, call five five five one two three four five six seven."
+        let provider = OpenAIChatCleanupService(
+            providerID: .openAICompatible, baseURL: "https://example.com/v1", modelID: "fast-model",
+            apiKey: "compatible-test", timeout: 1, session: session
+        )
+        for written in ["Call (555) 123-4567.", "Call 555 123 4567.", "Call 555-123-4567."] {
+            CleanupURLProtocol.handler = { request in
+                Self.response(request, #"{"choices":[{"message":{"role":"assistant","content":"\#(written)"}}]}"#)
+            }
+            let result = await pipeline(provider).finalize(spoken)
+            XCTAssertEqual(result.source, .openAICompatible, written)
+            XCTAssertEqual(result.text, written)
+        }
+        for written in ["Call (555) 123-4568.", "Call (555) 123.", "Call 555 123 4567 8."] {
+            CleanupURLProtocol.handler = { request in
+                Self.response(request, #"{"choices":[{"message":{"role":"assistant","content":"\#(written)"}}]}"#)
+            }
+            let result = await pipeline(provider).finalize(spoken)
+            XCTAssertEqual(result.source, .rawFallback, written)
+            XCTAssertEqual(result.text, spoken)
+        }
     }
 
     func testAzureUsesV1EndpointApiKeyHeaderAndDeploymentName() async throws {
