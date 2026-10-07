@@ -153,9 +153,9 @@ enum CleanupGuardError: LocalizedError, Equatable {
 
 enum CleanupGuard {
     /// - Parameter allowsNumberFormatting: Set only for custom filters, which
-    ///   may ask for a number style. It accepts a digit form only when that exact
-    ///   value, clock time, or digit sequence is spelled out in the source, so a
-    ///   changed value or a reordered digit still fails.
+    ///   may ask for a number style. It accepts a digit form only when the
+    ///   source spells out that exact value, clock time, or run of digit words;
+    ///   anything else falls back to the local transcript.
     static func postprocess(
         _ value: String,
         source: String,
@@ -205,15 +205,16 @@ enum CleanupGuard {
             let spoken = SpokenNumberParser.parse(trimmedSource)
             sourceNumbers.formUnion(spoken.values)
             // Each number group is accepted on its own when it is a source
-            // value, a complete spoken digit sequence ("four seven two one" →
-            // "4721"), or a hyphen range whose every part is one of those
+            // value, a complete spoken run of digit words ("four seven two one"
+            // → "4721"), or a hyphen range whose every part is one of those
             // ("five to ten" → "5-10"). Adjacent groups separated only by
             // spaces, parentheses, or hyphens are also accepted when together
-            // they reproduce one complete spoken sequence ("five five five one
-            // two three four" → "(555) 1234"); partial groups never merge
-            // across prose or across different source numbers. Digits spoken
-            // inside a sequence are not source values on their own, so a
-            // reordered sequence fails even when written one digit per group.
+            // they reproduce one complete spoken run ("five five five one two
+            // three four" → "(555) 1234"). Partial groups are not merged
+            // across prose, punctuation, or different source numbers, and a
+            // digit word inside a run is not a source value on its own, so a
+            // run written one digit per group must keep its spoken order
+            // unless those digits were also spoken separately.
             func isSequence(_ tokens: [String]) -> Bool {
                 let joined = tokens.joined()
                 return joined.allSatisfy { $0.isNumber || $0 == "-" }

@@ -220,9 +220,26 @@ final class CustomFilterNumberGuardTests: XCTestCase {
         let digits = SpokenNumberParser.parse("code four seven two one, then call five five five one two three four and five chairs")
         XCTAssertEqual(digits.digitSequences, ["4721", "5551234"])
         XCTAssertEqual(digits.values, ["5"])
-        XCTAssertEqual(SpokenNumberParser.parse("oh five chairs"), SpokenNumbers(values: ["0", "5"]))
+        XCTAssertEqual(SpokenNumberParser.parse("oh, five chairs"), SpokenNumbers(values: ["0", "5"]))
+        XCTAssertEqual(SpokenNumberParser.parse("the zip is oh two one three nine").digitSequences, ["02139"])
+        XCTAssertEqual(SpokenNumberParser.parse("five, oh, five minutes"), SpokenNumbers(values: ["5", "0"]))
         XCTAssertEqual(SpokenNumberParser.parse("two point five hours").values, ["2.5"])
-        XCTAssertEqual(SpokenNumberParser.parse("five point oh").values, ["5", "5.0"])
+        XCTAssertEqual(SpokenNumberParser.parse("five point oh").values, ["5.0"])
+        XCTAssertEqual(SpokenNumberParser.parse("two point five, six").values, ["2.5", "6"])
+    }
+
+    func testSpokenNumberParserEndsNumbersAndRunsAtPunctuation() {
+        XCTAssertEqual(
+            SpokenNumberParser.parse("read chapters two, three, and four."),
+            SpokenNumbers(values: ["2", "3", "4"])
+        )
+        XCTAssertEqual(SpokenNumberParser.parse("I said two. Three would be better"), SpokenNumbers(values: ["2", "3"]))
+        XCTAssertEqual(SpokenNumberParser.parse("twenty, five").values, ["20", "5"])
+        XCTAssertEqual(SpokenNumberParser.parse("twenty-five").values, ["25"])
+        XCTAssertEqual(SpokenNumberParser.parse("call five five five, one two three four").digitSequences, ["555", "1234"])
+        XCTAssertEqual(SpokenNumberParser.parse("nineteen, eighty four").values, ["19", "84"])
+        XCTAssertFalse(SpokenNumberParser.parse("five, thirty").values.contains("5:30"))
+        XCTAssertTrue(SpokenNumberParser.parse("seven o'clock").values.contains("7:00"))
         XCTAssertTrue(SpokenNumberParser.parse("one twenty five").digitSequences.isEmpty)
         XCTAssertTrue(SpokenNumberParser.parse("four and seven").digitSequences.isEmpty)
         XCTAssertTrue(SpokenNumberParser.parse("two point oh five").values.contains("2.05"))
@@ -277,8 +294,13 @@ final class CustomFilterNumberGuardTests: XCTestCase {
             "Bring 2 chairs for about 2.5 hours."
         )
         XCTAssertEqual(
-            try CleanupGuard.postprocess("Exactly 5.", source: "exactly five point oh", allowsNumberFormatting: true),
-            "Exactly 5."
+            try CleanupGuard.postprocess("Exactly 5.0.", source: "exactly five point oh", allowsNumberFormatting: true),
+            "Exactly 5.0."
+        )
+        XCTAssertThrowsError(try CleanupGuard.postprocess("Exactly 5.", source: "exactly five point oh", allowsNumberFormatting: true))
+        XCTAssertEqual(
+            try CleanupGuard.postprocess("Rate it 5, not 5.0.", source: "rate it five, not five point oh", allowsNumberFormatting: true),
+            "Rate it 5, not 5.0."
         )
         XCTAssertEqual(
             try CleanupGuard.postprocess("Allow 5-7 minutes.", source: "allow five to seven minutes", allowsNumberFormatting: true),
@@ -346,6 +368,37 @@ final class CustomFilterNumberGuardTests: XCTestCase {
         XCTAssertThrowsError(try CleanupGuard.postprocess(
             "Codes:\n- 4721\n- 902\n- 25", source: codes, mode: .technical, allowsNumberFormatting: true
         ))
+
+        XCTAssertEqual(
+            try CleanupGuard.postprocess(
+                "Read chapters 2, 3, and 4. I said 2. 3 would be better.",
+                source: "read chapters two, three, and four. I said two. Three would be better.",
+                allowsNumberFormatting: true
+            ),
+            "Read chapters 2, 3, and 4. I said 2. 3 would be better."
+        )
+        XCTAssertThrowsError(try CleanupGuard.postprocess(
+            "Read chapters 23 and 4.",
+            source: "read chapters two, three, and four.",
+            allowsNumberFormatting: true
+        ))
+        XCTAssertEqual(
+            try CleanupGuard.postprocess("Oh, 5 chairs.", source: "oh, five chairs", allowsNumberFormatting: true),
+            "Oh, 5 chairs."
+        )
+        let zip = "the zip is oh two one three nine"
+        XCTAssertEqual(
+            try CleanupGuard.postprocess("The zip is 02139.", source: zip, allowsNumberFormatting: true),
+            "The zip is 02139."
+        )
+        XCTAssertThrowsError(try CleanupGuard.postprocess("The zip is 02139.", source: zip))
+        XCTAssertThrowsError(try CleanupGuard.postprocess("The zip is 2139.", source: zip, allowsNumberFormatting: true))
+        let pausedPhone = "call five five five, one two three four"
+        XCTAssertEqual(
+            try CleanupGuard.postprocess("Call 555-1234.", source: pausedPhone, allowsNumberFormatting: true),
+            "Call 555-1234."
+        )
+        XCTAssertThrowsError(try CleanupGuard.postprocess("Call 5551234.", source: pausedPhone, allowsNumberFormatting: true))
 
         let areaCode = "my number is area code five five five number one two three four"
         for grouped in ["555-1234", "555 1234", "(555) 1234", "(555) 123-4"] {

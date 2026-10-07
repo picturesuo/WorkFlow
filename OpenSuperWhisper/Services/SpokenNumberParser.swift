@@ -2,13 +2,13 @@ import Foundation
 
 struct SpokenNumbers: Equatable {
     /// Numeric values the words spell out, such as "25", "2.5", "1984", and
-    /// unambiguous clock forms such as "5:30" or "5:00". A digit spoken as
-    /// part of a sequence, or the whole part of a decimal, is not a value of
-    /// its own.
+    /// clock forms such as "5:30" or "5:00". Punctuation between words ends a
+    /// number. A digit word inside a run of digit words, and the whole part of
+    /// a spoken decimal, are not values of their own.
     var values: Set<String> = []
-    /// Contiguous runs of single digit words in spoken order, such as
-    /// "four seven two one" → "4721". Codes and phone numbers keep their digit
-    /// order, so a reordered form never matches, even one digit per group.
+    /// Runs of single digit words separated only by spaces, in spoken order,
+    /// such as "four seven two one" → "4721" or "oh two one" → "021". Only the
+    /// complete run matches.
     var digitSequences: Set<String> = []
 }
 
@@ -58,9 +58,30 @@ enum SpokenNumberParser {
     ]
 
     static func parse(_ text: String) -> SpokenNumbers {
-        let words = text.lowercased()
-            .components(separatedBy: CharacterSet.letters.inverted)
-            .filter { !$0.isEmpty }
+        var words: [String] = []
+        var boundaryBefore: [Bool] = []
+        var word = ""
+        var pendingBoundary = false
+        for character in text.lowercased() {
+            if character.isLetter {
+                word.append(character)
+            } else {
+                if !word.isEmpty {
+                    words.append(word)
+                    boundaryBefore.append(pendingBoundary)
+                    word = ""
+                    pendingBoundary = false
+                }
+                if !character.isWhitespace, !"-'’".contains(character) { pendingBoundary = true }
+            }
+        }
+        if !word.isEmpty {
+            words.append(word)
+            boundaryBefore.append(pendingBoundary)
+        }
+        func adjacent(_ first: Segment, _ second: Segment) -> Bool {
+            second.start == first.end && !boundaryBefore[second.start]
+        }
 
         var numbers = SpokenNumbers()
         var segments: [Segment] = []
@@ -84,6 +105,7 @@ enum SpokenNumberParser {
 
         var index = 0
         while index < words.count {
+            if boundaryBefore[index] { flush(at: index) }
             let word = words[index]
             let next = index + 1 < words.count ? words[index + 1] : nil
 
@@ -149,11 +171,10 @@ enum SpokenNumberParser {
                 let whole = total + current
                 var digits = ""
                 var cursor = index + 1
-                while cursor < words.count, let digit = units[words[cursor]] {
+                while cursor < words.count, !boundaryBefore[cursor], let digit = units[words[cursor]] {
                     digits += String(digit)
                     cursor += 1
                 }
-                if digits.allSatisfy({ $0 == "0" }) { numbers.values.insert(String(whole)) }
                 numbers.values.insert("\(whole).\(digits)")
                 total = 0
                 current = 0
@@ -181,12 +202,11 @@ enum SpokenNumberParser {
             run = []
         }
         for (offset, segment) in segments.enumerated() {
-            if segment.isDigit, let last = run.last, segments[last].end == segment.start {
+            if segment.isDigit, let last = run.last, adjacent(segments[last], segment) {
                 run.append(offset)
             } else {
                 closeRun()
-                // A leading "oh" is the interjection ("oh, five chairs"), not a digit.
-                if segment.isDigit, words[segment.start] != "oh" { run = [offset] }
+                if segment.isDigit { run = [offset] }
             }
         }
         closeRun()
@@ -195,7 +215,7 @@ enum SpokenNumberParser {
             numbers.values.insert(String(segment.value))
         }
 
-        for (first, second) in zip(segments, segments.dropFirst()) where second.start == first.end {
+        for (first, second) in zip(segments, segments.dropFirst()) where adjacent(first, second) {
             // Spoken years and codes pair two-digit groups: "twenty twenty six" → 2026.
             if first.isTwoDigit, second.isTwoDigit {
                 numbers.values.insert(String(format: "%d%02d", first.value, second.value))
@@ -208,7 +228,7 @@ enum SpokenNumberParser {
 
         for (offset, hour) in segments.enumerated() where hour.isHour {
             // "five o'clock" → 5:00.
-            if hour.end < words.count,
+            if hour.end < words.count, !boundaryBefore[hour.end],
                words[hour.end] == "oclock" || (words[hour.end] == "o" && hour.end + 1 < words.count && words[hour.end + 1] == "clock") {
                 numbers.values.insert(String(format: "%d:00", hour.value))
             }
@@ -216,7 +236,7 @@ enum SpokenNumberParser {
             if offset + 2 < segments.count {
                 let zero = segments[offset + 1]
                 let minute = segments[offset + 2]
-                if zero.isDigit, zero.value == 0, zero.start == hour.end, minute.isDigit, minute.start == zero.end {
+                if zero.isDigit, zero.value == 0, adjacent(hour, zero), minute.isDigit, adjacent(zero, minute) {
                     numbers.values.insert(String(format: "%d:0%d", hour.value, minute.value))
                 }
             }
