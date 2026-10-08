@@ -96,14 +96,7 @@ final class TranscriptCleanupPipeline {
         vocabularyProvider: @escaping () -> [VocabularyEntry] = { VocabularyStore.load() },
         appRuleProvider: @escaping (String?) -> TargetAppRule? = { TargetAppRuleStore.rule(for: $0) },
         bedrockBudgetProvider: @escaping () async -> BedrockBudgetStatus? = {
-            let prefs = AppPreferences.shared
-            guard prefs.bedrockMonthlyBudgetEnabled,
-                  BedrockPricing.supports(modelID: prefs.bedrockModelID) else { return nil }
-            let now = Date()
-            let parts = Calendar.current.dateComponents([.year, .month], from: now)
-            let monthStart = Calendar.current.date(from: parts) ?? now
-            let spent = (try? await RecordingStore.shared.bedrockUsage(since: monthStart).estimatedCostUSD) ?? 0
-            return BedrockBudgetStatus(spentUSD: spent, limitUSD: prefs.bedrockMonthlyBudgetUSD)
+            await BedrockBudgetStatus.current()
         },
         filterProvider: @escaping () -> CleanupFilterSnapshot = {
             CustomCleanupFilterStore.currentSnapshot()

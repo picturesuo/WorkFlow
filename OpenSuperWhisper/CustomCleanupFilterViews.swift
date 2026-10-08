@@ -80,6 +80,7 @@ struct CustomCleanupFiltersCard: View {
     @State private var draft: CustomCleanupFilter?
     @State private var isNewDraft: Bool
     @State private var errorMessage = ""
+    @State private var assistant: FilterAssistantPresentation?
 
     init(writingFilter: WritingFilterPreferences, newDraft: CustomCleanupFilter? = nil) {
         self.writingFilter = writingFilter
@@ -99,6 +100,14 @@ struct CustomCleanupFiltersCard: View {
                         .fixedSize(horizontal: false, vertical: true)
                 }
                 Spacer()
+                Button {
+                    openAssistant(.new)
+                } label: {
+                    Label("Create with AI", systemImage: "sparkles")
+                }
+                .fixedSize()
+                .disabled(draft != nil || writingFilter.filters.count >= CustomCleanupFilterStore.maximumFilters)
+                .help("Describe a filter or paste a finished example, then review the AI's draft")
                 Menu {
                     Button("Blank filter") {
                         startDraft(CustomCleanupFilter(name: "", baseMode: .everyday, instructions: ""), isNew: true)
@@ -138,6 +147,11 @@ struct CustomCleanupFiltersCard: View {
                 }
             }
         }
+        .sheet(item: $assistant) { presentation in
+            FilterAssistantSheet(session: presentation.session, voice: presentation.voice) {
+                assistant = nil
+            }
+        }
     }
 
     private func row(for filter: CustomCleanupFilter) -> some View {
@@ -167,6 +181,15 @@ struct CustomCleanupFiltersCard: View {
                     .controlSize(.small)
                     .accessibilityLabel("Use \(filter.name)")
             }
+            Button {
+                openAssistant(.existing(filter))
+            } label: {
+                Image(systemName: "sparkles")
+            }
+            .buttonStyle(.plain)
+            .disabled(draft != nil)
+            .help("Improve with AI")
+            .accessibilityLabel("Improve \(filter.name) with AI")
             Button {
                 startDraft(filter, isNew: false)
             } label: {
@@ -250,6 +273,13 @@ struct CustomCleanupFiltersCard: View {
         .clipShape(RoundedRectangle(cornerRadius: 8))
     }
 
+    private func openAssistant(_ target: FilterAssistantSession.Target) {
+        assistant = FilterAssistantPresentation(
+            session: FilterAssistantSession(target: target),
+            voice: FilterAssistantVoiceInput()
+        )
+    }
+
     private func startDraft(_ filter: CustomCleanupFilter, isNew: Bool) {
         draft = filter
         isNewDraft = isNew
@@ -272,4 +302,11 @@ struct CustomCleanupFiltersCard: View {
             errorMessage = error.localizedDescription
         }
     }
+}
+
+/// Keeps one assistant conversation alive for the lifetime of its sheet.
+struct FilterAssistantPresentation: Identifiable {
+    let id = UUID()
+    let session: FilterAssistantSession
+    let voice: FilterAssistantVoiceInput
 }

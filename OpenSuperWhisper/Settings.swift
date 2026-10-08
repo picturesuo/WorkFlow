@@ -382,8 +382,10 @@ class SettingsViewModel: ObservableObject {
         let now = Date()
         let components = Calendar.current.dateComponents([.year, .month], from: now)
         let monthStart = Calendar.current.date(from: components) ?? now
-        bedrockUsageSummary = (try? await RecordingStore.shared.bedrockUsage(since: monthStart))
+        var usage = (try? await RecordingStore.shared.bedrockUsage(since: monthStart))
             ?? BedrockUsageSummary()
+        usage.add(FilterAssistantUsageStore.usage(since: monthStart))
+        bedrockUsageSummary = usage
         tokenEfficiencySummary = (try? await RecordingStore.shared.tokenEfficiency(since: monthStart))
             ?? .empty
         bedrockLastErrorMessage = AppPreferences.shared.bedrockLastErrorMessage

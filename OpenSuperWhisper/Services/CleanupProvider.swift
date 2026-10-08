@@ -34,6 +34,33 @@ struct CleanupProviderResult: Equatable {
     let modelID: String
 }
 
+/// One bounded chat turn sent through a cleanup provider's existing
+/// credentials, endpoint validation, and timeout. Transcript cleanup and
+/// filter drafting share this transport; each caller validates its own output.
+struct ProviderChatMessage: Equatable, Sendable {
+    enum Role: String, Sendable {
+        case user
+        case assistant
+    }
+
+    let role: Role
+    let content: String
+}
+
+struct ProviderChatRequest: Equatable, Sendable {
+    let systemPrompt: String
+    let messages: [ProviderChatMessage]
+    let maxOutputTokens: Int
+    /// Raises, never lowers, the provider's configured timeout.
+    var minimumTimeout: TimeInterval = 0
+}
+
+protocol CleanupChatCompleting {
+    var providerID: CleanupProviderID { get }
+    /// Returns the provider's raw reply text, unvalidated.
+    func complete(_ request: ProviderChatRequest) async throws -> CleanupProviderResult
+}
+
 protocol TranscriptCleanupProviding {
     var providerID: CleanupProviderID { get }
     func clean(
@@ -57,7 +84,7 @@ enum CleanupProviderError: LocalizedError, Equatable {
     }
 }
 
-struct BedrockCleanupProvider: TranscriptCleanupProviding {
+struct BedrockCleanupProvider: TranscriptCleanupProviding, CleanupChatCompleting {
     let providerID: CleanupProviderID = .bedrock
     let service: BedrockCleanupService
     let apiKey: String
@@ -82,10 +109,54 @@ struct BedrockCleanupProvider: TranscriptCleanupProviding {
             modelID: configuration.modelID
         )
     }
+
+    func complete(_ request: ProviderChatRequest) async throws -> CleanupProviderResult {
+        let response = try await service.complete(request, apiKey: apiKey, configuration: configuration)
+        return CleanupProviderResult(
+            text: response.text,
+            inputTokens: response.inputTokens,
+            outputTokens: response.outputTokens,
+            modelID: configuration.modelID
+        )
+    }
 }
 
 enum CleanupProviderFactory {
     static func makeSelected() throws -> any TranscriptCleanupProviding {
+        try makeSelectedProvider()
+    }
+
+    /// The same selected provider and stored credential, for bounded requests
+    /// that are not transcript cleanup. There is no fallback to another provider.
+    static func makeSelectedChat() throws -> any CleanupChatCompleting {
+        try makeSelectedProvider()
+    }
+
+    /// Where a request to the selected provider goes, without loading a key.
+    static func selectedDestination() -> CleanupProviderDestination {
+        let prefs = AppPreferences.shared
+        let providerID = CleanupProviderID(rawValue: prefs.cleanupProviderID) ?? .bedrock
+        switch providerID {
+        case .bedrock:
+            return CleanupProviderDestination(providerID: providerID, model: prefs.bedrockModelID, isOnThisMac: false)
+        case .ollama:
+            return CleanupProviderDestination(
+                providerID: providerID,
+                model: prefs.ollamaModelID,
+                isOnThisMac: OpenAIChatCleanupService.isLocalBaseURL(prefs.ollamaBaseURL)
+            )
+        case .openAICompatible:
+            return CleanupProviderDestination(
+                providerID: providerID,
+                model: prefs.openAICompatibleModelID,
+                isOnThisMac: OpenAIChatCleanupService.isLocalBaseURL(prefs.openAICompatibleBaseURL)
+            )
+        case .azureOpenAI:
+            return CleanupProviderDestination(providerID: providerID, model: prefs.azureOpenAIDeployment, isOnThisMac: false)
+        }
+    }
+
+    private static func makeSelectedProvider() throws -> any TranscriptCleanupProviding & CleanupChatCompleting {
         let prefs = AppPreferences.shared
         let providerID = CleanupProviderID(rawValue: prefs.cleanupProviderID) ?? .bedrock
 
@@ -136,5 +207,17 @@ enum CleanupProviderFactory {
                 usesReasoningParameters: prefs.azureOpenAIReasoningDeployment
             )
         }
+    }
+}
+
+struct CleanupProviderDestination: Equatable {
+    let providerID: CleanupProviderID
+    let model: String
+    let isOnThisMac: Bool
+
+    var summary: String {
+        let model = model.trimmingCharacters(in: .whitespacesAndNewlines)
+        let name = providerID == .ollama ? "Ollama" : providerID.displayName
+        return model.isEmpty ? name : "\(name) · \(model)"
     }
 }

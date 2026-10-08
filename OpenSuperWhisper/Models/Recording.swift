@@ -129,6 +129,16 @@ struct BedrockUsageSummary: Equatable {
     var estimatedCostUSD = 0.0
     var unpricedDictations = 0
     var localCleanedDictations = 0
+    var filterDraftRequests = 0
+
+    /// Folds in filter-drafting requests so totals and the Bedrock stop stay truthful.
+    mutating func add(_ drafting: FilterAssistantUsageStore.MonthUsage) {
+        filterDraftRequests += drafting.requests
+        inputTokens += drafting.inputTokens
+        outputTokens += drafting.outputTokens
+        estimatedCostUSD += drafting.estimatedCostUSD
+        unpricedDictations += drafting.unpricedRequests
+    }
 }
 
 @MainActor

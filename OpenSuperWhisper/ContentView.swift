@@ -120,6 +120,7 @@ class ContentViewModel: ObservableObject {
     @Published var historyDeletionError: String?
     
     private var cancellables = Set<AnyCancellable>()
+    private var recorderSessionID: UUID?
     
     init() {
         history.objectWillChange
@@ -129,12 +130,13 @@ class ContentViewModel: ObservableObject {
         recorder.$isRecording.combineLatest(recorder.$isConnecting)
             .receive(on: RunLoop.main)
             .sink { [weak self] _ in
-                guard let self else { return }
+                guard let self, let sessionID = self.recorderSessionID else { return }
                 // Both flags publish in the same main-queue block. Read the
                 // settled pair rather than an intermediate Combine emission.
+                let owned = self.recorder.ownsRecordingSession(sessionID)
                 self.updateRecorderState(
-                    isRecording: self.recorder.isRecording,
-                    isConnecting: self.recorder.isConnecting
+                    isRecording: owned && self.recorder.isRecording,
+                    isConnecting: owned && self.recorder.isConnecting
                 )
             }
             .store(in: &cancellables)
@@ -208,7 +210,8 @@ class ContentViewModel: ObservableObject {
     }
 
     var isRecording: Bool {
-        recorder.isRecording
+        guard let sessionID = recorderSessionID, recorder.ownsRecordingSession(sessionID) else { return false }
+        return recorder.isRecording
     }
     
     func startRecording() {
@@ -223,10 +226,12 @@ class ContentViewModel: ObservableObject {
             recordingStartedAt = Date()
         }
         
-        guard recorder.startRecording(completion: { [weak self] startError in
+        let sessionID = UUID()
+        guard recorder.startRecording(sessionID: sessionID, completion: { [weak self] startError in
             guard let startError else { return }
             Task { @MainActor in
-                guard let self else { return }
+                guard let self, self.recorderSessionID == sessionID else { return }
+                self.recorderSessionID = nil
                 self.state = .idle
                 self.resetRecordingStart()
                 self.recordingError = startError
@@ -234,12 +239,15 @@ class ContentViewModel: ObservableObject {
         }) else {
             state = .idle
             resetRecordingStart()
+            recordingError = "Another recording is already starting or active."
             return
         }
+        recorderSessionID = sessionID
     }
 
     func startDecoding() {
-        guard state != .decoding else { return }
+        guard state != .decoding, let sessionID = recorderSessionID else { return }
+        recorderSessionID = nil
         state = .decoding
         resetRecordingStart()
         
@@ -248,7 +256,7 @@ class ContentViewModel: ObservableObject {
         Task { [weak self] in
             guard let self = self else { return }
             
-            if let tempURL = await self.recorder.stopRecording() {
+            if let tempURL = await self.recorder.stopRecording(sessionID: sessionID) {
                 do {
                     print("start decoding...")
                     let duration = await AudioUtil.audioDuration(url: tempURL)
