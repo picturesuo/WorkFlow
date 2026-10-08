@@ -20,8 +20,7 @@ final class AudioSessionOwnershipTests: XCTestCase {
         let oldIndicator = UUID()
         let newRecording = UUID()
         XCTAssertTrue(gate.reserve(oldIndicator))
-        // The main-window Stop intentionally addresses the active recorder.
-        XCTAssertTrue(gate.take(ifMatching: nil))
+        XCTAssertTrue(gate.take(ifMatching: oldIndicator))
         XCTAssertTrue(gate.reserve(newRecording))
 
         XCTAssertFalse(gate.isCurrent(oldIndicator))
@@ -41,6 +40,17 @@ final class AudioSessionOwnershipTests: XCTestCase {
         XCTAssertFalse(gate.take(ifMatching: first))
         XCTAssertFalse(gate.reserve(UUID()))
         XCTAssertTrue(gate.take(ifMatching: second))
-        XCTAssertFalse(gate.take(ifMatching: nil))
+        XCTAssertFalse(gate.take(ifMatching: second))
+    }
+
+    func testMainWindowStopCannotConsumeTheAssistantSession() {
+        let gate = AudioRecordingSessionGate()
+        let assistant = UUID()
+        let mainWindow = UUID()
+        XCTAssertTrue(gate.reserve(assistant))
+        XCTAssertFalse(gate.reserve(mainWindow))
+        XCTAssertFalse(gate.take(ifMatching: mainWindow))
+        XCTAssertTrue(gate.isCurrent(assistant))
+        XCTAssertTrue(gate.take(ifMatching: assistant))
     }
 }

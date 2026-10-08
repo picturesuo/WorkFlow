@@ -5,7 +5,7 @@ import AppKit
 import CoreAudio
 
 /// Reserves one recorder session across the synchronous start call and its work queue.
-/// Unscoped commands intentionally address the current session (the main-window Stop).
+/// Only the recorder's own engine failure takes the current session unscoped.
 final class AudioRecordingSessionGate {
     private let lock = NSLock()
     private var sessionID: UUID?
@@ -180,7 +180,7 @@ class AudioRecorder: NSObject, ObservableObject {
     }
     
     @discardableResult
-    func startRecording(sessionID: UUID = UUID(), completion: ((String?) -> Void)? = nil) -> Bool {
+    func startRecording(sessionID: UUID, completion: ((String?) -> Void)? = nil) -> Bool {
         guard sessionGate.reserve(sessionID) else { return false }
 
         // Everything below costs CoreAudio HAL round-trips (device queries,
@@ -272,7 +272,7 @@ class AudioRecorder: NSObject, ObservableObject {
         sessionGate.isCurrent(sessionID)
     }
 
-    func stopRecording(sessionID: UUID? = nil) async -> URL? {
+    func stopRecording(sessionID: UUID) async -> URL? {
         await withCheckedContinuation { continuation in
             workQueue.async {
                 guard self.sessionGate.take(ifMatching: sessionID) else {
@@ -312,7 +312,7 @@ class AudioRecorder: NSObject, ObservableObject {
         }
     }
     
-    func cancelRecording(sessionID: UUID? = nil) {
+    func cancelRecording(sessionID: UUID) {
         workQueue.sync {
             guard sessionGate.take(ifMatching: sessionID) else { return }
             _ = performStop(discard: true)

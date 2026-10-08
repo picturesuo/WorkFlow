@@ -137,12 +137,7 @@ enum FilterAssistantPrompt {
     /// rejected rather than truncated, so a saved filter is exactly what the
     /// user reviewed.
     static func parse(_ raw: String) throws -> FilterAssistantReply {
-        var text = raw.trimmingCharacters(in: .whitespacesAndNewlines)
-        if text.hasPrefix("```") {
-            text = text.drop { $0 != "\n" }.trimmingCharacters(in: .whitespacesAndNewlines)
-            if text.hasSuffix("```") { text = String(text.dropLast(3)) }
-            text = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        }
+        let text = raw.trimmingCharacters(in: .whitespacesAndNewlines)
         guard text.first == "{", text.last == "}",
               let data = text.data(using: .utf8),
               let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
