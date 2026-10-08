@@ -45,7 +45,8 @@ This runbook lets a local coding agent install and verify WorkFlow without recei
      -only-testing:OpenSuperWhisperTests/FilterAssistantTransportTests \
      -only-testing:OpenSuperWhisperTests/FilterAssistantSessionTests \
      -only-testing:OpenSuperWhisperTests/FilterAssistantMathCleanupTests \
-     -only-testing:OpenSuperWhisperTests/FilterAssistantVoiceInputTests
+     -only-testing:OpenSuperWhisperTests/FilterAssistantVoiceInputTests \
+     -only-testing:OpenSuperWhisperTests/FilterAssistantLayoutTests
    ```
 
 4. Install the app. The independent purple icon is already included in the repository:
