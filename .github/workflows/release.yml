@@ -106,7 +106,7 @@ jobs:
         run: ./Scripts/package-release.sh "${{ steps.version.outputs.value }}"
 
       - name: Upload notarized artifact
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         with:
           name: WorkFlow-${{ steps.version.outputs.value }}-macOS-arm64
           path: dist/WorkFlow-${{ steps.version.outputs.value }}-macOS-arm64.zip
