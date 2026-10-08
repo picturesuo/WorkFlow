@@ -278,6 +278,8 @@ class ContentViewModel: ObservableObject {
                             cleanupModelID: cleanup.modelID,
                             cleanupRequested: cleanup.source != .disabled,
                             cleanupMode: cleanup.cleanupMode,
+                            cleanupFilterName: cleanup.customFilterName,
+                            cleanupFilterInstructions: cleanup.customFilterInstructions,
                             rawTokenEstimate: cleanup.rawTokenEstimate,
                             finalTokenEstimate: cleanup.finalTokenEstimate,
                             tokenEstimatorID: cleanup.tokenEstimatorID
@@ -334,7 +336,7 @@ struct ContentView: View {
     @State private var showMeetingNamePrompt = false
     @State private var meetingTitle = MeetingSessionController.defaultTitle()
     @State private var searchTask: Task<Void, Never>? = nil
-    @AppStorage("cleanupMode") private var cleanupModeRaw = CleanupMode.everyday.rawValue
+    private var writingFilter = WritingFilterPreferences()
     @AppStorage("modifierOnlyHotkey") private var modifierOnlyHotkeyRaw = ModifierKey.fn.rawValue
 
     private var currentShortcutDescription: String {
@@ -374,20 +376,6 @@ struct ContentView: View {
                 viewModel.search(query: query)
             }
         }
-    }
-
-    private var selectedCleanupMode: CleanupMode {
-        CleanupMode(rawValue: cleanupModeRaw) ?? .everyday
-    }
-
-    private var cleanupModeBinding: Binding<CleanupMode> {
-        Binding(
-            get: { selectedCleanupMode },
-            set: {
-                cleanupModeRaw = $0.rawValue
-                NotificationCenter.default.post(name: .cleanupModeChanged, object: nil)
-            }
-        )
     }
 
     private var requiresInputMonitoring: Bool {
@@ -544,7 +532,7 @@ struct ContentView: View {
                         microphoneService: viewModel.microphoneService,
                         meetingController: meetingController,
                         shortcut: currentShortcutDescription,
-                        cleanupMode: cleanupModeBinding
+                        writingFilter: writingFilter
                     )
                 }
             }
@@ -709,7 +697,7 @@ private struct DictationControls: View {
     @ObservedObject var microphoneService: MicrophoneService
     @ObservedObject var meetingController: MeetingSessionController
     let shortcut: String
-    @Binding var cleanupMode: CleanupMode
+    let writingFilter: WritingFilterPreferences
 
     private var status: DictationDockStatus {
         if meetingController.isSaving { return .savingMeeting }
@@ -736,7 +724,13 @@ private struct DictationControls: View {
     }
 
     private func dock(status: DictationDockStatus) -> some View {
-        DictationDock(status: status, shortcut: shortcut, cleanupMode: $cleanupMode) {
+        DictationDock(
+            status: status,
+            shortcut: shortcut,
+            writingSelection: writingFilter.selectionBinding,
+            customFilters: writingFilter.filters,
+            writingHelp: writingFilter.selectionDescription
+        ) {
             if viewModel.isRecording {
                 viewModel.startDecoding()
             } else {
@@ -783,7 +777,9 @@ enum DictationDockStatus: Equatable {
 struct DictationDock: View {
     let status: DictationDockStatus
     let shortcut: String
-    @Binding var cleanupMode: CleanupMode
+    @Binding var writingSelection: CleanupFilterSelection
+    var customFilters: [CustomCleanupFilter] = []
+    var writingHelp = ""
     let onRecord: () -> Void
     @Environment(\.colorScheme) private var colorScheme
 
@@ -809,11 +805,9 @@ struct DictationDock: View {
                     .accessibilityLabel(status.isRecording ? "Stop recording" : "Start recording")
                     .accessibilityHint(status.isRecording ? "Stops recording and begins transcription" : status.detail(shortcut: shortcut))
             }
-            Picker("Writing mode", selection: $cleanupMode) {
-                ForEach(CleanupMode.allCases) { mode in Text(mode.displayName).tag(mode) }
-            }
-            .pickerStyle(.segmented).labelsHidden()
-            .help(cleanupMode.description)
+            WritingFilterPicker(selection: $writingSelection, customFilters: customFilters)
+            .labelsHidden()
+            .help(writingHelp)
             .accessibilityLabel("Writing mode")
             .accessibilityHint("Changes how AI cleanup rewrites future dictations")
         }
@@ -1000,6 +994,9 @@ struct RecordingCard: View {
         case .openAICompatible:
             let tokenCount = (recording.cleanupInputTokens ?? 0) + (recording.cleanupOutputTokens ?? 0)
             return tokenCount > 0 ? "Custom API · \(tokenCount) tokens" : "Custom API"
+        case .azureOpenAI:
+            let tokenCount = (recording.cleanupInputTokens ?? 0) + (recording.cleanupOutputTokens ?? 0)
+            return tokenCount > 0 ? "Azure OpenAI · \(tokenCount) tokens" : "Azure OpenAI"
         case .rawFallback:
             return "Local fallback"
         case .budgetLimited:
@@ -1019,6 +1016,8 @@ struct RecordingCard: View {
             return "Transcript cleaned locally by Ollama. No transcript or audio left this Mac."
         case .openAICompatible:
             return "Transcript cleaned by the configured OpenAI-compatible API. Audio stayed on this Mac."
+        case .azureOpenAI:
+            return "Transcript cleaned by your Azure OpenAI deployment. Audio stayed on this Mac."
         case .rawFallback:
             return "The cleanup provider was unavailable, so \(AppIdentity.productName) preserved the local transcript."
         case .budgetLimited:
@@ -1039,9 +1038,9 @@ struct RecordingCard: View {
               sourceTokens > 0,
               finalTokens > 0 else { return nil }
         switch recording.cleanupSource {
-        case .bedrock, .ollama, .openAICompatible:
+        case .bedrock, .ollama, .openAICompatible, .azureOpenAI:
             let ratio = Double(sourceTokens) / Double(finalTokens)
-            return "\(mode.displayName) · \(TokenEfficiencyFormatter.ratio(ratio))"
+            return "\(recording.cleanupFilterName ?? mode.displayName) · \(TokenEfficiencyFormatter.ratio(ratio))"
         case .rawFallback, .budgetLimited, .disabled, nil:
             return nil
         }
@@ -1050,12 +1049,15 @@ struct RecordingCard: View {
     private var efficiencyBadgeHelp: String {
         let source = recording.rawTokenEstimate ?? 0
         let final = recording.finalTokenEstimate ?? 0
-        return "Estimated locally from the source and final text: \(source) → \(final) tokens. Provider billing tokens are reported separately."
+        let filter = recording.cleanupFilterName.map { name in
+            "Custom filter “\(name)” based on \(recording.cleanupMode?.displayName ?? "a built-in mode"). "
+        } ?? ""
+        return "\(filter)Estimated locally from the source and final text: \(source) → \(final) tokens. Provider billing tokens are reported separately."
     }
 
     private var cleanupBadgeColor: Color {
         switch recording.cleanupSource {
-        case .bedrock, .ollama, .openAICompatible:
+        case .bedrock, .ollama, .openAICompatible, .azureOpenAI:
             return ThemePalette.iconAccent(colorScheme)
         case .rawFallback, .budgetLimited:
             return .orange

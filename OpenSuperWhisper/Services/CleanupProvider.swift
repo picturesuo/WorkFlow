@@ -4,6 +4,7 @@ enum CleanupProviderID: String, CaseIterable, Codable, Identifiable {
     case bedrock
     case ollama
     case openAICompatible = "openai_compatible"
+    case azureOpenAI = "azure_openai"
 
     var id: String { rawValue }
 
@@ -12,6 +13,7 @@ enum CleanupProviderID: String, CaseIterable, Codable, Identifiable {
         case .bedrock: "Amazon Bedrock"
         case .ollama: "Ollama (local, free)"
         case .openAICompatible: "OpenAI-compatible"
+        case .azureOpenAI: "Azure OpenAI"
         }
     }
 
@@ -20,6 +22,7 @@ enum CleanupProviderID: String, CaseIterable, Codable, Identifiable {
         case .bedrock: .bedrock
         case .ollama: .ollama
         case .openAICompatible: .openAICompatible
+        case .azureOpenAI: .azureOpenAI
         }
     }
 }
@@ -36,7 +39,7 @@ protocol TranscriptCleanupProviding {
     func clean(
         transcript: String,
         systemPrompt: String,
-        cleanupMode: CleanupMode
+        filter: CleanupFilterSnapshot
     ) async throws -> CleanupProviderResult
 }
 
@@ -63,14 +66,14 @@ struct BedrockCleanupProvider: TranscriptCleanupProviding {
     func clean(
         transcript: String,
         systemPrompt: String,
-        cleanupMode: CleanupMode
+        filter: CleanupFilterSnapshot
     ) async throws -> CleanupProviderResult {
         let response = try await service.clean(
             transcript: transcript,
             apiKey: apiKey,
             configuration: configuration,
             systemPrompt: systemPrompt,
-            cleanupMode: cleanupMode
+            filter: filter
         )
         return CleanupProviderResult(
             text: response.text,
@@ -109,7 +112,7 @@ enum CleanupProviderFactory {
                 timeout: prefs.ollamaTimeoutSeconds
             )
         case .openAICompatible:
-            let apiKey = try CleanupCredentialStore.loadAPIKey()
+            let apiKey = try CleanupCredentialStore.loadAPIKey(for: .openAICompatible)
             guard (apiKey?.isEmpty == false) || OpenAIChatCleanupService.isLocalBaseURL(prefs.openAICompatibleBaseURL) else {
                 throw CleanupProviderError.missingCredential("OpenAI-compatible")
             }
@@ -119,6 +122,18 @@ enum CleanupProviderFactory {
                 modelID: prefs.openAICompatibleModelID,
                 apiKey: apiKey,
                 timeout: prefs.openAICompatibleTimeoutSeconds
+            )
+        case .azureOpenAI:
+            guard let apiKey = try CleanupCredentialStore.loadAPIKey(for: .azureOpenAI), !apiKey.isEmpty else {
+                throw CleanupProviderError.missingCredential("Azure OpenAI")
+            }
+            return OpenAIChatCleanupService(
+                providerID: .azureOpenAI,
+                baseURL: prefs.azureOpenAIEndpoint,
+                modelID: prefs.azureOpenAIDeployment,
+                apiKey: apiKey,
+                timeout: prefs.azureOpenAITimeoutSeconds,
+                usesReasoningParameters: prefs.azureOpenAIReasoningDeployment
             )
         }
     }

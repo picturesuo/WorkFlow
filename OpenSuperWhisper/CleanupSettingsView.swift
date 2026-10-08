@@ -5,7 +5,7 @@ import UniformTypeIdentifiers
 struct CleanupSettingsView: View {
     @ObservedObject var viewModel: SettingsViewModel
 
-    @AppStorage("cleanupMode") private var cleanupModeRaw = CleanupMode.everyday.rawValue
+    private var writingFilter = WritingFilterPreferences()
 
     @State private var providerID: CleanupProviderID
     @State private var ollamaBaseURL: String
@@ -16,6 +16,12 @@ struct CleanupSettingsView: View {
     @State private var compatibleTimeout: Double
     @State private var compatibleAPIKey = ""
     @State private var hasCompatibleAPIKey = false
+    @State private var azureEndpoint: String
+    @State private var azureDeployment: String
+    @State private var azureTimeout: Double
+    @State private var azureReasoningDeployment: Bool
+    @State private var azureAPIKey = ""
+    @State private var hasAzureAPIKey = false
     @State private var providerStatus = ""
     @State private var isTesting = false
 
@@ -29,13 +35,20 @@ struct CleanupSettingsView: View {
         _compatibleBaseURL = State(initialValue: prefs.openAICompatibleBaseURL)
         _compatibleModelID = State(initialValue: prefs.openAICompatibleModelID)
         _compatibleTimeout = State(initialValue: prefs.openAICompatibleTimeoutSeconds)
-        _hasCompatibleAPIKey = State(initialValue: ((try? CleanupCredentialStore.loadAPIKey()) ?? nil) != nil)
+        _hasCompatibleAPIKey = State(initialValue: ((try? CleanupCredentialStore.loadAPIKey(for: .openAICompatible)) ?? nil) != nil)
+        _azureEndpoint = State(initialValue: prefs.azureOpenAIEndpoint)
+        _azureDeployment = State(initialValue: prefs.azureOpenAIDeployment)
+        _azureTimeout = State(initialValue: prefs.azureOpenAITimeoutSeconds)
+        _azureReasoningDeployment = State(initialValue: prefs.azureOpenAIReasoningDeployment)
+        _hasAzureAPIKey = State(initialValue: ((try? CleanupCredentialStore.loadAPIKey(for: .azureOpenAI)) ?? nil) != nil)
     }
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
                 overviewCard
+                CustomCleanupFiltersCard(writingFilter: writingFilter)
+                    .settingsCard()
                 providerCard
                 efficiencyCard
                 usageCard
@@ -73,6 +86,10 @@ struct CleanupSettingsView: View {
         .onChange(of: compatibleBaseURL) { _, value in AppPreferences.shared.openAICompatibleBaseURL = value }
         .onChange(of: compatibleModelID) { _, value in AppPreferences.shared.openAICompatibleModelID = value }
         .onChange(of: compatibleTimeout) { _, value in AppPreferences.shared.openAICompatibleTimeoutSeconds = value }
+        .onChange(of: azureEndpoint) { _, value in AppPreferences.shared.azureOpenAIEndpoint = value }
+        .onChange(of: azureDeployment) { _, value in AppPreferences.shared.azureOpenAIDeployment = value }
+        .onChange(of: azureTimeout) { _, value in AppPreferences.shared.azureOpenAITimeoutSeconds = value }
+        .onChange(of: azureReasoningDeployment) { _, value in AppPreferences.shared.azureOpenAIReasoningDeployment = value }
     }
 
     private var overviewCard: some View {
@@ -99,6 +116,7 @@ struct CleanupSettingsView: View {
                 }
             }
             .pickerStyle(.segmented)
+            .labelsHidden()
             .disabled(!viewModel.bedrockCleanupEnabled)
 
             Divider()
@@ -106,34 +124,19 @@ struct CleanupSettingsView: View {
             VStack(alignment: .leading, spacing: 7) {
                 Text("Writing mode")
                     .font(.subheadline.weight(.medium))
-                Picker("Writing mode", selection: cleanupModeBinding) {
-                    ForEach(CleanupMode.allCases) { mode in
-                        Text(mode.displayName).tag(mode)
-                    }
-                }
-                .pickerStyle(.segmented)
+                WritingFilterPicker(
+                    selection: writingFilter.selectionBinding,
+                    customFilters: writingFilter.filters
+                )
+                .labelsHidden()
                 .accessibilityHint("Controls how the selected provider rewrites future dictations")
-                Text(selectedCleanupMode.description)
+                Text(writingFilter.selectionDescription)
                     .font(.caption)
                     .foregroundColor(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
         }
         .settingsCard()
-    }
-
-    private var selectedCleanupMode: CleanupMode {
-        CleanupMode(rawValue: cleanupModeRaw) ?? .everyday
-    }
-
-    private var cleanupModeBinding: Binding<CleanupMode> {
-        Binding(
-            get: { selectedCleanupMode },
-            set: {
-                cleanupModeRaw = $0.rawValue
-                NotificationCenter.default.post(name: .cleanupModeChanged, object: nil)
-            }
-        )
     }
 
     @ViewBuilder
@@ -146,6 +149,8 @@ struct CleanupSettingsView: View {
                 ollamaFields
             case .openAICompatible:
                 compatibleFields
+            case .azureOpenAI:
+                azureFields
             }
 
             if !currentStatus.isEmpty {
@@ -314,11 +319,71 @@ struct CleanupSettingsView: View {
                 .disabled(isTesting)
 
                 if hasCompatibleAPIKey {
-                    Button("Remove key", role: .destructive) { removeCompatibleKey() }
+                    Button("Remove key", role: .destructive) { removeKey(for: .openAICompatible) }
                 }
             }
 
             Text("Pricing depends on the service and model. \(AppIdentity.productName) records token counts but does not invent a dollar estimate when provider pricing is unknown.")
+                .font(.caption)
+                .foregroundColor(.secondary)
+        }
+    }
+
+    private var azureFields: some View {
+        Group {
+            HStack {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Azure OpenAI")
+                        .font(.headline)
+                    Text("Use a chat deployment in your Azure OpenAI or Microsoft Foundry resource. Usage bills to that Azure subscription; whether credits apply is between you and Microsoft.")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                Spacer()
+                Link("Open Foundry", destination: URL(string: "https://ai.azure.com")!)
+                    .font(.caption)
+            }
+
+            LabeledContent("Endpoint") {
+                TextField("https://YOUR-RESOURCE.openai.azure.com", text: $azureEndpoint)
+                    .textFieldStyle(.roundedBorder)
+                    .frame(width: 360)
+                    .accessibilityLabel("Azure OpenAI endpoint")
+            }
+            LabeledContent("Deployment") {
+                TextField("Deployment name, e.g. gpt-4.1-nano", text: $azureDeployment)
+                    .textFieldStyle(.roundedBorder)
+                    .frame(width: 360)
+                    .accessibilityLabel("Azure OpenAI deployment name")
+            }
+            SecureField(
+                hasAzureAPIKey ? "Stored in Keychain (enter to replace)" : "Azure OpenAI API key",
+                text: $azureAPIKey
+            )
+            .textFieldStyle(.roundedBorder)
+            .accessibilityLabel("Azure OpenAI API key")
+            .accessibilityHint("Stored securely in macOS Keychain after a successful connection test")
+            Toggle("Reasoning model deployment (o-series or GPT-5)", isOn: $azureReasoningDeployment)
+                .help("Reasoning deployments reject temperature, so WorkFlow sends a low reasoning effort and extra completion headroom instead.")
+            timeoutRow(value: $azureTimeout, range: 1...60)
+
+            HStack {
+                Button {
+                    Task { await testProvider() }
+                } label: {
+                    testLabel(active: isTesting, title: "Save & Test")
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(isTesting)
+                .accessibilityLabel(isTesting ? "Testing Azure OpenAI connection" : "Save API key and test Azure OpenAI")
+
+                if hasAzureAPIKey {
+                    Button("Remove key", role: .destructive) { removeKey(for: .azureOpenAI) }
+                }
+            }
+
+            Text("\(AppIdentity.productName) calls the Azure OpenAI v1 API with your deployment name and records token counts. It does not invent a dollar estimate for Azure pricing.")
                 .font(.caption)
                 .foregroundColor(.secondary)
         }
@@ -457,7 +522,13 @@ struct CleanupSettingsView: View {
     private func testProvider() async {
         isTesting = true
         defer { isTesting = false }
-        let enteredCompatibleKey = compatibleAPIKey.trimmingCharacters(in: .whitespacesAndNewlines)
+        let account: CleanupCredentialAccount? = switch providerID {
+        case .openAICompatible: .openAICompatible
+        case .azureOpenAI: .azureOpenAI
+        case .bedrock, .ollama: nil
+        }
+        let enteredKey = (providerID == .azureOpenAI ? azureAPIKey : compatibleAPIKey)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
         do {
             let provider: OpenAIChatCleanupService
             switch providerID {
@@ -470,8 +541,8 @@ struct CleanupSettingsView: View {
                     timeout: ollamaTimeout
                 )
             case .openAICompatible:
-                let stored = try CleanupCredentialStore.loadAPIKey()
-                let key = enteredCompatibleKey.isEmpty ? stored : enteredCompatibleKey
+                let stored = try CleanupCredentialStore.loadAPIKey(for: .openAICompatible)
+                let key = enteredKey.isEmpty ? stored : enteredKey
                 guard (key?.isEmpty == false) || OpenAIChatCleanupService.isLocalBaseURL(compatibleBaseURL) else {
                     providerStatus = "Enter an API key first."
                     return
@@ -483,6 +554,21 @@ struct CleanupSettingsView: View {
                     apiKey: key,
                     timeout: compatibleTimeout
                 )
+            case .azureOpenAI:
+                let stored = try CleanupCredentialStore.loadAPIKey(for: .azureOpenAI)
+                let key = enteredKey.isEmpty ? stored : enteredKey
+                guard key?.isEmpty == false else {
+                    providerStatus = "Enter an API key first."
+                    return
+                }
+                provider = OpenAIChatCleanupService(
+                    providerID: .azureOpenAI,
+                    baseURL: azureEndpoint,
+                    modelID: azureDeployment,
+                    apiKey: key,
+                    timeout: azureTimeout,
+                    usesReasoningParameters: azureReasoningDeployment
+                )
             case .bedrock:
                 return
             }
@@ -491,11 +577,10 @@ struct CleanupSettingsView: View {
                 transcript: "Um, this is a \(AppIdentity.productName) connection test.",
                 systemPrompt: CleanupPromptBuilder.baseSystemPrompt
             )
-            if providerID == .openAICompatible, !enteredCompatibleKey.isEmpty {
+            if let account, !enteredKey.isEmpty {
                 do {
-                    try CleanupCredentialStore.saveAPIKey(enteredCompatibleKey)
-                    compatibleAPIKey = ""
-                    hasCompatibleAPIKey = true
+                    try CleanupCredentialStore.saveAPIKey(enteredKey, for: account)
+                    setKeyState(stored: true, for: account)
                 } catch {
                     providerStatus = "Connected, but the key could not be saved: \(error.localizedDescription)"
                     return
@@ -504,7 +589,7 @@ struct CleanupSettingsView: View {
             let tokenCount = (result.inputTokens ?? 0) + (result.outputTokens ?? 0)
             providerStatus = tokenCount > 0 ? "Connected · \(tokenCount) tokens for this test." : "Connected successfully."
         } catch {
-            if providerID == .openAICompatible, !enteredCompatibleKey.isEmpty {
+            if account != nil, !enteredKey.isEmpty {
                 providerStatus = "Connection failed; the new key was not saved: \(error.localizedDescription)"
             } else {
                 providerStatus = "Connection failed: \(error.localizedDescription)"
@@ -512,14 +597,25 @@ struct CleanupSettingsView: View {
         }
     }
 
-    private func removeCompatibleKey() {
+    private func removeKey(for account: CleanupCredentialAccount) {
         do {
-            try CleanupCredentialStore.deleteAPIKey()
-            compatibleAPIKey = ""
-            hasCompatibleAPIKey = false
+            try CleanupCredentialStore.deleteAPIKey(for: account)
+            setKeyState(stored: false, for: account)
             providerStatus = "API key removed from Keychain."
         } catch {
             providerStatus = error.localizedDescription
+        }
+    }
+
+    /// Clears the entry field and records whether a key is stored.
+    private func setKeyState(stored: Bool, for account: CleanupCredentialAccount) {
+        switch account {
+        case .openAICompatible:
+            compatibleAPIKey = ""
+            hasCompatibleAPIKey = stored
+        case .azureOpenAI:
+            azureAPIKey = ""
+            hasAzureAPIKey = stored
         }
     }
 }

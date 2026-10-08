@@ -75,7 +75,7 @@ private struct HistoryFixture: View {
                 .padding(.horizontal, WFSpace.xl)
                 .padding(.bottom, WFSpace.lg)
             }
-            DictationDock(status: .ready, shortcut: "fn", cleanupMode: .constant(.technical), onRecord: {})
+            DictationDock(status: .ready, shortcut: "fn", writingSelection: .constant(.builtIn(.technical)), onRecord: {})
         }
         .background(ThemePalette.windowBackground(scheme))
     }

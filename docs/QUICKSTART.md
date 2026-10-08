@@ -41,11 +41,13 @@ If a prompt is missed, open System Settings → Privacy & Security and enable th
 
 1. In onboarding, keep the permission-free `Option`+backtick shortcut or choose `Fn`/globe and enable Input Monitoring.
 2. Download the recommended Parakeet v3 model (about 483 MB). Onboarding shows its percentage and marks it **Ready** when complete.
-3. Choose **Homework**, **Technical**, or **Everyday** in the main window or WorkFlow's menu-bar menu.
+3. Choose **Homework**, **Technical**, **Everyday**, or a saved custom filter in the main window or WorkFlow's menu-bar menu.
 4. Put the cursor in any text field, hold your chosen shortcut, speak, and release it.
 5. Keep the cursor in the intended field until text appears. WorkFlow targets the app that was active when recording began, but changing fields inside that app can redirect the paste.
 
 Use Homework for developed prose, Technical for compact commands sent to computers or coding agents, and Everyday for natural messages. After using more than one mode, open **Settings → Cleanup → Writing efficiency this month** to compare their estimated source-to-final token ratios. History also labels each successfully cleaned dictation with its mode and estimated efficiency.
+
+To make a mode more specific, open **Settings → Cleanup → Custom filters**, choose **New filter**, pick a base mode, and describe the change in plain language, for example "Write all numbers as digits." The filter then appears next to the built-in modes.
 
 WorkFlow launches at login and stays available in the menu bar by default. Dictation works entirely locally before any API is configured.
 
@@ -62,6 +64,15 @@ If you sometimes press Escape accidentally, enable **Settings → Shortcuts → 
 Amazon models are available by default in commercial AWS regions when the key has the required Bedrock permissions. If the test reports `AccessDeniedException`, confirm that the key can invoke Nova Micro in `us-east-1`; an organization policy or restricted account may require an administrator to grant model access.
 
 At the August 21, 2026 US price, a typical 200-input/40-output-token cleanup is about $0.0000126, and 100 daily dictations are about $0.04/month. AWS billing is authoritative.
+
+## Optional Azure OpenAI cleanup
+
+1. Deploy a small chat model in [Microsoft Foundry](https://ai.azure.com) and note its deployment name.
+2. Open WorkFlow → Settings → Cleanup and choose **Azure OpenAI**.
+3. Enter the resource endpoint, for example `https://YOUR-RESOURCE.openai.azure.com`, and the deployment name.
+4. Paste the resource key into the secure field and select **Save & Test**.
+
+Usage bills to your Azure subscription; WorkFlow reports tokens but does not estimate Azure prices.
 
 ## If your shortcut does nothing
 

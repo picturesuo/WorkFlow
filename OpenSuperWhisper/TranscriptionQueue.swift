@@ -129,6 +129,8 @@ class TranscriptionQueue: ObservableObject {
             let timestamp = Date()
             let id = UUID()
             let fileName = AudioRecorder.recordingFileName(id: id)
+            // Captured at enqueue so later filter edits cannot change queued work.
+            let filter = cleanupRequested ? CustomCleanupFilterStore.currentSnapshot() : nil
 
             let recording = Recording(
                 id: id,
@@ -143,9 +145,9 @@ class TranscriptionQueue: ObservableObject {
                 mode: mode,
                 cleanupRequested: cleanupRequested,
                 targetBundleID: targetBundleID,
-                cleanupMode: cleanupRequested
-                    ? (CleanupMode(rawValue: AppPreferences.shared.cleanupMode) ?? .everyday)
-                    : nil
+                cleanupMode: filter?.mode,
+                cleanupFilterName: filter?.customName,
+                cleanupFilterInstructions: filter?.customInstructions
             )
 
             try await recordingStore.addRecordingSync(recording)
@@ -350,7 +352,13 @@ class TranscriptionQueue: ObservableObject {
                         text,
                         targetBundleID: recording.targetBundleID,
                         cleanupOverride: true,
-                        cleanupModeOverride: recording.cleanupMode
+                        filterOverride: recording.cleanupMode.map {
+                            CleanupFilterSnapshot(
+                                mode: $0,
+                                customName: recording.cleanupFilterName,
+                                customInstructions: recording.cleanupFilterInstructions
+                            )
+                        }
                     )
                     if await discardCancelledOutput(recording) { return }
                     await recordingStore.completeRecording(
