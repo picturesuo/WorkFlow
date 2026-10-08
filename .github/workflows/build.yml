@@ -41,4 +41,16 @@ jobs:
             -only-testing:OpenSuperWhisperTests/LatestDictationGateTests \
             -only-testing:OpenSuperWhisperTests/ClipboardRestoreTests \
             -only-testing:OpenSuperWhisperTests/EmptyDictationDiscardTests \
-            -only-testing:OpenSuperWhisperTests/EscapeCancelConfirmationTests
+            -only-testing:OpenSuperWhisperTests/EscapeCancelConfirmationTests \
+            -only-testing:OpenSuperWhisperTests/AudioSessionOwnershipTests \
+            -only-testing:OpenSuperWhisperTests/CustomCleanupFilterStoreTests \
+            -only-testing:OpenSuperWhisperTests/CustomCleanupPromptTests \
+            -only-testing:OpenSuperWhisperTests/CustomFilterNumberGuardTests \
+            -only-testing:OpenSuperWhisperTests/CustomFilterPipelineTests \
+            -only-testing:OpenSuperWhisperTests/CustomFilterProviderTransportTests \
+            -only-testing:OpenSuperWhisperTests/FilterAssistantPromptTests \
+            -only-testing:OpenSuperWhisperTests/FilterAssistantTransportTests \
+            -only-testing:OpenSuperWhisperTests/FilterAssistantSessionTests \
+            -only-testing:OpenSuperWhisperTests/FilterAssistantMathCleanupTests \
+            -only-testing:OpenSuperWhisperTests/FilterAssistantVoiceInputTests \
+            -only-testing:OpenSuperWhisperTests/FilterAssistantLayoutTests
