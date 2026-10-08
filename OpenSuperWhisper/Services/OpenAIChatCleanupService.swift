@@ -18,7 +18,7 @@ enum OpenAIChatCleanupError: LocalizedError, Equatable {
     }
 }
 
-final class OpenAIChatCleanupService: TranscriptCleanupProviding {
+final class OpenAIChatCleanupService: TranscriptCleanupProviding, CleanupChatCompleting {
     private static let sharedSession: URLSession = {
         let configuration = URLSessionConfiguration.ephemeral
         configuration.waitsForConnectivity = false
@@ -76,6 +76,35 @@ final class OpenAIChatCleanupService: TranscriptCleanupProviding {
             return CleanupProviderResult(text: "", inputTokens: 0, outputTokens: 0, modelID: modelID)
         }
 
+        let result = try await complete(
+            ProviderChatRequest(
+                systemPrompt: systemPrompt,
+                messages: [ProviderChatMessage(role: .user, content: "RAW_TRANSCRIPTION:\n\(raw)")],
+                maxOutputTokens: CleanupTokenBudget.outputTokenLimit(for: raw, mode: cleanupMode)
+            )
+        )
+
+        do {
+            let cleaned = try CleanupGuard.postprocess(
+                result.text,
+                source: raw,
+                mode: cleanupMode,
+                allowsNumberFormatting: filter.isCustom
+            )
+            return CleanupProviderResult(
+                text: cleaned,
+                inputTokens: result.inputTokens,
+                outputTokens: result.outputTokens,
+                modelID: result.modelID
+            )
+        } catch CleanupGuardError.emptyResponse {
+            throw OpenAIChatCleanupError.emptyResponse
+        } catch CleanupGuardError.unsafeRewrite {
+            throw OpenAIChatCleanupError.unsafeRewrite
+        }
+    }
+
+    func complete(_ chat: ProviderChatRequest) async throws -> CleanupProviderResult {
         let model = modelID.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !model.isEmpty else {
             throw OpenAIChatCleanupError.invalidConfiguration(
@@ -83,6 +112,7 @@ final class OpenAIChatCleanupService: TranscriptCleanupProviding {
             )
         }
         let endpoint = try endpointURL()
+        let timeout = max(timeout, chat.minimumTimeout)
         var request = URLRequest(url: endpoint)
         request.httpMethod = "POST"
         request.timeoutInterval = max(0.5, timeout)
@@ -97,11 +127,9 @@ final class OpenAIChatCleanupService: TranscriptCleanupProviding {
             throw CleanupProviderError.missingCredential("Azure OpenAI")
         }
 
-        let messages = [
-            ChatMessage(role: "system", content: systemPrompt),
-            ChatMessage(role: "user", content: "RAW_TRANSCRIPTION:\n\(raw)")
-        ]
-        let maxTokens = CleanupTokenBudget.outputTokenLimit(for: raw, mode: cleanupMode)
+        let messages = [ChatMessage(role: "system", content: chat.systemPrompt)]
+            + chat.messages.map { ChatMessage(role: $0.role.rawValue, content: $0.content) }
+        let maxTokens = chat.maxOutputTokens
         if providerID == .ollama {
             request.httpBody = try JSONEncoder().encode(
                 OllamaRequest(
@@ -151,42 +179,25 @@ final class OpenAIChatCleanupService: TranscriptCleanupProviding {
             throw OpenAIChatCleanupError.requestFailed(statusCode: httpResponse.statusCode, message: message)
         }
 
-        let value: String
-        let inputTokens: Int?
-        let outputTokens: Int?
         if providerID == .ollama {
             let decoded = try JSONDecoder().decode(OllamaResponse.self, from: result.data)
-            value = decoded.message.content
-            inputTokens = decoded.promptEvalCount
-            outputTokens = decoded.evalCount
-        } else {
-            let decoded = try JSONDecoder().decode(OpenAIResponse.self, from: result.data)
-            guard let content = decoded.choices.first?.message.content else {
-                throw OpenAIChatCleanupError.invalidResponse
-            }
-            value = content
-            inputTokens = decoded.usage?.promptTokens
-            outputTokens = decoded.usage?.completionTokens
-        }
-
-        do {
-            let cleaned = try CleanupGuard.postprocess(
-                value,
-                source: raw,
-                mode: cleanupMode,
-                allowsNumberFormatting: filter.isCustom
-            )
             return CleanupProviderResult(
-                text: cleaned,
-                inputTokens: inputTokens,
-                outputTokens: outputTokens,
+                text: decoded.message.content,
+                inputTokens: decoded.promptEvalCount,
+                outputTokens: decoded.evalCount,
                 modelID: model
             )
-        } catch CleanupGuardError.emptyResponse {
-            throw OpenAIChatCleanupError.emptyResponse
-        } catch CleanupGuardError.unsafeRewrite {
-            throw OpenAIChatCleanupError.unsafeRewrite
         }
+        let decoded = try JSONDecoder().decode(OpenAIResponse.self, from: result.data)
+        guard let content = decoded.choices.first?.message.content else {
+            throw OpenAIChatCleanupError.invalidResponse
+        }
+        return CleanupProviderResult(
+            text: content,
+            inputTokens: decoded.usage?.promptTokens,
+            outputTokens: decoded.usage?.completionTokens,
+            modelID: model
+        )
     }
 
     private func endpointURL() throws -> URL {

@@ -154,8 +154,9 @@ enum CleanupGuardError: LocalizedError, Equatable {
 enum CleanupGuard {
     /// - Parameter allowsNumberFormatting: Set only for custom filters, which
     ///   may ask for a number style. It accepts a digit form only when the
-    ///   source spells out that exact value, clock time, or run of digit words;
-    ///   anything else falls back to the local transcript.
+    ///   source spells out that exact value, clock time, or run of digit words,
+    ///   and a √ or multiplication sign only where the source says that
+    ///   operation; anything else falls back to the local transcript.
     static func postprocess(
         _ value: String,
         source: String,
@@ -246,6 +247,9 @@ enum CleanupGuard {
                 guard tokens.allSatisfy(isExplained) || isSequence(tokens) || isRunWithSpokenMembers(run) else {
                     throw CleanupGuardError.unsafeRewrite
                 }
+            }
+            guard MathNotationGuard.isGrounded(cleaned, source: trimmedSource) else {
+                throw CleanupGuardError.unsafeRewrite
             }
         } else {
             guard numericTokens(in: cleaned).isSubset(of: sourceNumbers) else {

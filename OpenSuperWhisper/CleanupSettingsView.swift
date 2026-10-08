@@ -404,7 +404,7 @@ struct CleanupSettingsView: View {
                 Text(BedrockPricing.formatUSD(usage.estimatedCostUSD))
                     .font(.title2.weight(.semibold).monospacedDigit())
             }
-            Text("\(usage.cleanedDictations) cleaned · \(usage.localCleanedDictations) free local · \(usage.fallbackDictations) fallbacks · \(usage.inputTokens) input / \(usage.outputTokens) output tokens")
+            Text("\(usage.cleanedDictations) cleaned · \(usage.localCleanedDictations) free local · \(usage.fallbackDictations) fallbacks\(usage.filterDraftRequests > 0 ? " · \(usage.filterDraftRequests) filter drafts" : "") · \(usage.inputTokens) input / \(usage.outputTokens) output tokens")
                 .font(.caption)
                 .foregroundColor(.secondary)
             if usage.unpricedDictations > 0 {

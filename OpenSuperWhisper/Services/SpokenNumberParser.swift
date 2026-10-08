@@ -62,6 +62,13 @@ enum SpokenNumberParser {
         units[word.lowercased()].map(String.init)
     }
 
+    /// Whether a single word is a cardinal number word ("seven", "twenty", "hundred").
+    static func isCardinalWord(_ word: String) -> Bool {
+        let word = word.lowercased()
+        return units[word] != nil || teens[word] != nil || tens[word] != nil
+            || scales[word] != nil || word == "hundred"
+    }
+
     static func parse(_ text: String) -> SpokenNumbers {
         var words: [String] = []
         var boundaryBefore: [Bool] = []

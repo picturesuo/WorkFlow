@@ -81,6 +81,50 @@ final class BedrockCleanupService {
             return BedrockCleanupResponse(text: "", inputTokens: 0, outputTokens: 0)
         }
 
+        let response = try await complete(
+            ProviderChatRequest(
+                systemPrompt: systemPrompt,
+                messages: [ProviderChatMessage(role: .user, content: "RAW_TRANSCRIPTION:\n\(raw)")],
+                maxOutputTokens: CleanupTokenBudget.outputTokenLimit(for: raw, mode: cleanupMode)
+            ),
+            apiKey: apiKey,
+            configuration: configuration
+        )
+
+        let cleaned: String
+        do {
+            cleaned = try CleanupGuard.postprocess(
+                response.text,
+                source: raw,
+                mode: cleanupMode,
+                allowsNumberFormatting: filter.isCustom
+            )
+        } catch CleanupGuardError.emptyResponse {
+            throw BedrockCleanupError.emptyResponse
+        } catch CleanupGuardError.unsafeRewrite {
+            throw BedrockCleanupError.unsafeRewrite
+        }
+        if cleaned.isEmpty {
+            return BedrockCleanupResponse(
+                text: "",
+                inputTokens: response.inputTokens,
+                outputTokens: response.outputTokens
+            )
+        }
+
+        return BedrockCleanupResponse(
+            text: cleaned,
+            inputTokens: response.inputTokens,
+            outputTokens: response.outputTokens
+        )
+    }
+
+    /// Sends one Converse request and returns the raw reply text, unvalidated.
+    func complete(
+        _ chat: ProviderChatRequest,
+        apiKey: String,
+        configuration: BedrockCleanupConfiguration
+    ) async throws -> BedrockCleanupResponse {
         let region = configuration.region.trimmingCharacters(in: .whitespacesAndNewlines)
         let modelID = configuration.modelID.trimmingCharacters(in: .whitespacesAndNewlines)
         let token = apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -95,29 +139,24 @@ final class BedrockCleanupService {
         }
 
         let body = ConverseRequest(
-            system: [.init(text: systemPrompt)],
-            messages: [
-                .init(
-                    role: "user",
-                    content: [.init(text: "RAW_TRANSCRIPTION:\n\(raw)")]
-                )
-            ],
-            inferenceConfig: .init(
-                maxTokens: CleanupTokenBudget.outputTokenLimit(for: raw, mode: cleanupMode),
-                temperature: 0
-            )
+            system: [.init(text: chat.systemPrompt)],
+            messages: chat.messages.map {
+                .init(role: $0.role.rawValue, content: [.init(text: $0.content)])
+            },
+            inferenceConfig: .init(maxTokens: chat.maxOutputTokens, temperature: 0)
         )
 
+        let timeout = max(configuration.timeout, chat.minimumTimeout)
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
-        request.timeoutInterval = max(0.5, configuration.timeout)
+        request.timeoutInterval = max(0.5, timeout)
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         request.httpBody = try JSONEncoder().encode(body)
 
         let session = session
         let preparedRequest = request
-        let result = try await CleanupDeadline.run(seconds: configuration.timeout) {
+        let result = try await CleanupDeadline.run(seconds: timeout) {
             let (data, response) = try await session.data(for: preparedRequest)
             return CleanupHTTPResponse(data: data, response: response)
         }
@@ -132,33 +171,11 @@ final class BedrockCleanupService {
         }
 
         let decoded = try JSONDecoder().decode(ConverseResponse.self, from: result.data)
-        guard let first = decoded.output.message.content.first?.text else {
+        guard let text = decoded.output.message.content.first?.text else {
             throw BedrockCleanupError.invalidResponse
         }
-
-        let cleaned: String
-        do {
-            cleaned = try CleanupGuard.postprocess(
-                first,
-                source: raw,
-                mode: cleanupMode,
-                allowsNumberFormatting: filter.isCustom
-            )
-        } catch CleanupGuardError.emptyResponse {
-            throw BedrockCleanupError.emptyResponse
-        } catch CleanupGuardError.unsafeRewrite {
-            throw BedrockCleanupError.unsafeRewrite
-        }
-        if cleaned.isEmpty {
-            return BedrockCleanupResponse(
-                text: "",
-                inputTokens: decoded.usage?.inputTokens,
-                outputTokens: decoded.usage?.outputTokens
-            )
-        }
-
         return BedrockCleanupResponse(
-            text: cleaned,
+            text: text,
             inputTokens: decoded.usage?.inputTokens,
             outputTokens: decoded.usage?.outputTokens
         )
