@@ -49,7 +49,7 @@ This runbook lets a local coding agent install and verify WorkFlow without recei
      -only-testing:OpenSuperWhisperTests/FilterAssistantLayoutTests
    ```
 
-4. Install the app. The independent purple icon is already included in the repository:
+4. Install the app. The WorkFlow ivory ribbon icon is already included in the repository:
 
    ```bash
    ./Scripts/install-local.sh

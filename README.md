@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="docs/chat-icon.png" width="144" height="144" alt="WorkFlow purple waveform icon">
+  <img src="docs/chat-icon.png" width="144" height="144" alt="WorkFlow ivory W ribbon icon on a charcoal rounded square">
 </p>
 
 <h1 align="center">WorkFlow</h1>
