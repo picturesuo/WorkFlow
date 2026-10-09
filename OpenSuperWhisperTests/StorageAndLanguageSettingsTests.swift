@@ -294,15 +294,20 @@ final class IndicatorPanelFullScreenTests: XCTestCase {
 final class ClipboardRestoreTests: XCTestCase {
 
     private var pasteboard: NSPasteboard!
+    // The missing-target test pastes to the general pasteboard; hold it so
+    // tests in other processes that watch its change count stay deterministic.
+    private let generalPasteboardLock = GeneralPasteboardLock()
 
     override func setUp() {
         super.setUp()
+        generalPasteboardLock.lock()
         pasteboard = NSPasteboard(name: NSPasteboard.Name("osw-clipboard-test-\(UUID().uuidString)"))
     }
 
     override func tearDown() {
         pasteboard.releaseGlobally()
         pasteboard = nil
+        generalPasteboardLock.unlock()
         super.tearDown()
     }
 

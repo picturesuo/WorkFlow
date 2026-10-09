@@ -686,9 +686,13 @@ final class FilterAssistantVoiceInputTests: XCTestCase {
     private var cancelled: [UUID] = []
     private var removed: [URL] = []
     private var loading = CurrentValueSubject<Bool, Never>(false)
+    // These tests prove nothing reaches the general pasteboard, which other
+    // test processes paste to; hold it so their writes cannot move the count.
+    private let pasteboardLock = GeneralPasteboardLock()
 
     override func setUp() {
         super.setUp()
+        pasteboardLock.lock()
         audioURL = FileManager.default.temporaryDirectory.appendingPathComponent("\(UUID().uuidString).wav")
         FileManager.default.createFile(atPath: audioURL.path, contents: Data([0, 1, 2, 3]))
         started = []; stopped = []; cancelled = []; removed = []
@@ -697,6 +701,7 @@ final class FilterAssistantVoiceInputTests: XCTestCase {
 
     override func tearDown() {
         try? FileManager.default.removeItem(at: audioURL)
+        pasteboardLock.unlock()
         super.tearDown()
     }
 
