@@ -130,7 +130,8 @@ class TranscriptionQueue: ObservableObject {
             let id = UUID()
             let fileName = AudioRecorder.recordingFileName(id: id)
             // Captured at enqueue so later filter edits cannot change queued work.
-            let filter = cleanupRequested ? CustomCleanupFilterStore.currentSnapshot() : nil
+            let selected = CustomCleanupFilterStore.currentSnapshot()
+            let filter = cleanupRequested ? selected : nil
 
             let recording = Recording(
                 id: id,
@@ -150,7 +151,16 @@ class TranscriptionQueue: ObservableObject {
                 cleanupFilterInstructions: filter?.customInstructions
             )
 
-            try await recordingStore.addRecordingSync(recording)
+            if mode == .dictation {
+                // The selection is kept even when cleanup is off; the texts
+                // are filled when the first transcription finishes.
+                try await recordingStore.addRecordingSync(
+                    recording,
+                    source: DictationSource(recordingID: id, disposition: .pending, filter: selected)
+                )
+            } else {
+                try await recordingStore.addRecordingSync(recording)
+            }
 
             startProcessingQueue()
         } catch {
@@ -348,6 +358,9 @@ class TranscriptionQueue: ObservableObject {
                 }
 
                 if recording.cleanupRequested {
+                    // Learned preferences captured at enqueue apply only to the
+                    // built-in mode they were captured for.
+                    let captured = try? await recordingStore.dictationSource(for: recording.id)?.filter
                     let cleanup = await cleanupPipeline.finalize(
                         text,
                         targetBundleID: recording.targetBundleID,
@@ -356,11 +369,14 @@ class TranscriptionQueue: ObservableObject {
                             CleanupFilterSnapshot(
                                 mode: $0,
                                 customName: recording.cleanupFilterName,
-                                customInstructions: recording.cleanupFilterInstructions
+                                customInstructions: recording.cleanupFilterInstructions,
+                                customID: captured?.customID,
+                                learned: captured?.mode == $0 ? captured?.learned ?? [] : []
                             )
                         }
                     )
                     if await discardCancelledOutput(recording) { return }
+                    await recordingStore.completeDictationSource(recording.id, recognizerText: text, cleanup: cleanup)
                     await recordingStore.completeRecording(
                         recording.id,
                         transcription: cleanup.text,
@@ -376,8 +392,10 @@ class TranscriptionQueue: ObservableObject {
                         modelID: nil,
                         rawTokenEstimate: LocalTokenEstimator.estimate(text),
                         finalTokenEstimate: LocalTokenEstimator.estimate(localText),
-                        tokenEstimatorID: LocalTokenEstimator.identifier
+                        tokenEstimatorID: LocalTokenEstimator.identifier,
+                        cleanupInput: localText
                     )
+                    await recordingStore.completeDictationSource(recording.id, recognizerText: text, cleanup: localOutcome)
                     await recordingStore.completeRecording(
                         recording.id,
                         transcription: localText,

@@ -1,12 +1,44 @@
 import Foundation
 
-/// Accepts a custom filter's math symbols only where the speaker said the
-/// operation. A filter may write "square root of sixteen" as "√16" or "five
-/// times three" as "5 x 3", but cleanup must never introduce an operation,
-/// solve anything, or guess how far a radical extends. Anything else falls
-/// back to the local transcript.
+/// Accepts math symbols only where the speaker said the operation. A filter
+/// may write "square root of sixteen" as "√16", "five times three" as "5 x 3",
+/// "ten percent" as "10%", or "x squared plus one" as "x² + 1", but cleanup
+/// must never introduce an operation, a sign, or a percentage, solve anything,
+/// or guess how far a radical extends. Anything else falls back to the local
+/// transcript.
 enum MathNotationGuard {
+    private struct SpokenSymbol {
+        let written: NSRegularExpression
+        let spoken: NSRegularExpression
+    }
+
+    private static func pattern(_ value: String) -> NSRegularExpression {
+        try! NSRegularExpression(pattern: value, options: [.caseInsensitive])
+    }
+
+    /// Each symbol may be added at most as many times as the source says it.
+    private static let spokenSymbols = [
+        SpokenSymbol(written: pattern(#"[%％]"#), spoken: pattern(#"\bper\s?cent\b"#)),
+        SpokenSymbol(written: pattern(#"\+"#), spoken: pattern(#"\bplus\b"#)),
+        SpokenSymbol(written: pattern(#"="#), spoken: pattern(#"\bequals?\b|\bequal\s+to\b"#)),
+        // A minus sign: "−", "-4" with no word before it, or " - " between
+        // operands on one line; a "- " list marker is not one.
+        SpokenSymbol(
+            written: pattern(#"−|(?<![\p{L}\p{N}\-])-(?=\d)|(?<=[\p{N})]|\b[a-z])[ \t]+-[ \t]+(?=[\p{N}(√]|[a-z]\b)"#),
+            spoken: pattern(#"\bminus\b|\bnegative\b|\bdash\b"#)
+        ),
+        SpokenSymbol(
+            written: pattern(#"[\^⁰¹²³⁴⁵⁶⁷⁸⁹]+"#),
+            spoken: pattern(#"\bsquared\b|\bcubed\b|\bto\s+the\s+(?:\w+\s+)?power\b|\bpower\s+of\b|\bexponent\b"#)
+        )
+    ]
+
     static func isGrounded(_ cleaned: String, source: String) -> Bool {
+        for symbol in spokenSymbols {
+            let added = max(0, matches(symbol.written, in: cleaned) - matches(symbol.written, in: source))
+            guard added <= matches(symbol.spoken, in: source) else { return false }
+        }
+
         let addedRoots = max(0, count("√", in: cleaned) - count("√", in: source))
         guard addedRoots <= spokenSquareRoots(in: source) else { return false }
 
@@ -23,6 +55,10 @@ enum MathNotationGuard {
             guard saysGrouping else { return false }
         }
         return true
+    }
+
+    private static func matches(_ pattern: NSRegularExpression, in text: String) -> Int {
+        pattern.numberOfMatches(in: text, range: NSRange(text.startIndex..., in: text))
     }
 
     private static func count(_ needle: String, in text: String) -> Int {

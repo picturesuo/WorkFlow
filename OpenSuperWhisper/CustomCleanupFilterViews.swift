@@ -94,7 +94,7 @@ struct CustomCleanupFiltersCard: View {
                 VStack(alignment: .leading, spacing: 2) {
                     Text("Custom filters")
                         .font(.headline)
-                    Text("Start from Everyday, Technical, or Homework, then describe what to change in plain language. Meaning, names, values, paths, and identifiers always stay intact.")
+                    Text("Start from Everyday, Technical, Homework, or Writing, then describe what to change in plain language. Meaning, names, values, paths, and identifiers always stay intact.")
                         .font(.caption)
                         .foregroundColor(.secondary)
                         .fixedSize(horizontal: false, vertical: true)

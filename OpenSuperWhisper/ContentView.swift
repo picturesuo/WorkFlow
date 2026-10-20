@@ -294,9 +294,16 @@ class ContentViewModel: ObservableObject {
                         )
 
                         try recorder.moveTemporaryRecording(from: tempURL, to: newRecording.url)
+                        let source = DictationSource(
+                            recordingID: recordingId,
+                            recognizerText: rawText,
+                            cleanup: cleanup,
+                            fallbackFilter: CustomCleanupFilterStore.currentSnapshot(),
+                            disposition: .notInserted
+                        )
 
                         do {
-                            try await self.recordingStore.addRecordingSync(newRecording)
+                            try await self.recordingStore.addRecordingSync(newRecording, source: source)
                         } catch {
                             // The move succeeded, but no history row owns this file.
                             try? FileManager.default.removeItem(at: newRecording.url)

@@ -479,29 +479,23 @@ final class ProviderPipelineTests: XCTestCase {
     }
 
     func testProviderFailureMessageCannotPersistProviderPayload() async {
-        let previousMessage = AppPreferences.shared.bedrockLastErrorMessage
-        let previousDate = AppPreferences.shared.bedrockLastErrorDate
-        defer {
-            AppPreferences.shared.bedrockLastErrorMessage = previousMessage
-            AppPreferences.shared.bedrockLastErrorDate = previousDate
-        }
-
+        // The recorder is injected so parallel test processes sharing the
+        // app's preferences cannot race this assertion.
+        var recorded: [String?] = []
         let provider = SensitiveFailingCleanupProvider()
         let pipeline = TranscriptCleanupPipeline(
             isEnabled: { true },
             providerResolver: { provider },
             vocabularyProvider: { [] },
-            appRuleProvider: { _ in nil }
+            appRuleProvider: { _ in nil },
+            failureRecorder: { recorded.append($0) }
         )
 
         let result = await pipeline.finalize("private transcript")
 
         XCTAssertEqual(result.source, .rawFallback)
-        XCTAssertEqual(
-            AppPreferences.shared.bedrockLastErrorMessage,
-            TranscriptCleanupPipeline.safeFailureMessage
-        )
-        XCTAssertFalse(AppPreferences.shared.bedrockLastErrorMessage?.contains("private transcript") ?? true)
+        XCTAssertEqual(recorded, [TranscriptCleanupPipeline.safeFailureMessage])
+        XCTAssertFalse(recorded.contains { $0?.contains("private transcript") ?? false })
     }
 }
 

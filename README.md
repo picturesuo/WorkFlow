@@ -32,7 +32,18 @@ Saved filters sit beside the built-in modes in the main window and menu-bar **Wr
 
 - **Everyday** lightly cleans speech while preserving your natural voice and level of detail.
 - **Technical** produces compact, unambiguous instructions for computers and coding agents.
-- **Homework** develops complete explanations and preserves every idea. Longer output is expected.
+- **Homework** develops complete explanations and preserves every idea. Longer output is expected. Quantities come out as digits: "ten percent" becomes `10%`, "twenty twenty six" `2026`, "one hundred five" `105`.
+- **Writing** keeps your own voice for blogs and essays: your vocabulary, rhythm, long connected sentences, semicolons, and inline "(1) … (2)" enumerations. It removes only stutters, filler, and repeated takes.
+
+Digit formatting and every mode's style need AI cleanup. With cleanup off, WorkFlow inserts the recognizer's text with only your personal vocabulary applied, whatever mode is selected.
+
+## Learn from your finished writing
+
+Open **Settings → Personalization → Learn from finished writing**, paste a whole document you finished from your dictations, choose Homework, Technical, Everyday, or Writing, and select **Learn**. WorkFlow finds the dictations in History that the document came from, even across several dictations, repeated takes, or reordered paragraphs, and compares what it produced with what you kept. Only small style edits it can match with confidence count; rewritten content, changed values, quotations, and text it cannot attribute are left out, and a document with no confident match teaches nothing.
+
+The short matched edits, never the document or the rest of History, go to your cleanup provider, which can only name preferences from a fixed list, such as a spelling, a filler to drop, semicolon joins, or digits. WorkFlow checks each one against your edits before applying it to that mode alone, at once. Each learned preference is listed with where it came from, and can be switched off, deleted, or reset per mode; turning learning off stops both learning and applying. Custom filters are never changed.
+
+New dictations keep their original transcript on your Mac with their History item so later comparisons can tell recognition fixes, undone cleanup changes, and your own edits apart. Deleting the History item deletes it. History recorded before this has no original, so it is labeled legacy and only WorkFlow's saved text is compared.
 
 ## Why WorkFlow
 
@@ -70,7 +81,7 @@ Requirements: Apple Silicon, macOS 14 or newer, Xcode, Homebrew, Rust, and Git. 
 
 ## Privacy
 
-Audio stays on your Mac, including the filter assistant's microphone. Enabling a cleanup provider sends transcript text to it. In the filter assistant, **Send** transmits your request, class name, and pasted example to that provider; **Save filter** stores only the name, base mode, and instructions, never the example. Credentials and transcripts are never logged.
+Audio stays on your Mac, including the filter assistant's microphone. Enabling a cleanup provider sends transcript text to it. In the filter assistant, **Send** transmits your request, class name, and pasted example to that provider; **Save filter** stores only the name, base mode, and instructions, never the example. **Learn** sends only the short matched edits from a finished document, with a few words around each; the document is not stored. New dictations keep their original transcript locally until you delete them. Credentials and transcripts are never logged.
 
 ## Development
 

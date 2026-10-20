@@ -643,6 +643,8 @@ struct PersonalizationSettingsView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
+                CorrectionLearningCard()
+                    .settingsCard()
                 vocabularyCard
                 appRulesCard
                 meetingsCard

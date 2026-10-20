@@ -89,7 +89,7 @@ final class OpenAIChatCleanupService: TranscriptCleanupProviding, CleanupChatCom
                 result.text,
                 source: raw,
                 mode: cleanupMode,
-                allowsNumberFormatting: filter.isCustom
+                allowsNumberFormatting: filter.allowsNumberFormatting
             )
             return CleanupProviderResult(
                 text: cleaned,

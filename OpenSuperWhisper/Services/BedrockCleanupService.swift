@@ -97,7 +97,7 @@ final class BedrockCleanupService {
                 response.text,
                 source: raw,
                 mode: cleanupMode,
-                allowsNumberFormatting: filter.isCustom
+                allowsNumberFormatting: filter.allowsNumberFormatting
             )
         } catch CleanupGuardError.emptyResponse {
             throw BedrockCleanupError.emptyResponse

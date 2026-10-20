@@ -159,10 +159,17 @@ class RecordingStore: ObservableObject {
         let dbPath = appDirectory.appendingPathComponent("recordings.sqlite")
 
         do {
-            try FileManager.default.createDirectory(at: appDirectory, withIntermediateDirectories: true)
+            // The test host is the real-identity app, so tests that reach the
+            // shared store get a private in-memory database, never the user's History.
+            let isTesting = OpenSuperWhisperApp.isRunningTests
+            if !isTesting {
+                try FileManager.default.createDirectory(at: appDirectory, withIntermediateDirectories: true)
+            }
             try self.init(
-                database: DatabaseQueue(path: dbPath.path),
-                recordingsDirectory: appDirectory.appendingPathComponent("recordings"),
+                database: isTesting ? DatabaseQueue() : DatabaseQueue(path: dbPath.path),
+                recordingsDirectory: isTesting
+                    ? FileManager.default.temporaryDirectory.appendingPathComponent("WorkFlowTestRecordings")
+                    : appDirectory.appendingPathComponent("recordings"),
                 cancelQueuedRecording: { TranscriptionQueue.shared.cancelRecording($0) },
                 stopPlayback: { urls in
                     let recorder = AudioRecorder.shared
@@ -326,6 +333,29 @@ class RecordingStore: ObservableObject {
             }
         }
 
+        // New dictations keep their original evidence locally for correction
+        // learning. Existing rows are untouched and stay legacy History.
+        migrator.registerMigration("v9_add_dictation_sources") { db in
+            try db.create(table: DictationSource.databaseTableName, ifNotExists: true) { t in
+                t.column("recordingID", .blob)
+                    .primaryKey()
+                    .references(Recording.databaseTableName, column: "id", onDelete: .cascade)
+                t.column("capturedAt", .datetime).notNull()
+                t.column("recordingStartedAt", .datetime)
+                t.column("recognizerText", .text)
+                t.column("cleanupInputText", .text)
+                t.column("emittedText", .text)
+                t.column("insertedText", .text)
+                t.column("disposition", .text).notNull()
+                t.column("selectedMode", .text).notNull()
+                t.column("filterID", .blob)
+                t.column("filterName", .text)
+                t.column("filterInstructions", .text)
+                t.column("learnedPreferences", .text).notNull().defaults(to: "[]")
+                t.column("cleanupSource", .text)
+            }
+        }
+
         try migrator.migrate(dbQueue)
     }
     
@@ -478,9 +508,78 @@ class RecordingStore: ObservableObject {
         }
     }
     
-    private nonisolated func insertRecording(_ recording: Recording) async throws {
+    private nonisolated func insertRecording(_ recording: Recording, source: DictationSource? = nil) async throws {
         try await dbQueue.write { db in
             try recording.insert(db)
+            try source?.insert(db)
+        }
+    }
+
+    /// Saves a dictation with its original evidence in one transaction.
+    func addRecording(_ recording: Recording, source: DictationSource) {
+        Task {
+            do {
+                try await insertRecording(recording, source: source)
+                await MainActor.run {
+                    NotificationCenter.default.post(name: Self.recordingsDidUpdateNotification, object: nil)
+                }
+            } catch {
+                print("Failed to add recording.")
+            }
+        }
+    }
+
+    func addRecordingSync(_ recording: Recording, source: DictationSource) async throws {
+        try await insertRecording(recording, source: source)
+        await MainActor.run {
+            NotificationCenter.default.post(name: Self.recordingsDidUpdateNotification, object: nil)
+        }
+    }
+
+    /// Fills a queued dictation's evidence when its first transcription
+    /// finishes. A regeneration never replaces the original evidence.
+    nonisolated func completeDictationSource(
+        _ id: UUID,
+        recognizerText: String,
+        cleanup: TranscriptCleanupOutcome
+    ) async {
+        do {
+            try await dbQueue.write { db in
+                guard var source = try DictationSource.fetchOne(db, key: id),
+                      source.recognizerText == nil else { return }
+                source.recognizerText = recognizerText
+                source.cleanupInputText = cleanup.cleanupInput == recognizerText ? nil : cleanup.cleanupInput
+                source.emittedText = cleanup.text
+                source.cleanupSource = cleanup.source
+                source.disposition = .notInserted
+                try source.update(db)
+            }
+        } catch {
+            print("Failed to save dictation evidence.")
+        }
+    }
+
+    nonisolated func dictationSource(for id: UUID) async throws -> DictationSource? {
+        try await dbQueue.read { db in
+            try DictationSource.fetchOne(db, key: id)
+        }
+    }
+
+    /// Completed dictations, newest first, with their original evidence when
+    /// it exists. Meetings are excluded: they are never inserted into a document.
+    nonisolated func learningCandidates(limit: Int = 1_000) async throws -> [CorrectionCandidate] {
+        try await dbQueue.read { db in
+            let recordings = try Recording
+                .filter(Recording.Columns.mode == RecordingMode.dictation.rawValue)
+                .filter(Recording.Columns.status == RecordingStatus.completed.rawValue)
+                .order(Recording.Columns.timestamp.desc)
+                .limit(limit)
+                .fetchAll(db)
+            let sources = try DictationSource
+                .filter(keys: recordings.map(\.id))
+                .fetchAll(db)
+            let sourcesByID = Dictionary(sources.map { ($0.recordingID, $0) }, uniquingKeysWith: { first, _ in first })
+            return recordings.compactMap { CorrectionCandidate(recording: $0, source: sourcesByID[$0.id]) }
         }
     }
     

@@ -23,6 +23,11 @@ struct TranscriptCleanupOutcome: Equatable {
     let rawTokenEstimate: Int?
     let finalTokenEstimate: Int?
     let tokenEstimatorID: String?
+    /// The text cleanup received: the recognizer's words after vocabulary.
+    let cleanupInput: String?
+    /// The mode and filter selected for this dictation, kept even when
+    /// cleanup was off and so shaped nothing.
+    let selectedFilter: CleanupFilterSnapshot?
 
     init(
         text: String,
@@ -35,7 +40,9 @@ struct TranscriptCleanupOutcome: Equatable {
         customFilterInstructions: String? = nil,
         rawTokenEstimate: Int? = nil,
         finalTokenEstimate: Int? = nil,
-        tokenEstimatorID: String? = nil
+        tokenEstimatorID: String? = nil,
+        cleanupInput: String? = nil,
+        selectedFilter: CleanupFilterSnapshot? = nil
     ) {
         self.text = text
         self.source = source
@@ -48,6 +55,8 @@ struct TranscriptCleanupOutcome: Equatable {
         self.rawTokenEstimate = rawTokenEstimate
         self.finalTokenEstimate = finalTokenEstimate
         self.tokenEstimatorID = tokenEstimatorID
+        self.cleanupInput = cleanupInput
+        self.selectedFilter = selectedFilter
     }
 
     init(
@@ -59,7 +68,8 @@ struct TranscriptCleanupOutcome: Equatable {
         filter: CleanupFilterSnapshot,
         rawTokenEstimate: Int?,
         finalTokenEstimate: Int?,
-        tokenEstimatorID: String?
+        tokenEstimatorID: String?,
+        cleanupInput: String? = nil
     ) {
         self.init(
             text: text,
@@ -72,7 +82,9 @@ struct TranscriptCleanupOutcome: Equatable {
             customFilterInstructions: filter.customInstructions,
             rawTokenEstimate: rawTokenEstimate,
             finalTokenEstimate: finalTokenEstimate,
-            tokenEstimatorID: tokenEstimatorID
+            tokenEstimatorID: tokenEstimatorID,
+            cleanupInput: cleanupInput,
+            selectedFilter: filter
         )
     }
 }
@@ -87,6 +99,8 @@ final class TranscriptCleanupPipeline {
     private let appRuleProvider: (String?) -> TargetAppRule?
     private let bedrockBudgetProvider: () async -> BedrockBudgetStatus?
     private let filterProvider: () -> CleanupFilterSnapshot
+    /// Records the last cleanup failure, or clears it with nil.
+    private let failureRecorder: (String?) -> Void
 
     init(
         isEnabled: @escaping () -> Bool = { AppPreferences.shared.bedrockCleanupEnabled },
@@ -100,6 +114,10 @@ final class TranscriptCleanupPipeline {
         },
         filterProvider: @escaping () -> CleanupFilterSnapshot = {
             CustomCleanupFilterStore.currentSnapshot()
+        },
+        failureRecorder: @escaping (String?) -> Void = { message in
+            AppPreferences.shared.bedrockLastErrorMessage = message
+            AppPreferences.shared.bedrockLastErrorDate = message == nil ? nil : Date()
         }
     ) {
         self.isEnabled = isEnabled
@@ -108,6 +126,7 @@ final class TranscriptCleanupPipeline {
         self.appRuleProvider = appRuleProvider
         self.bedrockBudgetProvider = bedrockBudgetProvider
         self.filterProvider = filterProvider
+        self.failureRecorder = failureRecorder
     }
 
     convenience init(
@@ -171,7 +190,9 @@ final class TranscriptCleanupPipeline {
                 modelID: nil,
                 rawTokenEstimate: rawTokenEstimate,
                 finalTokenEstimate: LocalTokenEstimator.estimate(localTranscript),
-                tokenEstimatorID: LocalTokenEstimator.identifier
+                tokenEstimatorID: LocalTokenEstimator.identifier,
+                cleanupInput: localTranscript,
+                selectedFilter: filter
             )
         }
 
@@ -197,7 +218,8 @@ final class TranscriptCleanupPipeline {
                     filter: filter,
                     rawTokenEstimate: rawTokenEstimate,
                     finalTokenEstimate: LocalTokenEstimator.estimate(localTranscript),
-                    tokenEstimatorID: LocalTokenEstimator.identifier
+                    tokenEstimatorID: LocalTokenEstimator.identifier,
+                    cleanupInput: localTranscript
                 )
             }
             let systemPrompt = CleanupPromptBuilder.systemPrompt(
@@ -234,7 +256,8 @@ final class TranscriptCleanupPipeline {
                 filter: filter,
                 rawTokenEstimate: rawTokenEstimate,
                 finalTokenEstimate: LocalTokenEstimator.estimate(finalText),
-                tokenEstimatorID: LocalTokenEstimator.identifier
+                tokenEstimatorID: LocalTokenEstimator.identifier,
+                cleanupInput: localTranscript
             )
         } catch {
             print(Self.safeFailureMessage)
@@ -248,19 +271,18 @@ final class TranscriptCleanupPipeline {
                 filter: filter,
                 rawTokenEstimate: rawTokenEstimate,
                 finalTokenEstimate: LocalTokenEstimator.estimate(localTranscript),
-                tokenEstimatorID: LocalTokenEstimator.identifier
+                tokenEstimatorID: LocalTokenEstimator.identifier,
+                cleanupInput: localTranscript
             )
         }
     }
 
     private func recordFailure(_ message: String) {
-        AppPreferences.shared.bedrockLastErrorMessage = message
-        AppPreferences.shared.bedrockLastErrorDate = Date()
+        failureRecorder(message)
     }
 
     private func clearFailure() {
-        AppPreferences.shared.bedrockLastErrorMessage = nil
-        AppPreferences.shared.bedrockLastErrorDate = nil
+        failureRecorder(nil)
     }
 }
 

@@ -17,22 +17,43 @@ struct CleanupFilterSnapshot: Equatable, Sendable {
     let mode: CleanupMode
     let customName: String?
     let customInstructions: String?
+    /// The saved filter's identity, when one was selected, so evidence can
+    /// follow a filter across renames.
+    let customID: UUID?
+    /// Enabled learned preferences for a built-in mode. A custom filter keeps
+    /// exactly its saved instructions, so it never carries learned ones.
+    let learned: [LearnedPreference]
 
-    init(mode: CleanupMode, customName: String? = nil, customInstructions: String? = nil) {
+    init(
+        mode: CleanupMode,
+        customName: String? = nil,
+        customInstructions: String? = nil,
+        customID: UUID? = nil,
+        learned: [LearnedPreference] = []
+    ) {
         self.mode = mode
         let name = customName?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         let instructions = customInstructions?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         if name.isEmpty || instructions.isEmpty {
             self.customName = nil
             self.customInstructions = nil
+            self.customID = nil
+            self.learned = learned.filter { $0.mode == mode && $0.isEnabled }
         } else {
             self.customName = name
             self.customInstructions = instructions
+            self.customID = customID
+            self.learned = []
         }
     }
 
     init(filter: CustomCleanupFilter) {
-        self.init(mode: filter.baseMode, customName: filter.name, customInstructions: filter.instructions)
+        self.init(
+            mode: filter.baseMode,
+            customName: filter.name,
+            customInstructions: filter.instructions,
+            customID: filter.id
+        )
     }
 
     static func builtIn(_ mode: CleanupMode) -> CleanupFilterSnapshot {
@@ -40,6 +61,12 @@ struct CleanupFilterSnapshot: Equatable, Sendable {
     }
 
     var isCustom: Bool { customName != nil }
+
+    /// Whether cleanup may choose a number style, which also turns on the
+    /// guard's requirement that every spoken number survives.
+    var allowsNumberFormatting: Bool {
+        isCustom || mode.formatsNumbers || learned.contains(where: \.formatsNumbers)
+    }
 
     var displayName: String { customName ?? mode.displayName }
 }
@@ -89,7 +116,7 @@ enum CustomCleanupFilterValidationError: LocalizedError, Equatable {
         case .duplicateName:
             "Another filter already uses this name."
         case .reservedName:
-            "Everyday, Technical, and Homework are built-in modes. Choose a different name."
+            "Everyday, Technical, Homework, and Writing are built-in modes. Choose a different name."
         case .emptyInstructions:
             "Describe what this filter should change, for example “write numbers as digits”."
         case .instructionsTooLong:
@@ -244,10 +271,14 @@ enum CustomCleanupFilterStore {
             if let filter = filters.first(where: { $0.id == id }) {
                 return CleanupFilterSnapshot(filter: filter)
             }
-            return .builtIn(baseMode(in: defaults))
+            return builtInSnapshot(baseMode(in: defaults), in: defaults)
         case .builtIn(let mode):
-            return .builtIn(mode)
+            return builtInSnapshot(mode, in: defaults)
         }
+    }
+
+    private static func builtInSnapshot(_ mode: CleanupMode, in defaults: UserDefaults) -> CleanupFilterSnapshot {
+        CleanupFilterSnapshot(mode: mode, learned: LearnedPreferenceStore.activePreferences(for: mode, in: defaults))
     }
 
     static func sanitized(_ filters: [CustomCleanupFilter]) -> [CustomCleanupFilter] {

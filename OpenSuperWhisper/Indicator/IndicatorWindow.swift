@@ -213,6 +213,7 @@ class IndicatorViewModel: ObservableObject {
         }
         
         state = .decoding
+        let recordingStartedAt = self.recordingStartedAt
         
         Task { [weak self] in
             guard let self = self else { return }
@@ -272,20 +273,32 @@ class IndicatorViewModel: ObservableObject {
                         )
                         
                         try recorder.moveTemporaryRecording(from: tempURL, to: newRecording.url)
-                        
-                        await MainActor.run {
-                            self.recordingStore.addRecording(newRecording)
-                        }
 
                         // claimIfCurrent is process-wide and one-shot, so an older
                         // session finishing late cannot paste over a newer dictation.
-                        guard self.latestDictationGate.claimIfCurrent(generation) else {
+                        let isCurrent = self.latestDictationGate.claimIfCurrent(generation)
+                        let disposition = isCurrent ? self.deliver(text) : .staleSkipped
+                        let attemptedDelivery = [.pasteSent, .pasteFailed, .copiedOnly].contains(disposition)
+                        let source = DictationSource(
+                            recordingID: recordingId,
+                            recordingStartedAt: recordingStartedAt,
+                            recognizerText: rawText,
+                            cleanup: cleanup,
+                            fallbackFilter: filter,
+                            disposition: disposition,
+                            insertedText: attemptedDelivery ? Self.applyPostProcessing(text) : nil
+                        )
+                        await MainActor.run {
+                            self.recordingStore.addRecording(newRecording, source: source)
+                        }
+
+                        guard isCurrent else {
                             print("Saved stale or already-pasted dictation generation \(generation) without pasting")
                             self.delegate?.didFinishDecoding(self)
                             return
                         }
                         
-                        guard insertText(text) else {
+                        guard disposition != .pasteFailed else {
                             let recoveryState: RecordingState =
                                 NSPasteboard.general.string(forType: .string) == Self.applyPostProcessing(text)
                                 ? .pasteFailed
@@ -318,37 +331,40 @@ class IndicatorViewModel: ObservableObject {
         }
     }
     
-    @discardableResult
-    func insertText(_ text: String) -> Bool {
-        guard !text.isEmpty else { return false }
+    /// Delivers the text as the app rule and preferences ask and reports
+    /// what was done. A posted Cmd+V is not proof the target inserted it.
+    func deliver(_ text: String) -> DictationDisposition {
+        guard !text.isEmpty else { return .pasteFailed }
         let finalText = Self.applyPostProcessing(text)
         let prefs = AppPreferences.shared
         let appRule = TargetAppRuleStore.rule(for: pasteTarget?.bundleID)
 
         switch appRule?.pasteBehavior ?? .appDefault {
         case .never:
-            return true
+            return .savedOnly
         case .copyOnly:
             ClipboardUtil.copyToClipboard(finalText)
-            return true
+            return .copiedOnly
         case .appDefault:
             break
         }
 
         if prefs.autoPasteTranscription {
-            if prefs.autoCopyToClipboard {
+            let posted = if prefs.autoCopyToClipboard {
                 // Paste and keep in clipboard
-                return ClipboardUtil.insertTextAndKeepInClipboard(finalText, targetPID: pasteTarget?.pid)
+                ClipboardUtil.insertTextAndKeepInClipboard(finalText, targetPID: pasteTarget?.pid)
             } else {
                 // Paste but restore original clipboard (legacy behavior)
-                return ClipboardUtil.insertText(finalText, targetPID: pasteTarget?.pid)
+                ClipboardUtil.insertText(finalText, targetPID: pasteTarget?.pid)
             }
+            return posted ? .pasteSent : .pasteFailed
         } else if prefs.autoCopyToClipboard {
             // Only copy to clipboard, don't paste
             ClipboardUtil.copyToClipboard(finalText)
+            return .copiedOnly
         }
         // If both are false, do nothing
-        return true
+        return .savedOnly
     }
     
     static func applyPostProcessing(_ text: String) -> String {

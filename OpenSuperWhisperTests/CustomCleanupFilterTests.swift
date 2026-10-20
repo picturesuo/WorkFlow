@@ -155,9 +155,16 @@ final class CustomCleanupPromptTests: XCTestCase {
         for mode in CleanupMode.allCases {
             let prompt = CleanupPromptBuilder.systemPrompt(mode: mode)
             XCTAssertEqual(prompt, CleanupPromptBuilder.systemPrompt(filter: .builtIn(mode)))
-            XCTAssertTrue(prompt.hasPrefix(CleanupPromptBuilder.baseSystemPrompt))
-            XCTAssertTrue(prompt.contains("convert spoken numbers into digits unless those digits already appear"))
             XCTAssertFalse(prompt.contains("Custom filter"))
+            XCTAssertFalse(prompt.contains("Learned preferences"))
+            if mode.formatsNumbers {
+                // Homework and Writing choose a number style by contract.
+                XCTAssertFalse(prompt.contains("convert spoken numbers into digits unless"))
+                XCTAssertTrue(prompt.contains("never change, drop, or add a value"))
+            } else {
+                XCTAssertTrue(prompt.hasPrefix(CleanupPromptBuilder.baseSystemPrompt))
+                XCTAssertTrue(prompt.contains("convert spoken numbers into digits unless those digits already appear"))
+            }
         }
     }
 
@@ -328,9 +335,10 @@ final class CustomFilterNumberGuardTests: XCTestCase {
             "My extension is 4721 and the office is 555-1234."
         )
         XCTAssertThrowsError(try CleanupGuard.postprocess("My extension is 4721.", source: phone))
+        // Every spoken number must survive, so each regrouping keeps both.
         for regrouped in [
-            "47 21", "47-21", "47 21, 555 1234", "(555) 1234", "4-7-2-1", "4721 5551234", "4721 (555-1234)",
-            "4721\n- 555-1234"
+            "47 21 and 555 1234", "47-21 and 555-1234", "47 21, 555 1234", "4721 and (555) 1234",
+            "4-7-2-1 and 5-5-5-1-2-3-4", "4721 5551234", "4721 (555-1234)", "4721\n- 555-1234"
         ] {
             XCTAssertNoThrow(
                 try CleanupGuard.postprocess("Call \(regrouped).", source: phone, allowsNumberFormatting: true),
@@ -338,7 +346,7 @@ final class CustomFilterNumberGuardTests: XCTestCase {
             )
         }
         for changed in [
-            "4271", "4-2-7-1", "4 2 7 1", "4721-555", "1234-555", "555-5555", "5-5-5-1-3-2-4", "472", "47 2",
+            "47 21", "(555) 1234", "4271", "4-2-7-1", "4 2 7 1", "4721-555", "1234-555", "555-5555", "5-5-5-1-3-2-4", "472", "47 2",
             "47 21 5", "4721 555123", "47 and 21", "4721 and 9", "47, 21", "(555) 123", "4 and 7"
         ] {
             XCTAssertThrowsError(
