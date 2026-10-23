@@ -95,7 +95,7 @@ final class TranscriptionCancellationTests: XCTestCase {
 
 /// Exercises TranscriptionService itself. No file, microphone, model, or provider
 /// is opened; each engine call returns only when the test releases it.
-private final class ControlledTranscriptionEngine: TranscriptionEngine {
+final class ControlledTranscriptionEngine: TranscriptionEngine {
     let isModelLoaded = true
     let engineName = "Controlled fixture"
     private let lock = NSLock()

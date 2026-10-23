@@ -179,11 +179,12 @@ enum CleanupGuard {
     /// - Parameter allowsNumberFormatting: Set for filters that may choose a
     ///   number style: custom filters, Homework, Writing, and learned digit
     ///   preferences. It accepts a digit form only when the source spells out
-    ///   that exact value, clock time, or run of digit words, and requires
-    ///   every number the speaker said to survive unless they corrected it.
-    ///   In every mode a number word may not change value, and a %, sign,
-    ///   operator, power, √, or multiplication sign appears only where the
-    ///   source says it; anything else falls back to the local transcript.
+    ///   that exact value, clock time, or run of digit words.
+    ///   In every mode each number, negation, path, flag, URL, and identifier
+    ///   the speaker said must survive unless they corrected it, a number word
+    ///   may not change value, a %, sign, operator, power, √, or multiplication
+    ///   sign appears only where the source says it, and EMPTY is accepted only
+    ///   for filler; anything else falls back to the local transcript.
     static func postprocess(
         _ value: String,
         source: String,
@@ -205,7 +206,12 @@ enum CleanupGuard {
             cleaned = cleaned.trimmingCharacters(in: .whitespacesAndNewlines)
         }
 
-        if cleaned == "EMPTY" { return "" }
+        // An empty cleanup discards the dictation without saving or pasting
+        // it, so it is accepted only when the speaker said nothing but filler.
+        if cleaned == "EMPTY" {
+            guard isOnlyFiller(trimmedSource) else { throw CleanupGuardError.unsafeRewrite }
+            return ""
+        }
         guard !cleaned.isEmpty else { throw CleanupGuardError.emptyResponse }
 
         let maximumFactor: Double
@@ -278,13 +284,15 @@ enum CleanupGuard {
                     throw CleanupGuardError.unsafeRewrite
                 }
             }
-            guard keepsEverySourceNumber(cleaned, source: trimmedSource) else {
-                throw CleanupGuardError.unsafeRewrite
-            }
         } else {
             guard numericTokens(in: cleaned).isSubset(of: sourceNumbers) else {
                 throw CleanupGuardError.unsafeRewrite
             }
+        }
+        guard keepsEverySourceNumber(cleaned, source: trimmedSource),
+              keepsEveryNegation(cleaned, source: trimmedSource),
+              keepsEveryIdentifier(cleaned, source: trimmedSource) else {
+            throw CleanupGuardError.unsafeRewrite
         }
         // A number word may be kept or written as digits, never changed.
         let sourceValues = numericTokens(in: trimmedSource)
@@ -329,9 +337,20 @@ enum CleanupGuard {
         options: [.caseInsensitive]
     )
 
-    private static func isCorrected(_ range: Range<String.Index>, in source: String) -> Bool {
+    /// "don't, sorry, do": a word is replaced only when the speaker pauses
+    /// before correcting it, so "don't wait" and "not actually" still negate.
+    private static let pausedCorrectionPattern = try! NSRegularExpression(
+        pattern: #"^\s*[,;:.!?…—–-]+\s*(?:no|sorry|wait|actually|i mean|rather|or rather|scratch that|correction|make that|make it)\b"#,
+        options: [.caseInsensitive]
+    )
+
+    private static func isCorrected(
+        _ range: Range<String.Index>,
+        in source: String,
+        pattern: NSRegularExpression = correctionPattern
+    ) -> Bool {
         let following = String(source[range.upperBound...].prefix(24))
-        return correctionPattern.firstMatch(in: following, range: NSRange(following.startIndex..., in: following)) != nil
+        return pattern.firstMatch(in: following, range: NSRange(following.startIndex..., in: following)) != nil
     }
 
     /// Every number the speaker said, as digits or words, must still be in
@@ -344,6 +363,11 @@ enum CleanupGuard {
         for token in written where token.contains("-") {
             written.formUnion(token.split(separator: "-").map(String.init))
             written.insert(token.filter(\.isNumber))
+        }
+        // "two times, twice" → "twice" still says the number.
+        for (word, value) in multiplicativeWords
+        where cleaned.range(of: #"\b\#(word)\b"#, options: [.regularExpression, .caseInsensitive]) != nil {
+            written.insert(value)
         }
         // A regrouped run ("(555) 1234") or one that keeps some members as
         // number words ("2 three-bedroom") still writes the spoken digit run.
@@ -368,6 +392,149 @@ enum CleanupGuard {
             guard !occurrence.values.isDisjoint(with: written) else { return false }
         }
         return true
+    }
+
+    private static let multiplicativeWords = [("twice", "2"), ("thrice", "3")]
+
+    /// Hesitation sounds that say nothing on their own.
+    private static let fillerWords: Set<String> = [
+        "um", "umm", "uh", "uhh", "uhm", "er", "erm", "ah", "ahh", "eh",
+        "hm", "hmm", "mm", "mmm", "mhm", "like", "so", "well"
+    ]
+    private static let fillerPhrasePattern = try! NSRegularExpression(
+        pattern: #"\b(?:you know|i mean)\b"#,
+        options: [.caseInsensitive]
+    )
+
+    private static func isOnlyFiller(_ source: String) -> Bool {
+        let text = fillerPhrasePattern.stringByReplacingMatches(
+            in: source, range: NSRange(source.startIndex..., in: source), withTemplate: " "
+        )
+        return text.lowercased()
+            .split { !($0.isLetter || $0.isNumber || $0 == "'" || $0 == "’") }
+            .allSatisfy { fillerWords.contains(String($0)) }
+    }
+
+    /// "do not" and "don't" each negate once.
+    private static let negationPattern = try! NSRegularExpression(
+        pattern: #"\b(?:not|no|never|nor|neither|none|nobody|nothing|nowhere|cannot|without|\p{L}+n['’]t)\b"#,
+        options: [.caseInsensitive]
+    )
+
+    /// Negations the rewrite must keep. A negation the speaker corrected
+    /// ("don't, sorry, do"), a word they repeated ("don't don't"), and a bare
+    /// "no" that answers or corrects ("five, no, six", "ten no wait twelve")
+    /// are not required.
+    private static func requiredNegations(in text: String) -> Int {
+        negations(in: text) { range, word in
+            !isCorrected(range, in: text, pattern: pausedCorrectionPattern)
+                && !(word == "no" && isBareNo(range, in: text))
+        }
+    }
+
+    private static func negations(
+        in text: String,
+        where isRequired: (Range<String.Index>, String) -> Bool = { _, _ in true }
+    ) -> Int {
+        var count = 0
+        var previous: (word: String, end: String.Index)?
+        for match in negationPattern.matches(in: text, range: NSRange(text.startIndex..., in: text)) {
+            guard let range = Range(match.range, in: text) else { continue }
+            let word = text[range].lowercased().replacingOccurrences(of: "’", with: "'")
+            defer { previous = (word, range.upperBound) }
+            if let previous, previous.word == word,
+               !text[previous.end..<range.lowerBound].contains(where: { $0.isLetter || $0.isNumber }) {
+                continue
+            }
+            if isRequired(range, word) { count += 1 }
+        }
+        return count
+    }
+
+    private static func isBareNo(_ range: Range<String.Index>, in text: String) -> Bool {
+        let after = text[range.upperBound...]
+        guard let next = after.first, next.isWhitespace, !isCorrected(range, in: text) else { return true }
+        func isNumber(_ word: Substring) -> Bool {
+            !word.isEmpty && (word.allSatisfy(\.isNumber) || SpokenNumberParser.isCardinalWord(String(word)))
+        }
+        let nextWord = after.drop(while: \.isWhitespace).prefix { $0.isLetter || $0.isNumber }
+        let previousWord = Substring(text[..<range.lowerBound].reversed()
+            .drop(while: \.isWhitespace).prefix { $0.isLetter || $0.isNumber }.reversed())
+        // "yeah no, that's fine" and "oh no" answer rather than negate.
+        if [previousWord, nextWord].contains(where: { answerWords.contains($0.lowercased()) }) { return true }
+        return isNumber(nextWord) && isNumber(previousWord)
+    }
+
+    private static let answerWords: Set<String> = ["yeah", "yes", "yep", "oh", "ok", "okay"]
+
+    private static func keepsEveryNegation(_ cleaned: String, source: String) -> Bool {
+        // "x is not equal to y" may be written "x ≠ y".
+        negations(in: cleaned) + cleaned.filter { $0 == "≠" }.count >= requiredNegations(in: source)
+    }
+
+    /// Prose that happens to contain a slash.
+    private static let proseSlashWords: Set<String> = [
+        "and/or", "either/or", "he/she", "him/her", "his/her", "s/he", "w/o",
+        "n/a", "yes/no", "on/off", "a/b", "i/o"
+    ]
+
+    /// Source words that only work verbatim: URLs, emails, paths, flags, file
+    /// names, and snake_case or camelCase identifiers. Numbers are checked
+    /// separately, so purely numeric forms are not identifiers.
+    private static func identifiers(in source: String) -> [(token: String, range: Range<String.Index>)] {
+        let wrapping = CharacterSet(charactersIn: "\"'`([{<“”‘’")
+        let trailing = CharacterSet(charactersIn: ".,;:!?\"'`)]}>“”‘’…")
+        var result: [(token: String, range: Range<String.Index>)] = []
+        var start = source.startIndex
+        while let wordStart = source[start...].firstIndex(where: { !$0.isWhitespace }) {
+            let wordEnd = source[wordStart...].firstIndex(where: \.isWhitespace) ?? source.endIndex
+            start = wordEnd
+            let word = String(source[wordStart..<wordEnd])
+            let trimmedStart = word.unicodeScalars.drop { wrapping.contains($0) }
+            var scalars = Array(trimmedStart)
+            while let last = scalars.last, trailing.contains(last) { scalars.removeLast() }
+            var token = String(String.UnicodeScalarView(scalars))
+            // "GitHub's" names GitHub.
+            for suffix in ["'s", "’s"] where token.hasSuffix(suffix) { token.removeLast(2) }
+            guard token.contains(where: \.isLetter), isIdentifier(token),
+                  let range = source.range(of: token, range: wordStart..<wordEnd) else { continue }
+            result.append((token, range))
+        }
+        return result
+    }
+
+    private static func isIdentifier(_ token: String) -> Bool {
+        if token.contains("://") { return true }
+        if token.hasPrefix("-") {
+            return token.drop { $0 == "-" }.first?.isLetter == true
+        }
+        let characters = Array(token)
+        for (index, character) in characters.enumerated() where index > 0 && index < characters.count - 1 {
+            let neighbors = characters[index - 1].isLetter || characters[index - 1].isNumber
+            guard neighbors, characters[index + 1].isLetter || characters[index + 1].isNumber else { continue }
+            switch character {
+            case "@", "_", "\\": return true
+            case "/" where !proseSlashWords.contains(token.lowercased()): return true
+            default: break
+            }
+        }
+        let segments = token.split(separator: ".", omittingEmptySubsequences: false)
+        if segments.count > 1,
+           segments.allSatisfy({ !$0.isEmpty && $0.allSatisfy { $0.isLetter || $0.isNumber || $0 == "-" } }),
+           segments.contains(where: { $0.count > 1 }),
+           (segments.last?.count ?? 0) > 1 {
+            return true
+        }
+        // camelCase and brand casing such as useEffect or GitHub.
+        return zip(characters, characters.dropFirst()).contains { $0.isLowercase && $1.isUppercase }
+    }
+
+    private static func keepsEveryIdentifier(_ cleaned: String, source: String) -> Bool {
+        identifiers(in: source).allSatisfy { identifier in
+            let capitalized = identifier.token.prefix(1).uppercased() + identifier.token.dropFirst()
+            return cleaned.contains(identifier.token) || cleaned.contains(capitalized)
+                || isCorrected(identifier.range, in: source, pattern: pausedCorrectionPattern)
+        }
     }
 
     private static func numericTokens(in value: String) -> Set<String> {

@@ -45,15 +45,16 @@ class IndicatorViewModel: ObservableObject {
     private let cleanupPipeline: TranscriptCleanupPipeline
     private let latestDictationGate: LatestDictationGate
     private var dictationGeneration: UInt64?
-    private var recorderSessionID: UUID?
+    var recorderSessionID: UUID?
     private let pasteTarget: PasteTarget?
     
     init(
         pasteTarget: PasteTarget? = nil,
-        latestDictationGate: LatestDictationGate? = nil
+        latestDictationGate: LatestDictationGate? = nil,
+        transcriptionService: TranscriptionService? = nil
     ) {
         self.recordingStore = RecordingStore.shared
-        self.transcriptionService = TranscriptionService.shared
+        self.transcriptionService = transcriptionService ?? .shared
         self.transcriptionQueue = TranscriptionQueue.shared
         self.cleanupPipeline = TranscriptCleanupPipeline.shared
         self.latestDictationGate = latestDictationGate ?? .shared
@@ -191,9 +192,13 @@ class IndicatorViewModel: ObservableObject {
         recorderSessionID = nil
         stopBlinking()
         
-        if isTranscriptionBusy {
-            // The engine is busy with another transcription: keep the user's audio
-            // and put it into the queue instead of deleting it.
+        if transcriptionQueue.isProcessing {
+            // Queue work (imports, meetings, regenerations) can hold the engine
+            // for minutes: keep the user's audio and queue it instead of deleting
+            // it. The queue never pastes. A dictation stopped while an older
+            // dictation is still transcribing does not come here: starting it
+            // already retired the older one, so queueing it would paste neither.
+            // Transcription is serialized, so it waits and is delivered.
             Task { [weak self] in
                 guard let self = self else { return }
                 if let tempURL = await self.recorder.stopRecording(sessionID: sessionID) {
