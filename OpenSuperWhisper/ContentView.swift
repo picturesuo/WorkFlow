@@ -641,9 +641,7 @@ struct HistoryHeader<Controls: View>: View {
     var body: some View {
         VStack(alignment: .leading, spacing: WFSpace.lg) {
             HStack(spacing: WFSpace.sm) {
-                Image(systemName: "waveform")
-                    .font(.system(size: 16, weight: .semibold))
-                    .foregroundStyle(ThemePalette.iconAccent(colorScheme))
+                WorkFlowMark(size: 24)
                 Text(AppIdentity.productName).font(.system(size: 14, weight: .semibold))
                 Spacer(minLength: WFSpace.sm)
                 controls()
@@ -690,7 +688,7 @@ struct HistoryEmptyState: View {
         VStack(spacing: WFSpace.md) {
             Image(systemName: isSearching ? "magnifyingglass" : "waveform")
                 .font(.system(size: 28, weight: .light))
-                .foregroundStyle(ThemePalette.iconAccent(colorScheme))
+                .foregroundStyle(.secondary)
                 .frame(width: 60, height: 60)
                 .background(ThemePalette.panelSurface(colorScheme), in: RoundedRectangle(cornerRadius: 18))
             Text(isSearching ? "No matching transcriptions" : "Make room for your next thought")
@@ -780,7 +778,7 @@ enum DictationDockStatus: Equatable {
     func detail(shortcut: String) -> String {
         switch self {
         case .recording(let duration): return "\(TextUtil.formatDuration(duration)) · Stop when you’re finished"
-        case .ready: return shortcut.isEmpty ? "Click the microphone to start" : "\(shortcut) to dictate anywhere"
+        case .ready: return shortcut.isEmpty ? "Click the microphone to start" : "Press \(shortcut) to dictate anywhere"
         case .connecting: return "Your microphone is getting ready"
         case .transcribing, .loadingModel, .processingQueue, .savingMeeting: return "You can keep browsing your history"
         case .meeting: return "Use the meeting button above to stop"
@@ -803,14 +801,14 @@ struct DictationDock: View {
             HStack(spacing: WFSpace.md) {
                 VStack(alignment: .leading, spacing: 4) {
                     HStack(spacing: 6) {
-                        Circle().fill(status.isRecording ? Color.red : ThemePalette.iconAccent(colorScheme))
-                            .frame(width: 6, height: 6)
+                        statusIndicator
                         Text(status.title).font(.system(size: 14, weight: .semibold))
                     }
                     Text(status.detail(shortcut: shortcut))
                         .font(.caption).foregroundStyle(.secondary).monospacedDigit()
                         .fixedSize(horizontal: false, vertical: true)
                 }
+                .accessibilityElement(children: .combine)
                 Spacer(minLength: WFSpace.sm)
                 Button(action: onRecord) { MainRecordButton(isRecording: status.isRecording) }
                     .buttonStyle(WFPressableStyle())
@@ -820,11 +818,17 @@ struct DictationDock: View {
                     .accessibilityLabel(status.isRecording ? "Stop recording" : "Start recording")
                     .accessibilityHint(status.isRecording ? "Stops recording and begins transcription" : status.detail(shortcut: shortcut))
             }
-            WritingFilterPicker(selection: $writingSelection, customFilters: customFilters)
-            .labelsHidden()
-            .help(writingHelp)
-            .accessibilityLabel("Writing mode")
-            .accessibilityHint("Changes how AI cleanup rewrites future dictations")
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: WFSpace.md) {
+                    Text("Writing mode")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .accessibilityHidden(true)
+                    Spacer(minLength: 0)
+                    writingPicker.fixedSize()
+                }
+                writingPicker.frame(maxWidth: .infinity, alignment: .leading)
+            }
         }
         .padding(.horizontal, WFSpace.xl)
         .padding(.vertical, WFSpace.lg)
@@ -832,6 +836,34 @@ struct DictationDock: View {
         .overlay(alignment: .top) {
             Rectangle().fill(ThemePalette.hairline(colorScheme)).frame(height: 1)
         }
+    }
+
+    private var writingPicker: some View {
+        WritingFilterPicker(selection: $writingSelection, customFilters: customFilters)
+            .labelsHidden()
+            .help(writingHelp)
+            .accessibilityLabel("Writing mode")
+            .accessibilityHint("Changes how AI cleanup rewrites future dictations")
+    }
+
+    /// Ready shows the brand ink, live recording is red, work in progress
+    /// spins, and a missing microphone warns, so each state reads at a glance.
+    private var statusIndicator: some View {
+        Group {
+            switch status {
+            case .ready:
+                Circle().fill(ThemePalette.ink(colorScheme)).frame(width: 6, height: 6)
+            case .recording, .meeting:
+                Circle().fill(Color.red).frame(width: 6, height: 6)
+            case .connecting, .transcribing, .loadingModel, .processingQueue, .savingMeeting:
+                ProgressView().controlSize(.small).scaleEffect(0.55)
+            case .noMicrophone:
+                Image(systemName: "exclamationmark.triangle.fill")
+                    .font(.system(size: 10))
+                    .foregroundStyle(.orange)
+            }
+        }
+        .frame(width: 10, height: 10)
     }
 }
 
@@ -1073,7 +1105,7 @@ struct RecordingCard: View {
     private var cleanupBadgeColor: Color {
         switch recording.cleanupSource {
         case .bedrock, .ollama, .openAICompatible, .azureOpenAI:
-            return ThemePalette.iconAccent(colorScheme)
+            return ThemePalette.linkText(colorScheme)
         case .rawFallback, .budgetLimited:
             return .orange
         case .disabled, nil:
@@ -1126,7 +1158,6 @@ struct RecordingCard: View {
     private var progressLabel: some View {
         HStack(spacing: 6) {
             Image(systemName: recording.status == .pending ? "clock" : "waveform")
-                .foregroundStyle(ThemePalette.iconAccent(colorScheme))
             Text(isRegenerating ? "Updating transcription · \(statusText)" : statusText)
             if recording.status != .pending {
                 Text("\(Int(recording.progress * 100))%")
@@ -1333,7 +1364,7 @@ struct MicrophonePickerIconView: View {
                 .background(
                     RoundedRectangle(cornerRadius: WFRadius.control, style: .continuous)
                         .fill(isHovered
-                              ? BrandPalette.violet.opacity(0.14)
+                              ? ThemePalette.ink(colorScheme).opacity(0.08)
                               : Color.clear)
                 )
                 .contentShape(RoundedRectangle(cornerRadius: WFRadius.control, style: .continuous))
@@ -1401,15 +1432,17 @@ struct MicrophonePickerIconView: View {
     }
 }
 
+/// Ink tile with an inverse glyph, like the mark itself; red while recording.
 struct MainRecordButton: View {
     let isRecording: Bool
+    @Environment(\.colorScheme) private var colorScheme
 
     var body: some View {
         Image(systemName: isRecording ? "stop.fill" : "mic.fill")
             .font(.system(size: 18, weight: .semibold))
-            .foregroundStyle(.white)
+            .foregroundStyle(isRecording ? Color.white : ThemePalette.onInk(colorScheme))
             .frame(width: 44, height: 44)
-            .background(isRecording ? Color.red : BrandPalette.violet, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+            .background(isRecording ? Color.red : ThemePalette.ink(colorScheme), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
     }
 }
 

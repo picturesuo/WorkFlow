@@ -8,6 +8,7 @@ struct FilterAssistantSheet: View {
     let onClose: () -> Void
 
     @State private var showsExample: Bool
+    @Environment(\.colorScheme) private var colorScheme
 
     init(
         session: FilterAssistantSession,
@@ -42,6 +43,7 @@ struct FilterAssistantSheet: View {
         }
         .padding(20)
         .frame(width: 540)
+        .tint(ThemePalette.controlTint)
         .onAppear {
             voice.onTranscript = { [weak session] text in
                 guard let session else { return }
@@ -89,7 +91,7 @@ struct FilterAssistantSheet: View {
                     HStack(alignment: .top, spacing: 6) {
                         Image(systemName: entry.role == .user ? "person.fill" : "sparkles")
                             .font(.caption)
-                            .foregroundColor(entry.role == .user ? .secondary : .accentColor)
+                            .foregroundColor(entry.role == .user ? .secondary : ThemePalette.linkText(colorScheme))
                             .frame(width: 14)
                             .accessibilityHidden(true)
                         Text(entry.text)

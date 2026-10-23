@@ -25,11 +25,13 @@ enum WFMotion {
 
 // MARK: - Palette
 
+/// Charcoal ink on warm paper in light mode and ivory ink on charcoal in dark
+/// mode, both taken from the WorkFlow mark.
 enum ThemePalette {
     static func windowBackground(_ scheme: ColorScheme) -> Color {
         scheme == .dark
-            ? Color(red: 0.105, green: 0.105, blue: 0.12)
-            : Color(red: 0.965, green: 0.965, blue: 0.975)
+            ? Color(red: 21 / 255, green: 21 / 255, blue: 21 / 255)
+            : Color(red: 245 / 255, green: 243 / 255, blue: 238 / 255)
     }
 
     static func panelSurface(_ scheme: ColorScheme) -> Color {
@@ -46,14 +48,14 @@ enum ThemePalette {
 
     static func cardBackground(_ scheme: ColorScheme) -> Color {
         scheme == .dark
-            ? Color(red: 0.145, green: 0.145, blue: 0.165)
-            : Color.white
+            ? Color(red: 31 / 255, green: 30 / 255, blue: 28 / 255)
+            : Color(red: 255 / 255, green: 254 / 255, blue: 250 / 255)
     }
 
     static func cardBorder(_ scheme: ColorScheme) -> Color {
         scheme == .dark
             ? Color.white.opacity(0.08)
-            : Color(red: 0.88, green: 0.88, blue: 0.93)
+            : Color(red: 230 / 255, green: 225 / 255, blue: 214 / 255)
     }
 
     static func cardShadow(_ scheme: ColorScheme) -> Color {
@@ -64,20 +66,50 @@ enum ThemePalette {
         scheme == .dark ? Color.white.opacity(0.10) : Color.black.opacity(0.08)
     }
 
-    static func iconAccent(_ scheme: ColorScheme) -> Color {
-        scheme == .dark ? BrandPalette.lavender : BrandPalette.violet
+    /// The mark's charcoal in light mode and its ivory in dark mode: the record
+    /// control, the ready state, and selection.
+    static func ink(_ scheme: ColorScheme) -> Color {
+        scheme == .dark ? BrandPalette.ivory : Color(red: 31 / 255, green: 29 / 255, blue: 26 / 255)
     }
 
+    /// Glyphs drawn on `ink`, like the W on its tile.
+    static func onInk(_ scheme: ColorScheme) -> Color {
+        scheme == .dark ? Color(red: 31 / 255, green: 29 / 255, blue: 26 / 255) : BrandPalette.ivory
+    }
+
+    /// Links and emphasized labels: a warm brass with AA text contrast on
+    /// cards (6.3:1 light, 10.2:1 dark).
     static func linkText(_ scheme: ColorScheme) -> Color {
-        scheme == .dark ? BrandPalette.lavender : BrandPalette.violet
+        scheme == .dark
+            ? Color(red: 216 / 255, green: 201 / 255, blue: 169 / 255)
+            : Color(red: 107 / 255, green: 93 / 255, blue: 69 / 255)
     }
 
-    static var brandGradient: LinearGradient {
-        LinearGradient(
-            colors: [BrandPalette.violet, BrandPalette.lavender],
-            startPoint: .topLeading,
-            endPoint: .bottomTrailing
-        )
+    /// Fill for switches, prominent buttons, and checkboxes. White labels stay
+    /// readable on it (14.1:1 light, 4.9:1 dark), and setting it explicitly
+    /// keeps a user-chosen system accent from recoloring the app.
+    static let controlTint = Color(nsColor: NSColor(name: nil) { appearance in
+        appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+            ? NSColor(srgbRed: 122 / 255, green: 112 / 255, blue: 95 / 255, alpha: 1)
+            : NSColor(srgbRed: 46 / 255, green: 43 / 255, blue: 38 / 255, alpha: 1)
+    })
+}
+
+// MARK: - Brand mark
+
+/// The WorkFlow mark, drawn from the bundled `AppIcon.icns` so the window and
+/// the Dock always show the same logo.
+struct WorkFlowMark: View {
+    var size: CGFloat = 24
+
+    static let image = NSImage(named: "AppIcon")
+
+    var body: some View {
+        Image(nsImage: Self.image ?? NSApplication.shared.applicationIconImage)
+            .resizable()
+            .interpolation(.high)
+            .frame(width: size, height: size)
+            .accessibilityHidden(true)
     }
 }
 
@@ -129,7 +161,7 @@ struct ToolbarIconButton: View {
                 .background(
                     RoundedRectangle(cornerRadius: WFRadius.control, style: .continuous)
                         .fill(isHovered
-                              ? BrandPalette.violet.opacity(0.14)
+                              ? ThemePalette.ink(colorScheme).opacity(0.08)
                               : Color.clear)
                 )
                 .contentShape(RoundedRectangle(cornerRadius: WFRadius.control, style: .continuous))
@@ -155,7 +187,7 @@ struct SurfaceCard: ViewModifier {
                 RoundedRectangle(cornerRadius: WFRadius.card, style: .continuous)
                     .stroke(
                         isHovered
-                            ? BrandPalette.violet.opacity(0.35)
+                            ? ThemePalette.ink(colorScheme).opacity(0.22)
                             : ThemePalette.cardBorder(colorScheme),
                         lineWidth: 1
                     )

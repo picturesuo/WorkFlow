@@ -4,6 +4,7 @@ import UniformTypeIdentifiers
 
 struct CleanupSettingsView: View {
     @ObservedObject var viewModel: SettingsViewModel
+    @Environment(\.colorScheme) private var colorScheme
 
     private var writingFilter = WritingFilterPreferences()
 
@@ -460,12 +461,12 @@ struct CleanupSettingsView: View {
             if let homeworkComparison = technicalComparison(over: .homework) {
                 Label(homeworkComparison, systemImage: "chart.bar.xaxis")
                     .font(.caption.weight(.medium))
-                    .foregroundColor(.accentColor)
+                    .foregroundColor(ThemePalette.linkText(colorScheme))
             }
             if let everydayComparison = technicalComparison(over: .everyday) {
                 Label(everydayComparison, systemImage: "chart.bar.xaxis")
                     .font(.caption.weight(.medium))
-                    .foregroundColor(.accentColor)
+                    .foregroundColor(ThemePalette.linkText(colorScheme))
             }
 
             Text("These are local estimates from the text before and after cleanup (\(LocalTokenEstimator.identifier)), not provider billing tokens. Failed or budget-limited cleanups are excluded.")

@@ -47,6 +47,8 @@ This runbook lets a local coding agent install and verify WorkFlow without recei
      -only-testing:OpenSuperWhisperTests/FilterAssistantMathCleanupTests \
      -only-testing:OpenSuperWhisperTests/FilterAssistantVoiceInputTests \
      -only-testing:OpenSuperWhisperTests/FilterAssistantLayoutTests \
+     -only-testing:OpenSuperWhisperTests/BrandPaletteTests \
+     -only-testing:OpenSuperWhisperTests/BrandLayoutTests \
      -only-testing:OpenSuperWhisperTests/CustomFilterHistoryTests \
      -only-testing:OpenSuperWhisperTests/NumericPreservationGuardTests \
      -only-testing:OpenSuperWhisperTests/DictationSourceEvidenceTests \

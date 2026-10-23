@@ -31,7 +31,7 @@ struct OpenSuperWhisperApp: App {
             }
             .frame(minWidth: 440, idealWidth: 560, minHeight: 460)
             .environmentObject(appState)
-            .tint(BrandPalette.violet)
+            .tint(ThemePalette.controlTint)
         }
         .windowStyle(.hiddenTitleBar)
         .defaultSize(width: 560, height: 720)
@@ -101,7 +101,15 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
     private var meetingErrorObserver: AnyCancellable?
     private var recordingRetentionTimer: Timer?
     private var hideMainWindowAtLaunch = false
-    
+
+    func applicationWillFinishLaunching(_ notification: Notification) {
+        // The XCTest host renders views offscreen. Keeping it out of the Dock
+        // stops a test run from taking focus away from the user's work.
+        if OpenSuperWhisperApp.isRunningTests {
+            NSApplication.shared.setActivationPolicy(.prohibited)
+        }
+    }
+
     func applicationDidFinishLaunching(_ notification: Notification) {
         guard !OpenSuperWhisperApp.isRunningTests else { return }
 

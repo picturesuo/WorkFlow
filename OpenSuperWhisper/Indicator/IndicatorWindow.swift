@@ -413,6 +413,7 @@ class IndicatorViewModel: ObservableObject {
 
 struct RecordingIndicator: View {
     let isBlinking: Bool
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     
     var body: some View {
         Circle()
@@ -424,13 +425,8 @@ struct RecordingIndicator: View {
                 )
             )
             .frame(width: 8, height: 8)
-            .overlay {
-                Circle()
-                    .stroke(BrandPalette.lavender.opacity(0.65), lineWidth: 1)
-            }
-            .shadow(color: BrandPalette.violet.opacity(0.75), radius: 5)
-            .opacity(isBlinking ? 0.3 : 1.0)
-            .animation(.easeInOut(duration: 0.4), value: isBlinking)
+            .opacity(isBlinking && !reduceMotion ? 0.3 : 1.0)
+            .animation(reduceMotion ? nil : .easeInOut(duration: 0.4), value: isBlinking)
     }
 }
 
@@ -469,7 +465,7 @@ struct IndicatorWindow: View {
     @Environment(\.colorScheme) private var colorScheme
     
     private var backgroundColor: Color {
-        BrandPalette.midnight.opacity(colorScheme == .dark ? 0.78 : 0.88)
+        BrandPalette.charcoal.opacity(colorScheme == .dark ? 0.82 : 0.9)
     }
     
     var body: some View {
@@ -481,7 +477,7 @@ struct IndicatorWindow: View {
             case .connecting:
                 HStack(spacing: 8) {
                     ProgressView()
-                        .tint(BrandPalette.lavender)
+                        .tint(BrandPalette.ivory)
                         .scaleEffect(0.7)
                         .frame(width: 24)
                     
@@ -514,7 +510,7 @@ struct IndicatorWindow: View {
             case .decoding:
                 HStack(spacing: 8) {
                     ProgressView()
-                        .tint(BrandPalette.lavender)
+                        .tint(BrandPalette.ivory)
                         .scaleEffect(0.7)
                         .frame(width: 24)
                     

@@ -47,6 +47,7 @@ class FileDropHandler: ObservableObject {
 
 struct FileDropOverlay: ViewModifier {
     @ObservedObject private var handler: FileDropHandler
+    @Environment(\.colorScheme) private var colorScheme
     
     init() {
         self.handler = FileDropHandler.shared
@@ -61,14 +62,14 @@ struct FileDropOverlay: ViewModifier {
                             .fill(.regularMaterial)
                         RoundedRectangle(cornerRadius: WFRadius.card, style: .continuous)
                             .strokeBorder(
-                                BrandPalette.violet.opacity(0.5),
+                                ThemePalette.ink(colorScheme).opacity(0.45),
                                 style: StrokeStyle(lineWidth: 2, dash: [8, 6])
                             )
                             .padding(16)
                         VStack(spacing: 16) {
                             Image(systemName: "arrow.down.doc.fill")
                                 .font(.system(size: 40))
-                                .foregroundStyle(ThemePalette.brandGradient)
+                                .foregroundStyle(ThemePalette.ink(colorScheme))
                                 .symbolEffect(.bounce, value: handler.isDragging)
                             Text("Drop audio files to transcribe")
                                 .font(.headline)

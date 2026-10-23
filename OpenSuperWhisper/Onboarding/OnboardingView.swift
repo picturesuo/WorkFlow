@@ -362,19 +362,9 @@ struct OnboardingView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            // Header with gradient background
             VStack(alignment: .leading, spacing: 16) {
-                VStack(alignment: .leading, spacing: 6) {
-                    Text("Welcome to")
-                        .font(.title2)
-                        .fontWeight(.medium)
-                        .foregroundColor(.secondary)
-                    
-                    Text(AppIdentity.productName)
-                        .font(.system(size: 32, weight: .bold))
-                        .foregroundStyle(ThemePalette.brandGradient)
-                }
-                .padding(.bottom, 8)
+                OnboardingWelcomeHeader()
+                    .padding(.bottom, 8)
                 
                 // Language Selection
                 HStack(spacing: 8) {
@@ -394,7 +384,7 @@ struct OnboardingView: View {
                         Text("Use Asian Autocorrect")
                             .font(.caption)
                     }
-                    .toggleStyle(SwitchToggleStyle(tint: Color.accentColor))
+                    .toggleStyle(SwitchToggleStyle(tint: ThemePalette.controlTint))
                 }
             }
             .padding(20)
@@ -528,22 +518,7 @@ struct OnboardingView: View {
             .padding(16)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(
-            ZStack {
-                Color(.windowBackgroundColor)
-                
-                // Subtle gradient overlay
-                LinearGradient(
-                    colors: [
-                        BrandPalette.deepViolet.opacity(0.08),
-                        Color.clear,
-                        BrandPalette.violet.opacity(0.08)
-                    ],
-                    startPoint: .topLeading,
-                    endPoint: .bottomTrailing
-                )
-            }
-        )
+        .background(ThemePalette.windowBackground(colorScheme))
         .alert("Download Error", isPresented: $showError) {
             Button("OK", role: .cancel) {}
         } message: {
@@ -556,9 +531,31 @@ struct OnboardingView: View {
     }
 }
 
+/// The first thing a new user sees: the WorkFlow mark beside its name.
+struct OnboardingWelcomeHeader: View {
+    @Environment(\.colorScheme) private var colorScheme
+
+    var body: some View {
+        HStack(spacing: 14) {
+            WorkFlowMark(size: 56)
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Welcome to")
+                    .font(.title3.weight(.medium))
+                    .foregroundColor(.secondary)
+                Text(AppIdentity.productName)
+                    .font(.system(size: 30, weight: .bold))
+                    .foregroundStyle(ThemePalette.ink(colorScheme))
+            }
+        }
+        .accessibilityElement(children: .combine)
+        .accessibilityAddTraits(.isHeader)
+    }
+}
+
 struct OnboardingUnifiedModelItemView: View {
     @Binding var model: OnboardingUnifiedModel
     @ObservedObject var viewModel: OnboardingViewModel
+    @Environment(\.colorScheme) private var colorScheme
     @State private var showError = false
     @State private var errorMessage = ""
     
@@ -646,12 +643,13 @@ struct OnboardingUnifiedModelItemView: View {
         .background(
             RoundedRectangle(cornerRadius: 10)
                 .fill(isSelected ? Color(.controlBackgroundColor).opacity(0.8) : Color(.controlBackgroundColor).opacity(0.5))
-                .shadow(color: isSelected ? Color.blue.opacity(0.2) : Color.black.opacity(0.05), radius: isSelected ? 8 : 4, x: 0, y: 2)
+                .shadow(color: Color.black.opacity(isSelected ? 0.08 : 0.05), radius: isSelected ? 8 : 4, x: 0, y: 2)
         )
         .overlay(
             RoundedRectangle(cornerRadius: 10)
-                .stroke(isSelected ? Color.blue.opacity(0.3) : Color.clear, lineWidth: 1.5)
+                .stroke(isSelected ? ThemePalette.ink(colorScheme).opacity(0.55) : Color.clear, lineWidth: 1.5)
         )
+        .accessibilityAddTraits(isSelected ? .isSelected : [])
         .contentShape(Rectangle())
         .onTapGesture {
             if model.isDownloaded && !isSelected {
@@ -671,6 +669,7 @@ private struct KeyCap: View {
     let w: CGFloat
     let h: CGFloat
     let highlighted: Bool
+    @Environment(\.colorScheme) private var colorScheme
     
     var body: some View {
         Text(label)
@@ -680,13 +679,13 @@ private struct KeyCap: View {
             .frame(width: w, height: h)
             .background(
                 RoundedRectangle(cornerRadius: 4)
-                    .fill(highlighted ? Color.accentColor.opacity(0.35) : Color(.controlBackgroundColor).opacity(0.5))
+                    .fill(highlighted ? ThemePalette.ink(colorScheme) : Color(.controlBackgroundColor).opacity(0.5))
             )
             .overlay(
                 RoundedRectangle(cornerRadius: 4)
-                    .stroke(highlighted ? Color.accentColor.opacity(0.7) : Color.white.opacity(0.08), lineWidth: 1)
+                    .stroke(highlighted ? Color.clear : ThemePalette.hairline(colorScheme), lineWidth: 1)
             )
-            .foregroundColor(highlighted ? .white : .secondary)
+            .foregroundColor(highlighted ? ThemePalette.onInk(colorScheme) : .secondary)
     }
 }
 
@@ -821,6 +820,7 @@ struct OnboardingShortcutCard: View {
     let subtitle: String
     let isSelected: Bool
     let action: () -> Void
+    @Environment(\.colorScheme) private var colorScheme
     
     var body: some View {
         Button(action: action) {
@@ -839,14 +839,15 @@ struct OnboardingShortcutCard: View {
             .background(
                 RoundedRectangle(cornerRadius: 10)
                     .fill(isSelected ? Color(.controlBackgroundColor).opacity(0.8) : Color(.controlBackgroundColor).opacity(0.5))
-                    .shadow(color: isSelected ? Color.blue.opacity(0.2) : Color.black.opacity(0.05), radius: isSelected ? 8 : 4, x: 0, y: 2)
+                    .shadow(color: Color.black.opacity(isSelected ? 0.08 : 0.05), radius: isSelected ? 8 : 4, x: 0, y: 2)
             )
             .overlay(
                 RoundedRectangle(cornerRadius: 10)
-                    .stroke(isSelected ? Color.blue.opacity(0.3) : Color.clear, lineWidth: 1.5)
+                    .stroke(isSelected ? ThemePalette.ink(colorScheme).opacity(0.55) : Color.clear, lineWidth: 1.5)
             )
         }
         .buttonStyle(.plain)
+        .accessibilityAddTraits(isSelected ? .isSelected : [])
     }
 }
 

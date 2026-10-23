@@ -911,6 +911,7 @@ struct SettingsView: View {
             .padding()
             .background(Color(.windowBackgroundColor))
         }
+        .tint(ThemePalette.controlTint)
         .onAppear {
             previousModelURL = viewModel.selectedModelURL
             if viewModel.selectedEngine == "fluidaudio" {
@@ -1078,7 +1079,7 @@ struct SettingsView: View {
                                     .font(.subheadline)
                                 Spacer()
                                 Toggle("", isOn: $viewModel.useAsianAutocorrect)
-                                    .toggleStyle(SwitchToggleStyle(tint: Color.accentColor))
+                                    .toggleStyle(SwitchToggleStyle(tint: ThemePalette.controlTint))
                                     .labelsHidden()
                                     .accessibilityLabel("Use Asian autocorrect")
                             }
@@ -1103,7 +1104,7 @@ struct SettingsView: View {
                                 .font(.subheadline)
                             Spacer()
                             Toggle("", isOn: $viewModel.showTimestamps)
-                                .toggleStyle(SwitchToggleStyle(tint: Color.accentColor))
+                                .toggleStyle(SwitchToggleStyle(tint: ThemePalette.controlTint))
                                 .labelsHidden()
                                 .accessibilityLabel("Show timestamps")
                         }
@@ -1113,7 +1114,7 @@ struct SettingsView: View {
                                 .font(.subheadline)
                             Spacer()
                             Toggle("", isOn: $viewModel.suppressBlankAudio)
-                                .toggleStyle(SwitchToggleStyle(tint: Color.accentColor))
+                                .toggleStyle(SwitchToggleStyle(tint: ThemePalette.controlTint))
                                 .labelsHidden()
                                 .accessibilityLabel("Suppress blank audio")
                         }
@@ -1128,7 +1129,7 @@ struct SettingsView: View {
                             }
                             Spacer()
                             Toggle("", isOn: $viewModel.addSpaceAfterSentence)
-                                .toggleStyle(SwitchToggleStyle(tint: Color.accentColor))
+                                .toggleStyle(SwitchToggleStyle(tint: ThemePalette.controlTint))
                                 .labelsHidden()
                                 .accessibilityLabel("Add a space after sentences")
                         }
@@ -1156,7 +1157,7 @@ struct SettingsView: View {
                             }
                             Spacer()
                             Toggle("", isOn: $viewModel.autoCopyToClipboard)
-                                .toggleStyle(SwitchToggleStyle(tint: Color.accentColor))
+                                .toggleStyle(SwitchToggleStyle(tint: ThemePalette.controlTint))
                                 .labelsHidden()
                                 .accessibilityLabel("Keep dictation on the clipboard")
                         }
@@ -1171,7 +1172,7 @@ struct SettingsView: View {
                             }
                             Spacer()
                             Toggle("", isOn: $viewModel.autoPasteTranscription)
-                                .toggleStyle(SwitchToggleStyle(tint: Color.accentColor))
+                                .toggleStyle(SwitchToggleStyle(tint: ThemePalette.controlTint))
                                 .labelsHidden()
                                 .accessibilityLabel("Automatically paste dictation")
                         }
@@ -1270,7 +1271,7 @@ struct SettingsView: View {
                                 .font(.subheadline)
                             Spacer()
                             Toggle("", isOn: $viewModel.useBeamSearch)
-                                .toggleStyle(SwitchToggleStyle(tint: Color.accentColor))
+                                .toggleStyle(SwitchToggleStyle(tint: ThemePalette.controlTint))
                                 .labelsHidden()
                                 .help("Beam search can provide better results but is slower")
                                 .accessibilityLabel("Use beam search")
@@ -1345,7 +1346,7 @@ struct SettingsView: View {
                             .font(.subheadline)
                         Spacer()
                         Toggle("", isOn: $viewModel.debugMode)
-                            .toggleStyle(SwitchToggleStyle(tint: Color.accentColor))
+                            .toggleStyle(SwitchToggleStyle(tint: ThemePalette.controlTint))
                             .labelsHidden()
                             .help("Enable additional logging and debugging information")
                             .accessibilityLabel("Enable debug mode")
@@ -1491,7 +1492,7 @@ struct SettingsView: View {
                                     }
                                     Spacer()
                                     Toggle("", isOn: $viewModel.doublePressToTrigger)
-                                        .toggleStyle(SwitchToggleStyle(tint: Color.accentColor))
+                                        .toggleStyle(SwitchToggleStyle(tint: ThemePalette.controlTint))
                                         .labelsHidden()
                                         .accessibilityLabel("Require a double tap to trigger dictation")
                                 }
@@ -1582,7 +1583,7 @@ struct SettingsView: View {
                             }
                             Spacer()
                             Toggle("", isOn: $viewModel.holdToRecord)
-                                .toggleStyle(SwitchToggleStyle(tint: Color.accentColor))
+                                .toggleStyle(SwitchToggleStyle(tint: ThemePalette.controlTint))
                                 .labelsHidden()
                                 .accessibilityLabel("Hold to record")
                         }
@@ -1592,7 +1593,7 @@ struct SettingsView: View {
                                 .font(.subheadline)
                             Spacer()
                             Toggle("", isOn: $viewModel.playSoundOnRecordStart)
-                                .toggleStyle(SwitchToggleStyle(tint: Color.accentColor))
+                                .toggleStyle(SwitchToggleStyle(tint: ThemePalette.controlTint))
                                 .labelsHidden()
                                 .help("Play a notification sound when recording begins")
                                 .accessibilityLabel("Play a sound when recording starts")
@@ -1608,7 +1609,7 @@ struct SettingsView: View {
                             }
                             Spacer()
                             Toggle("", isOn: $viewModel.ignoreEscWhileRecording)
-                                .toggleStyle(SwitchToggleStyle(tint: Color.accentColor))
+                                .toggleStyle(SwitchToggleStyle(tint: ThemePalette.controlTint))
                                 .labelsHidden()
                                 .accessibilityLabel("Ignore Escape while recording")
                                 .accessibilityHint("Prevents Escape from deleting a dictation that is still recording")
@@ -1624,7 +1625,7 @@ struct SettingsView: View {
                             }
                             Spacer()
                             Toggle("", isOn: $viewModel.escCancelWithoutConfirmation)
-                                .toggleStyle(SwitchToggleStyle(tint: Color.accentColor))
+                                .toggleStyle(SwitchToggleStyle(tint: ThemePalette.controlTint))
                                 .labelsHidden()
                                 .accessibilityLabel("Cancel long recordings without confirmation")
                         }
@@ -1654,7 +1655,7 @@ struct SettingsView: View {
                             }
                             Spacer()
                             Toggle("", isOn: $viewModel.launchAtLogin)
-                                .toggleStyle(SwitchToggleStyle(tint: Color.accentColor))
+                                .toggleStyle(SwitchToggleStyle(tint: ThemePalette.controlTint))
                                 .labelsHidden()
                                 .accessibilityLabel("Launch WorkFlow at login")
                         }
@@ -1669,7 +1670,7 @@ struct SettingsView: View {
                             }
                             Spacer()
                             Toggle("", isOn: $viewModel.startHiddenInMenuBar)
-                                .toggleStyle(SwitchToggleStyle(tint: Color.accentColor))
+                                .toggleStyle(SwitchToggleStyle(tint: ThemePalette.controlTint))
                                 .labelsHidden()
                                 .accessibilityLabel("Start hidden in the menu bar")
                         }
@@ -1966,7 +1967,7 @@ struct RecordingStorageSettingsView: View {
                             }
                         }
                     ))
-                        .toggleStyle(SwitchToggleStyle(tint: Color.accentColor))
+                        .toggleStyle(SwitchToggleStyle(tint: ThemePalette.controlTint))
                         .labelsHidden()
                         .accessibilityLabel("Automatically delete old recordings")
                     .help("Automatically delete recordings and their transcriptions older than the selected number of days")

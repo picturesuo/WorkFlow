@@ -81,6 +81,8 @@ struct CustomCleanupFiltersCard: View {
     @State private var isNewDraft: Bool
     @State private var errorMessage = ""
     @State private var assistant: FilterAssistantPresentation?
+    @State private var pendingDeletion: CustomCleanupFilter?
+    @Environment(\.colorScheme) private var colorScheme
 
     init(writingFilter: WritingFilterPreferences, newDraft: CustomCleanupFilter? = nil) {
         self.writingFilter = writingFilter
@@ -152,6 +154,27 @@ struct CustomCleanupFiltersCard: View {
                 assistant = nil
             }
         }
+        .confirmationDialog(
+            "Delete “\(pendingDeletion?.name ?? "")”?",
+            isPresented: Binding(
+                get: { pendingDeletion != nil },
+                set: { if !$0 { pendingDeletion = nil } }
+            ),
+            titleVisibility: .visible,
+            presenting: pendingDeletion
+        ) { filter in
+            Button("Delete Filter", role: .destructive) {
+                CustomCleanupFilterStore.delete(id: filter.id)
+                NotificationCenter.default.post(name: .cleanupModeChanged, object: nil)
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: { filter in
+            if writingFilter.selection == .custom(filter.id) {
+                Text("New dictations switch to \(filter.baseMode.displayName). History keeps the dictations this filter already cleaned up.")
+            } else {
+                Text("History keeps the dictations this filter already cleaned up.")
+            }
+        }
     }
 
     private func row(for filter: CustomCleanupFilter) -> some View {
@@ -175,7 +198,7 @@ struct CustomCleanupFiltersCard: View {
             if isSelected {
                 Label("In use", systemImage: "checkmark.circle.fill")
                     .font(.caption.weight(.medium))
-                    .foregroundColor(.accentColor)
+                    .foregroundColor(ThemePalette.linkText(colorScheme))
             } else {
                 Button("Use") { writingFilter.selectionBinding.wrappedValue = .custom(filter.id) }
                     .controlSize(.small)
@@ -200,8 +223,7 @@ struct CustomCleanupFiltersCard: View {
             .help("Edit filter")
             .accessibilityLabel("Edit \(filter.name)")
             Button(role: .destructive) {
-                CustomCleanupFilterStore.delete(id: filter.id)
-                NotificationCenter.default.post(name: .cleanupModeChanged, object: nil)
+                pendingDeletion = filter
             } label: {
                 Image(systemName: "trash")
             }
@@ -269,7 +291,7 @@ struct CustomCleanupFiltersCard: View {
             }
         }
         .padding(10)
-        .background(Color.accentColor.opacity(0.06))
+        .background(ThemePalette.ink(colorScheme).opacity(0.05))
         .clipShape(RoundedRectangle(cornerRadius: 8))
     }
 
