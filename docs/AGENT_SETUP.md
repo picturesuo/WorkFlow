@@ -55,7 +55,8 @@ This runbook lets a local coding agent install and verify WorkFlow without recei
      -only-testing:OpenSuperWhisperTests/LearnedPreferenceStoreTests \
      -only-testing:OpenSuperWhisperTests/LearnedPreferenceScopeTests \
      -only-testing:OpenSuperWhisperTests/CorrectionLearningSessionTests \
-     -only-testing:OpenSuperWhisperTests/CorrectionLearningLayoutTests
+     -only-testing:OpenSuperWhisperTests/CorrectionLearningLayoutTests \
+     -only-testing:OpenSuperWhisperTests/DocumentTextExtractorTests
    ```
 
 4. Install the app. The WorkFlow ivory ribbon icon is already included in the repository:

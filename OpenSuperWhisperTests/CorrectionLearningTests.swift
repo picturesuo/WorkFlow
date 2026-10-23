@@ -102,6 +102,14 @@ private final class ScriptedLearningChat: CleanupChatCompleting {
     }
 }
 
+private extension Array {
+    func asyncMap<T>(_ transform: (Element) async throws -> T) async rethrows -> [T] {
+        var result: [T] = []
+        for element in self { result.append(try await transform(element)) }
+        return result
+    }
+}
+
 private func makeDefaults(_ name: String = #function) throws -> (UserDefaults, String) {
     let suite = "CorrectionLearningTests-\(name)-\(UUID().uuidString)"
     return (try XCTUnwrap(UserDefaults(suiteName: suite)), suite)
@@ -347,6 +355,24 @@ final class CorrectionAlignerTests: XCTestCase {
         )
         XCTAssertTrue(valueEdit.edits.isEmpty, "A changed value is content, not style")
         XCTAssertEqual(valueEdit.excludedEdits, 1)
+    }
+
+    func testWordsAddedAcrossALineBreakAreTooUncertainToLearn() {
+        let candidate = CorrectionCandidate(emitted: first)
+        // A neighboring column or heading interleaved by a PDF layout.
+        let interleaved = first.replacingOccurrences(of: "wing for modern", with: "wing\nOur guide explained\nfor modern")
+        let column = CorrectionAligner.align(document: interleaved, candidates: [candidate])
+        XCTAssertEqual(column.passages.count, 1)
+        XCTAssertTrue(column.edits.isEmpty, "\(column.edits.map(\.final))")
+        XCTAssertEqual(column.excludedEdits, 1)
+
+        // The same words added inside a line remain the user's edit, and
+        // punctuation added where a line ends is still learnable.
+        let inline = first.replacingOccurrences(of: "wing for modern", with: "wing, honestly, for modern")
+            .replacingOccurrences(of: "last spring and", with: "last spring;\nand")
+        let kept = CorrectionAligner.align(document: inline, candidates: [candidate])
+        XCTAssertEqual(Set(kept.edits.map(\.final)), [", honestly,", ";"])
+        XCTAssertEqual(kept.excludedEdits, 0)
     }
 
     func testRepeatedTakesKeepOnlyEditsBothTakesShow() {
@@ -894,6 +920,169 @@ final class CorrectionLearningSessionTests: XCTestCase {
         XCTAssertFalse(disabled.canLearn)
         disabled.learn()
         XCTAssertEqual(disabled.errorMessage, CorrectionLearningError.learningDisabled.localizedDescription)
+    }
+
+    private func loadFiles(_ session: CorrectionLearningSession, _ urls: [URL]) async throws {
+        session.load(urls)
+        for _ in 0..<400 where session.isLoadingFile { try await Task.sleep(nanoseconds: 5_000_000) }
+        XCTAssertFalse(session.isLoadingFile)
+    }
+
+    /// Wraps text into PDF-width lines, as an exported document lays it out.
+    private func wrapped(_ paragraph: String, width: Int = 60) -> [String] {
+        var lines: [String] = []
+        var line = ""
+        for word in paragraph.split(separator: " ") {
+            if !line.isEmpty, line.count + word.count + 1 > width {
+                lines.append(line)
+                line = ""
+            }
+            line += line.isEmpty ? String(word) : " \(word)"
+        }
+        if !line.isEmpty { lines.append(line) }
+        return lines
+    }
+
+    func testFinishedDocumentAsPDFLearnsLikePastedText() async throws {
+        try await dictateTrainingCorpus()
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("CorrectionLearningPDF-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let pdf = directory.appendingPathComponent("training-log.pdf")
+        let paragraphs = Corpus.document.components(separatedBy: "\n\n")
+        try writeSyntheticPDF(pages: [
+            ["Training log"] + wrapped(paragraphs[1]) + ["1"],
+            wrapped(paragraphs[2]) + ["2"]
+        ], to: pdf)
+
+        let historyBefore = try await store.learningCandidates()
+        let sourcesBefore = try await historyBefore.asyncMap { try await self.store.dictationSource(for: $0.id) }
+        let fileBefore = try Data(contentsOf: pdf)
+        let modifiedBefore = try pdf.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate
+
+        let chat = ScriptedLearningChat()
+        let session = session(chat)
+        try await loadFiles(session, [pdf])
+        XCTAssertNil(session.errorMessage)
+        XCTAssertTrue(session.fileSummary?.hasPrefix("Loaded training-log.pdf") == true, session.fileSummary ?? "")
+        XCTAssertTrue(session.document.contains("I kept a notebook of every route;"))
+        XCTAssertTrue(LearnedPreferenceStore.load(from: defaults).isEmpty, "Loading a file learns nothing by itself")
+        XCTAssertTrue(chat.requests.isEmpty, "Loading a file sends nothing")
+
+        session.learn()
+        try await finish(session)
+        let report = try XCTUnwrap(session.report, session.errorMessage ?? "")
+        XCTAssertEqual(report.status, .learned)
+        XCTAssertEqual(report.matchedDictations, 2)
+        XCTAssertEqual(Set(report.merge.added.map(\.kind)), [.semicolonJoin, .removeFiller, .spelling])
+        XCTAssertFalse(chat.requests[0].messages[0].content.contains("Training log"))
+
+        // Learning reads History and the file; it never changes either.
+        let historyAfter = try await store.learningCandidates()
+        XCTAssertEqual(historyAfter, historyBefore)
+        let sourcesAfter = try await historyAfter.asyncMap { try await self.store.dictationSource(for: $0.id) }
+        XCTAssertEqual(sourcesAfter, sourcesBefore)
+        XCTAssertEqual(try Data(contentsOf: pdf), fileBefore)
+        XCTAssertEqual(try pdf.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate, modifiedBefore)
+
+        // A file that cannot be read leaves the document as it was.
+        let scan = directory.appendingPathComponent("scan.png")
+        try Data("synthetic".utf8).write(to: scan)
+        let before = session.document
+        try await loadFiles(session, [scan])
+        XCTAssertEqual(session.document, before)
+        XCTAssertEqual(session.errorMessage, DocumentTextExtractor.ExtractionError.unsupported("scan.png").errorDescription)
+    }
+
+    func testLoadingAndLearningNeverOverlap() async throws {
+        try await dictateTrainingCorpus()
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("CorrectionLearningOverlap-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let replacement = directory.appendingPathComponent("other.txt")
+        try Data("A different document that should not replace the one being learned.".utf8).write(to: replacement)
+
+        // A file dropped while learning is ignored.
+        let chat = ScriptedLearningChat()
+        chat.delayNanoseconds = 100_000_000
+        let session = session(chat)
+        session.document = Corpus.document
+        session.learn()
+        session.load([replacement])
+        XCTAssertFalse(session.isLoadingFile)
+        try await finish(session)
+        XCTAssertEqual(session.document, Corpus.document)
+        XCTAssertEqual(session.report?.status, .learned)
+
+        // Learn is refused while a file is still loading.
+        let loading = self.session(ScriptedLearningChat())
+        loading.document = Corpus.document
+        loading.load([replacement])
+        XCTAssertTrue(loading.isLoadingFile)
+        XCTAssertFalse(loading.canLearn)
+        loading.learn()
+        XCTAssertFalse(loading.isLearning)
+        for _ in 0..<400 where loading.isLoadingFile { try await Task.sleep(nanoseconds: 5_000_000) }
+        XCTAssertFalse(loading.isLoadingFile)
+        XCTAssertTrue(loading.document.hasPrefix("A different document"))
+
+        // A document over the limit cannot be learned until it is trimmed.
+        loading.document = String(repeating: "x", count: CorrectionAligner.maximumDocumentLength + 1)
+        XCTAssertFalse(loading.canLearn)
+    }
+
+    func testLargeDocumentsAreLearnedInBatchesWithoutSkippingEdits() async throws {
+        // Letter-only nonsense words keep every four-word anchor unique.
+        func word(_ index: Int) -> String {
+            let letters = Array("bcdfghjklmnpqrstvwxz")
+            return "zo" + String(letters[index / letters.count % letters.count]) + String(letters[index % letters.count]) + "a"
+        }
+        // Each sentence has its own spacing edit; the first three also drop
+        // "basically", which is one repeated edit and is sent once.
+        var spoken: [String] = []
+        var finished: [String] = []
+        for sentence in 0..<45 {
+            let w = (0..<6).map { word(sentence * 6 + $0) }
+            let filler = sentence < 3 ? " basically" : ""
+            spoken.append("\(w[0]) \(w[1]) \(w[2]) \(w[3]) \(w[4])\(filler) \(w[5]).")
+            finished.append("\(w[0]) \(w[1]) \(w[2])\(w[3]) \(w[4]) \(w[5]).")
+        }
+        let legacyStore = try makeStore()
+        try await legacyStore.addRecordingSync(recording(UUID(), text: spoken.joined(separator: " ")))
+        let chat = ScriptedLearningChat()
+        let session = CorrectionLearningSession(
+            mode: .writing,
+            destination: CleanupProviderDestination(providerID: .ollama, model: "m", isOnThisMac: true),
+            chatResolver: { chat },
+            budgetProvider: { nil },
+            candidateProvider: { try await legacyStore.learningCandidates() },
+            defaults: defaults
+        )
+        session.document = finished.joined(separator: " ")
+        let editLines = { (index: Int) in
+            chat.requests[index].messages[0].content.split(separator: "\n").filter { $0.first?.isNumber == true }
+        }
+
+        session.learn()
+        try await finish(session)
+        XCTAssertNil(session.errorMessage)
+        XCTAssertEqual(session.report?.learnableEdits, 48)
+        XCTAssertEqual(session.report?.remainingEdits, 6)
+        XCTAssertTrue(session.report?.summary.hasSuffix("6 more edits are left; select Learn again to continue.") == true, session.report?.summary ?? "")
+        XCTAssertEqual(editLines(0).count, CorrectionLearningPrompt.maximumEdits)
+
+        session.learn()
+        try await finish(session)
+        XCTAssertEqual(chat.requests.count, 2, "The edits left over were not silently marked reviewed")
+        guard chat.requests.count == 2 else { return }
+        XCTAssertEqual(editLines(1).count, 6, "The edits left over from the first batch are sent next")
+        XCTAssertEqual(session.report?.remainingEdits, 0)
+        XCTAssertEqual((editLines(0) + editLines(1)).filter { $0.contains("«basically»") }.count, 1, "A repeated edit is sent once")
+
+        session.learn()
+        try await finish(session)
+        XCTAssertEqual(session.report?.status, .nothingNew)
+        XCTAssertEqual(chat.requests.count, 2)
     }
 }
 
