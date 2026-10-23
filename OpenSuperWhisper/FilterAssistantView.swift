@@ -44,7 +44,7 @@ struct FilterAssistantSheet: View {
         .padding(20)
         .frame(width: 540)
         .tint(ThemePalette.controlTint)
-        .onAppear {
+        .onAppear { [session] in
             voice.onTranscript = { [weak session] text in
                 guard let session else { return }
                 let current = session.request.trimmingCharacters(in: .whitespacesAndNewlines)

@@ -11,7 +11,7 @@ class FluidAudioEngine: TranscriptionEngine {
     private var transcriptionTask: Task<String, Error>?
     private var progressTask: Task<Void, Never>?
     
-    var onProgressUpdate: ((Float) -> Void)?
+    var onProgressUpdate: (@Sendable (Float) -> Void)?
     
     var isModelLoaded: Bool {
         asrManager != nil

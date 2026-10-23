@@ -8,12 +8,17 @@ import UniformTypeIdentifiers
 enum DocumentTextExtractor {
     static let maximumFileBytes = 50 * 1024 * 1024
 
-    static let wordDocument = UTType(importedAs: "org.openxmlformats.wordprocessingml.document")
-    static let legacyWordDocument = UTType(importedAs: "com.microsoft.word.doc")
-    static let openDocumentText = UTType(importedAs: "org.oasis-open.opendocument.text")
+    // macOS declares these types itself, so they are looked up by identifier.
+    // Importing them (UTType(importedAs:)) would require declaring them in the
+    // app's Info.plist, which WorkFlow does not need.
+    static let wordDocument = UTType("org.openxmlformats.wordprocessingml.document")
+    static let legacyWordDocument = UTType("com.microsoft.word.doc")
+    static let openDocumentText = UTType("org.oasis-open.opendocument.text")
 
     /// Plain text covers Markdown and other text formats that conform to it.
-    static let supportedTypes: [UTType] = [.pdf, wordDocument, legacyWordDocument, openDocumentText, .rtf, .rtfd, .plainText]
+    static let supportedTypes: [UTType] = [
+        UTType.pdf, wordDocument, legacyWordDocument, openDocumentText, .rtf, .rtfd, .plainText
+    ].compactMap { $0 }
 
     enum ExtractionError: LocalizedError, Equatable {
         case unsupported(String)
@@ -84,11 +89,11 @@ enum DocumentTextExtractor {
     }
 
     private static func richText(_ url: URL, type: UTType, name: String) throws -> String {
-        let documentType: NSAttributedString.DocumentType = if type.conforms(to: wordDocument) {
+        let documentType: NSAttributedString.DocumentType = if wordDocument.map(type.conforms(to:)) == true {
             .officeOpenXML
-        } else if type.conforms(to: legacyWordDocument) {
+        } else if legacyWordDocument.map(type.conforms(to:)) == true {
             .docFormat
-        } else if type.conforms(to: openDocumentText) {
+        } else if openDocumentText.map(type.conforms(to:)) == true {
             .openDocument
         } else if type.conforms(to: .rtfd) {
             .rtfd

@@ -1,22 +1,24 @@
 import Foundation
 import AVFoundation
 import CoreAudioTypes
+import os
 
-private class ProgressContext {
-    var onProgress: ((Float) -> Void)?
-    private var _lastReportedProgress: Float = 0.0
-    private let lock = NSLock()
-    
-    var lastReportedProgress: Float {
-        get {
-            lock.lock()
-            defer { lock.unlock() }
-            return _lastReportedProgress
-        }
-        set {
-            lock.lock()
-            defer { lock.unlock() }
-            _lastReportedProgress = newValue
+/// Shared with whisper's C progress callback, which runs on whisper's own
+/// thread and hands each report to the main queue.
+private final class ProgressContext: Sendable {
+    let onProgress: (@Sendable (Float) -> Void)?
+    private let reported = OSAllocatedUnfairLock(initialState: Float(0))
+
+    init(onProgress: (@Sendable (Float) -> Void)?) {
+        self.onProgress = onProgress
+    }
+
+    /// Records `progress` if it moves forward; returns whether it did.
+    func advance(to progress: Float) -> Bool {
+        reported.withLock { last in
+            guard progress > last else { return false }
+            last = progress
+            return true
         }
     }
 }
@@ -54,7 +56,7 @@ class WhisperEngine: TranscriptionEngine {
     private let abortFlag = AbortFlag()
     private var progressContext: ProgressContext?
     
-    var onProgressUpdate: ((Float) -> Void)?
+    var onProgressUpdate: (@Sendable (Float) -> Void)?
     
     var isModelLoaded: Bool {
         context != nil
@@ -65,7 +67,10 @@ class WhisperEngine: TranscriptionEngine {
         guard let modelPath = modelPath else {
             throw TranscriptionError.contextInitializationFailed
         }
-        
+        try load(modelPath: modelPath)
+    }
+
+    func load(modelPath: String) throws {
         let params = WhisperContextParams()
         // Load the model without a decoding state: a fresh whisper_state is
         // created per transcription, so recordings can share the model weights
@@ -85,8 +90,7 @@ class WhisperEngine: TranscriptionEngine {
         abortFlag.isSet = false
         
         // Setup progress context for callback
-        progressContext = ProgressContext()
-        progressContext?.onProgress = onProgressUpdate
+        progressContext = ProgressContext(onProgress: onProgressUpdate)
         
         defer {
             progressContext = nil
@@ -159,8 +163,7 @@ class WhisperEngine: TranscriptionEngine {
             // Map whisper progress (0-100) to our range (10-95%)
             let normalizedProgress = 0.10 + (Float(progressPercent) / 100.0) * 0.85
             // Report every progress update for smooth animation
-            if normalizedProgress > ctx.lastReportedProgress {
-                ctx.lastReportedProgress = normalizedProgress
+            if ctx.advance(to: normalizedProgress) {
                 DispatchQueue.main.async {
                     ctx.onProgress?(normalizedProgress)
                 }
@@ -317,7 +320,7 @@ class WhisperEngine: TranscriptionEngine {
             let workerCount = totalFrames > minFramesForParallel ? ProcessInfo.processInfo.activeProcessorCount : 1
             
             if workerCount == 1 {
-                let result = try self.convertSegment(
+                let result = try Self.convertSegment(
                     fileURL: resolvedURL,
                     sourceFormat: sourceFormat,
                     targetFormat: targetFormat,
@@ -347,7 +350,7 @@ class WhisperEngine: TranscriptionEngine {
                     let startFrame = AVAudioFramePosition(workerIndex) * framesPerWorker
                     let endFrame = workerIndex == workerCount - 1 ? totalFrames : startFrame + framesPerWorker
                     
-                    let segment = try? self.convertSegment(
+                    let segment = try? Self.convertSegment(
                         fileURL: resolvedURL,
                         sourceFormat: sourceFormat,
                         targetFormat: targetFormat,
@@ -363,7 +366,11 @@ class WhisperEngine: TranscriptionEngine {
                 }
             }
             
-            group.wait()
+            // Wait without blocking a Swift concurrency thread; the workers
+            // run on their own dispatch queue.
+            await withCheckedContinuation { continuation in
+                group.notify(queue: queue) { continuation.resume() }
+            }
             
             guard !segmentResults.contains(where: { $0 == nil }) else { return nil }
             
@@ -380,7 +387,7 @@ class WhisperEngine: TranscriptionEngine {
         }.value
     }
     
-    nonisolated func convertSegment(
+    nonisolated static func convertSegment(
         fileURL: URL,
         sourceFormat: AVAudioFormat,
         targetFormat: AVAudioFormat,
@@ -460,7 +467,7 @@ class WhisperEngine: TranscriptionEngine {
         return result
     }
     
-    private nonisolated func appendMixedSamples(from buffer: AVAudioPCMBuffer, to output: inout [Float]) {
+    private nonisolated static func appendMixedSamples(from buffer: AVAudioPCMBuffer, to output: inout [Float]) {
         let frameCount = Int(buffer.frameLength)
         guard frameCount > 0, let channelData = buffer.floatChannelData else { return }
         

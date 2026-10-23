@@ -146,7 +146,7 @@ class TranscriptionService: ObservableObject {
         try Task.checkCancellation()
         transcriptionTask?.engine = engine
 
-        let reportProgress: (Float) -> Void = { [weak self] newProgress in
+        let reportProgress: @Sendable (Float) -> Void = { [weak self] newProgress in
             Task { @MainActor in
                 guard let self, let request = self.transcriptionTask,
                       request.token == token, !request.task.isCancelled else { return }

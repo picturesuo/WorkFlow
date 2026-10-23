@@ -250,9 +250,8 @@ class MicrophoneService: ObservableObject {
     
     #if os(macOS)
     func getCoreAudioDeviceID(for device: AudioDevice) -> AudioDeviceID? {
-        var deviceID = device.id as CFString
+        var deviceUID = device.id as CFString
         var audioDeviceID = AudioDeviceID()
-        var propertySize = UInt32(MemoryLayout<AudioDeviceID>.size)
         
         var translationAddress = AudioObjectPropertyAddress(
             mSelector: kAudioHardwarePropertyDeviceForUID,
@@ -260,23 +259,28 @@ class MicrophoneService: ObservableObject {
             mElement: kAudioObjectPropertyElementMain
         )
         
-        var translation = AudioValueTranslation(
-            mInputData: &deviceID,
-            mInputDataSize: UInt32(MemoryLayout<CFString>.size),
-            mOutputData: &audioDeviceID,
-            mOutputDataSize: UInt32(MemoryLayout<AudioDeviceID>.size)
-        )
-        
-        propertySize = UInt32(MemoryLayout<AudioValueTranslation>.size)
-        
-        let status = AudioObjectGetPropertyData(
-            AudioObjectID(kAudioObjectSystemObject),
-            &translationAddress,
-            0,
-            nil,
-            &propertySize,
-            &translation
-        )
+        // The translation holds pointers to the UID and the result, so both
+        // must stay valid for the whole CoreAudio call, not just the
+        // translation's initializer.
+        let status = withUnsafeMutablePointer(to: &deviceUID) { uidPointer in
+            withUnsafeMutablePointer(to: &audioDeviceID) { devicePointer in
+                var translation = AudioValueTranslation(
+                    mInputData: UnsafeMutableRawPointer(uidPointer),
+                    mInputDataSize: UInt32(MemoryLayout<CFString>.size),
+                    mOutputData: UnsafeMutableRawPointer(devicePointer),
+                    mOutputDataSize: UInt32(MemoryLayout<AudioDeviceID>.size)
+                )
+                var propertySize = UInt32(MemoryLayout<AudioValueTranslation>.size)
+                return AudioObjectGetPropertyData(
+                    AudioObjectID(kAudioObjectSystemObject),
+                    &translationAddress,
+                    0,
+                    nil,
+                    &propertySize,
+                    &translation
+                )
+            }
+        }
         
         return status == noErr ? audioDeviceID : nil
     }

@@ -162,7 +162,7 @@ class OnboardingViewModel: ObservableObject {
     
     @MainActor
     private func downloadWhisperModel(model: OnboardingUnifiedModel, url: URL) async throws {
-        downloadTask = Task {
+        downloadTask = Task { [self] in
             do {
                 let filename = url.lastPathComponent
                 
@@ -232,7 +232,7 @@ class OnboardingViewModel: ObservableObject {
     private func downloadParakeetModel(model: OnboardingUnifiedModel, version: String) async throws {
         var wasCancelled = false
         
-        downloadTask = Task {
+        downloadTask = Task { [self] in
             do {
                 let asrVersion: AsrModelVersion = version == "v2" ? .v2 : .v3
                 
