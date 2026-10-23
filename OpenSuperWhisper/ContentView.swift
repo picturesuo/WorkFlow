@@ -381,7 +381,7 @@ struct ContentView: View {
     @StateObject private var meetingController = MeetingSessionController.shared
     @Environment(\.colorScheme) private var colorScheme
     @State private var isSettingsPresented = false
-    @State private var settingsTab = 0
+    @State private var settingsPane = SettingsPane.dictation
     @State private var searchText = ""
     @State private var debouncedSearchText = ""
     @State private var showDeleteConfirmation = false
@@ -491,7 +491,6 @@ struct ContentView: View {
                                 help: "Settings",
                                 accessibilityLabel: "Open settings"
                             ) {
-                                settingsTab = 0
                                 isSettingsPresented.toggle()
                             }
                         }
@@ -618,7 +617,7 @@ struct ContentView: View {
         }
         .fileDropHandler()
         .sheet(isPresented: $isSettingsPresented) {
-            SettingsView(initialTab: settingsTab)
+            SettingsView(selection: $settingsPane)
         }
         .alert("Start meeting recording", isPresented: $showMeetingNamePrompt) {
             TextField("Meeting name", text: $meetingTitle)
@@ -662,7 +661,7 @@ struct ContentView: View {
         } message: {
             Text(viewModel.historyDeletionError ?? "Please try again.")
         }
-        .modifier(OpenSettingsRequests(isPresented: $isSettingsPresented, tab: $settingsTab))
+        .modifier(OpenSettingsRequests(isPresented: $isSettingsPresented, pane: $settingsPane))
         .onDisappear { searchTask?.cancel() }
     }
 }
@@ -779,7 +778,7 @@ private struct DictationControls: View {
             writingSelection: writingFilter.selectionBinding,
             customFilters: writingFilter.filters,
             writingHelp: writingFilter.selectionDescription,
-            onLearn: { SettingsRequest.open(tab: SettingsView.personalizeTab) }
+            onLearn: { SettingsRequest.open(pane: .personalize) }
         ) {
             if viewModel.isRecording {
                 viewModel.startDecoding()
@@ -1083,7 +1082,7 @@ struct RecordingCard: View {
         return recording.transcription
     }
 
-    private var cleanupBadgeLabel: String? {
+    var cleanupBadgeLabel: String? {
         guard recording.status == .completed else { return nil }
         guard let source = recording.cleanupSource else { return nil }
         switch source {
@@ -1107,15 +1106,15 @@ struct RecordingCard: View {
             let tokenCount = (recording.cleanupInputTokens ?? 0) + (recording.cleanupOutputTokens ?? 0)
             return tokenCount > 0 ? "Azure OpenAI · \(tokenCount) tokens" : "Azure OpenAI"
         case .rawFallback:
-            return "Local fallback"
+            return "Original transcript"
         case .budgetLimited:
-            return "Local · budget limit"
+            return "Cost stop reached"
         case .disabled:
-            return "Local only"
+            return "Cleanup off"
         }
     }
 
-    private var cleanupBadgeHelp: String {
+    var cleanupBadgeHelp: String {
         switch recording.cleanupSource {
         case .bedrock:
             let input = recording.cleanupInputTokens.map(String.init) ?? "unknown"
@@ -1128,11 +1127,11 @@ struct RecordingCard: View {
         case .azureOpenAI:
             return "Transcript cleaned by your Azure OpenAI deployment. Audio stayed on this Mac."
         case .rawFallback:
-            return "The cleanup provider was unavailable, so \(AppIdentity.productName) preserved the local transcript."
+            return "AI cleanup didn’t finish, so \(AppIdentity.productName) kept the original transcript.\(hasAudio ? " Regenerate tries cleanup again." : "")"
         case .budgetLimited:
-            return "The monthly Bedrock limit was reached, so this transcript stayed local."
+            return "This month’s estimated-cost stop was reached, so cleanup paused and \(AppIdentity.productName) kept the original transcript."
         case .disabled:
-            return "This transcript was processed entirely on this Mac."
+            return "AI cleanup was off, so this is the recognized text with your vocabulary applied. It never left this Mac."
         case nil:
             return "Cleanup source was not recorded for this older transcription."
         }
@@ -1204,10 +1203,17 @@ struct RecordingCard: View {
     @ViewBuilder
     private var badges: some View {
         if let cleanupBadgeLabel {
-            Text(cleanupBadgeLabel)
-                .foregroundStyle(cleanupBadgeColor)
-                .help(cleanupBadgeHelp)
-                .accessibilityHint(cleanupBadgeHelp)
+            Group {
+                if recording.cleanupSource == .rawFallback || recording.cleanupSource == .budgetLimited {
+                    Label(cleanupBadgeLabel, systemImage: "exclamationmark.triangle")
+                        .labelStyle(.titleAndIcon)
+                } else {
+                    Text(cleanupBadgeLabel)
+                }
+            }
+            .foregroundStyle(cleanupBadgeColor)
+            .help(cleanupBadgeHelp)
+            .accessibilityHint(cleanupBadgeHelp)
         }
         if let efficiencyBadgeLabel {
             Text(efficiencyBadgeLabel)

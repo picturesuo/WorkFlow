@@ -18,7 +18,7 @@ Open **Settings → Cleanup → Custom filters**, choose **Create with AI**, and
 
 If the style is hard to describe, name the class or assignment and paste an essay or problem set you already finished; the filter is fitted to it. Nothing leaves the app until you press **Send**, which sends the request, class name, and example to your cleanup provider. It proposes a name, base mode, and instructions; edit them or ask for changes. Nothing is stored until you choose **Save filter**, with **Use for new dictations** checked to make it your writing mode.
 
-Now "the square root of sixteen times three" comes out as `√16 x 3`. The filter is instructed to format, not solve or change, what you said, and WorkFlow checks the output: `twenty five` may become `25`, but a number, √, or × it cannot match to your words makes the dictation fall back to the local transcript.
+Now "the square root of sixteen times three" comes out as `√16 x 3`. The filter is instructed to format, not solve or change, what you said, and WorkFlow checks the output: `twenty five` may become `25`, but a number, √, or × it cannot match to your words makes the dictation keep its original transcript.
 
 Three starters ship with the app; each row shows the style it asks for:
 
@@ -48,7 +48,7 @@ New dictations keep their original transcript on your Mac with their History ite
 ## Why WorkFlow
 
 - Audio never leaves your Mac; only transcript text reaches the one provider you enable.
-- Cleanup is instructed to edit literally. Output numbers are checked against your words, and a failed or rejected cleanup returns local text.
+- Cleanup is instructed to edit literally. Output numbers are checked against your words, and a failed or rejected cleanup keeps your original transcript.
 - Filters are plain language, reviewed by you, and work in every app.
 - Transcription is free. AI cleanup is billed by the provider you choose and can cost very little depending on model and use; credit eligibility is up to that provider.
 - Choose Amazon Bedrock, Azure OpenAI, local Ollama, or any OpenAI-compatible API. Keys live in macOS Keychain.

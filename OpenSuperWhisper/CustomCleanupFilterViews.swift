@@ -208,6 +208,7 @@ struct CustomCleanupFiltersCard: View {
                 openAssistant(.existing(filter))
             } label: {
                 Image(systemName: "sparkles")
+                    .foregroundStyle(.secondary)
             }
             .buttonStyle(.plain)
             .disabled(draft != nil)
@@ -217,6 +218,7 @@ struct CustomCleanupFiltersCard: View {
                 startDraft(filter, isNew: false)
             } label: {
                 Image(systemName: "pencil")
+                    .foregroundStyle(.secondary)
             }
             .buttonStyle(.plain)
             .disabled(draft != nil)
@@ -226,6 +228,7 @@ struct CustomCleanupFiltersCard: View {
                 pendingDeletion = filter
             } label: {
                 Image(systemName: "trash")
+                    .foregroundStyle(.secondary)
             }
             .buttonStyle(.plain)
             .disabled(draft != nil)

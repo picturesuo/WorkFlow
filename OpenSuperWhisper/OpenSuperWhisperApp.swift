@@ -439,7 +439,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
 
     @objc private func openLearning() {
         showMainWindow()
-        SettingsRequest.open(tab: SettingsView.personalizeTab)
+        SettingsRequest.open(pane: .personalize)
     }
 
     @objc private func toggleMeeting() {

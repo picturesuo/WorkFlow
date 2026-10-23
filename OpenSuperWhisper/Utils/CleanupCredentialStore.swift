@@ -109,3 +109,15 @@ enum CleanupCredentialStore {
         }
     }
 }
+
+/// Whether each provider has a key stored. Settings asks once when it opens;
+/// layout tests pass fixed answers so a render never touches Keychain.
+struct StoredCredentialStatus {
+    var bedrock: () throws -> Bool
+    var cleanup: (CleanupCredentialAccount) -> Bool
+
+    static let keychain = StoredCredentialStatus(
+        bedrock: { try BedrockCredentialStore.loadAPIKey() != nil },
+        cleanup: { ((try? CleanupCredentialStore.loadAPIKey(for: $0)) ?? nil) != nil }
+    )
+}

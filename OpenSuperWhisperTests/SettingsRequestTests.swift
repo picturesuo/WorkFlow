@@ -3,13 +3,13 @@ import XCTest
 @testable import OpenSuperWhisper
 
 /// "Learn…" in the menu bar opens the main window and asks for Settings on
-/// Personalize. On a menu-bar-only launch the window, and so its listener,
+/// Personalize; Cmd+, reopens the last pane viewed. On a menu-bar-only launch the window, and so its listener,
 /// does not exist yet when the request is made.
 @MainActor
 final class SettingsRequestTests: XCTestCase {
     private final class Presentation: ObservableObject {
         @Published var isPresented = false
-        @Published var tab = 0
+        @Published var pane = SettingsPane.dictation
     }
 
     private struct Host: View {
@@ -17,7 +17,7 @@ final class SettingsRequestTests: XCTestCase {
         var body: some View {
             Color.clear
                 .frame(width: 40, height: 40)
-                .modifier(OpenSettingsRequests(isPresented: $presentation.isPresented, tab: $presentation.tab))
+                .modifier(OpenSettingsRequests(isPresented: $presentation.isPresented, pane: $presentation.pane))
         }
     }
 
@@ -34,13 +34,13 @@ final class SettingsRequestTests: XCTestCase {
     }
 
     func testRequestBeforeTheMainWindowExistsOpensPersonalizeWhenItAppears() async {
-        SettingsRequest.open(tab: SettingsView.personalizeTab)
+        SettingsRequest.open(pane: .personalize)
         let presentation = Presentation()
         let (window, _) = host(presentation)
         await settle()
 
         XCTAssertTrue(presentation.isPresented, "Before the fix the request was lost on a menu-bar-only launch")
-        XCTAssertEqual(presentation.tab, SettingsView.personalizeTab)
+        XCTAssertEqual(presentation.pane, .personalize)
         XCTAssertFalse(window.isVisible, "Verified offscreen")
     }
 
@@ -53,13 +53,20 @@ final class SettingsRequestTests: XCTestCase {
         SettingsRequest.open()
         await settle()
         XCTAssertTrue(presentation.isPresented)
-        XCTAssertEqual(presentation.tab, 0)
+        XCTAssertEqual(presentation.pane, .dictation)
 
         presentation.isPresented = false
-        SettingsRequest.open(tab: SettingsView.personalizeTab)
+        SettingsRequest.open(pane: .personalize)
         await settle()
         XCTAssertTrue(presentation.isPresented)
-        XCTAssertEqual(presentation.tab, SettingsView.personalizeTab)
+        XCTAssertEqual(presentation.pane, .personalize)
+
+        // Cmd+, names no pane, so Settings reopens where the person left it.
+        presentation.isPresented = false
+        SettingsRequest.open()
+        await settle()
+        XCTAssertTrue(presentation.isPresented)
+        XCTAssertEqual(presentation.pane, .personalize)
 
         // A handled request is not replayed by the next window.
         let next = Presentation()

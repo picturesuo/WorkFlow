@@ -2,11 +2,213 @@ import AppKit
 import SwiftUI
 import UniformTypeIdentifiers
 
+// MARK: - Cleanup
+
+/// How AI cleanup writes: the master switch, the four built-in modes, and
+/// saved custom filters. Where it runs and what it costs live in Provider & Cost.
 struct CleanupSettingsView: View {
     @ObservedObject var viewModel: SettingsViewModel
-    @Environment(\.colorScheme) private var colorScheme
+    let onShowProvider: () -> Void
 
     private var writingFilter = WritingFilterPreferences()
+    @State private var meetingCleanupEnabled = AppPreferences.shared.meetingCleanupEnabled
+
+    init(viewModel: SettingsViewModel, onShowProvider: @escaping () -> Void = {}) {
+        self.viewModel = viewModel
+        self.onShowProvider = onShowProvider
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 22) {
+            SettingsPaneHeader(
+                title: "Cleanup",
+                subtitle: "AI cleanup turns what you said into text that reads the way you want."
+            )
+            cleanupSwitch
+            modes
+            CustomCleanupFiltersCard(writingFilter: writingFilter)
+                .padding(16)
+                .settingsSurface()
+            SettingsGroup(
+                footer: "Audio never leaves this Mac; only text goes to your provider. If cleanup fails, runs out of time, or would change your meaning, WorkFlow keeps your original transcript."
+            ) {
+                SettingsToggleRow(
+                    title: "Clean up meeting transcripts",
+                    detail: "Off keeps long meetings on this Mac and free.",
+                    isOn: $meetingCleanupEnabled
+                )
+            }
+        }
+        .onChange(of: meetingCleanupEnabled) { _, value in AppPreferences.shared.meetingCleanupEnabled = value }
+    }
+
+    private var destination: CleanupProviderDestination {
+        CleanupProviderFactory.selectedDestination()
+    }
+
+    private var hasKeyForSelectedProvider: Bool {
+        switch destination.providerID {
+        case .bedrock: viewModel.hasBedrockAPIKey
+        case .ollama: true
+        case .openAICompatible: viewModel.hasCompatibleAPIKey || destination.isOnThisMac
+        case .azureOpenAI: viewModel.hasAzureAPIKey
+        }
+    }
+
+    private var cleanupSwitch: some View {
+        SettingsGroup {
+            SettingsRow(
+                title: "AI cleanup",
+                detail: viewModel.bedrockCleanupEnabled
+                    ? "Runs on \(ProviderCostSettingsView.summary(of: destination))."
+                    : "Off: dictations are pasted as recognized, with your vocabulary applied. Modes and filters need cleanup on."
+            ) {
+                Toggle("AI cleanup", isOn: $viewModel.bedrockCleanupEnabled)
+                    .toggleStyle(.switch)
+                    .labelsHidden()
+                    .accessibilityLabel("AI cleanup")
+                    .accessibilityHint("Rewrites new dictations in the selected writing mode")
+            }
+            SettingsDivider()
+            if viewModel.bedrockCleanupEnabled, !hasKeyForSelectedProvider {
+                SettingsNotice(
+                    title: "Add your \(destination.providerID.displayName) key",
+                    detail: "Until then, dictations keep their original transcript."
+                ) {
+                    SettingsLinkButton(title: "Provider & Cost", action: onShowProvider)
+                }
+            } else if viewModel.bedrockCleanupEnabled, viewModel.bedrockLastErrorMessage != nil {
+                SettingsNotice(
+                    title: "The last cleanup request didn’t finish",
+                    detail: "That dictation kept its original transcript."
+                ) {
+                    SettingsLinkButton(title: "Check connection", action: onShowProvider)
+                }
+            } else {
+                HStack {
+                    Text("Connection and estimated cost")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                    SettingsLinkButton(title: "Provider & Cost ›", action: onShowProvider)
+                        .accessibilityLabel("Open Provider & Cost")
+                }
+                .settingsRowPadding()
+            }
+        }
+    }
+
+    private var modes: some View {
+        VStack(alignment: .leading, spacing: 7) {
+            Text("Writing mode")
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(.secondary)
+                .padding(.leading, 2)
+                .accessibilityAddTraits(.isHeader)
+            LazyVGrid(columns: [GridItem(.flexible(), spacing: 10), GridItem(.flexible())], spacing: 10) {
+                ForEach(CleanupMode.allCases) { mode in
+                    WritingModeCard(
+                        mode: mode,
+                        isSelected: writingFilter.selection == .builtIn(mode)
+                    ) {
+                        writingFilter.selectionBinding.wrappedValue = .builtIn(mode)
+                    }
+                }
+            }
+            Text("Each example shows the style a mode aims for. Your choice applies to new dictations and is also in the main window and menu bar.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+                .padding(.horizontal, 2)
+        }
+    }
+}
+
+/// A built-in mode as a selectable card with a short spoken → written example.
+struct WritingModeCard: View {
+    let mode: CleanupMode
+    let isSelected: Bool
+    let action: () -> Void
+    @Environment(\.colorScheme) private var colorScheme
+
+    var body: some View {
+        Button(action: action) {
+            VStack(alignment: .leading, spacing: 8) {
+                HStack(alignment: .firstTextBaseline) {
+                    Text(mode.displayName)
+                        .font(.system(size: 14, weight: .semibold))
+                    Spacer(minLength: 4)
+                    Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
+                        .font(.system(size: 14))
+                        .foregroundStyle(isSelected ? ThemePalette.ink(colorScheme) : Color.secondary.opacity(0.45))
+                }
+                Text(mode.summary)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                Spacer(minLength: 0)
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("“\(mode.example.spoken)”")
+                        .foregroundStyle(.secondary)
+                    Text(mode.example.written)
+                        .foregroundStyle(.primary)
+                }
+                .font(.caption)
+                .fixedSize(horizontal: false, vertical: true)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 8)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(ThemePalette.panelSurface(colorScheme), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+            }
+            .padding(12)
+            .frame(maxWidth: .infinity, minHeight: 150, alignment: .topLeading)
+            .background(ThemePalette.cardBackground(colorScheme), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .stroke(isSelected ? ThemePalette.ink(colorScheme) : ThemePalette.cardBorder(colorScheme), lineWidth: isSelected ? 1.5 : 1)
+            )
+            .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+        }
+        .buttonStyle(.plain)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("\(mode.displayName) writing mode")
+        .accessibilityValue(isSelected ? "Selected" : "Not selected")
+        .accessibilityHint(mode.description)
+        .accessibilityAddTraits(isSelected ? [.isButton, .isSelected] : .isButton)
+    }
+}
+
+extension CleanupMode {
+    /// One line for a mode card; `description` stays the full help text.
+    var summary: String {
+        switch self {
+        case .homework: "Complete explanations that keep every idea, with quantities as digits."
+        case .technical: "Compact, unambiguous instructions for computers and coding agents."
+        case .everyday: "A light pass that keeps your natural voice and level of detail."
+        case .writing: "Your own voice for essays and posts; only stutters and filler go."
+        }
+    }
+
+    /// Illustrates the style the mode's instructions ask for. It is not
+    /// output from any provider.
+    var example: (spoken: String, written: String) {
+        switch self {
+        case .homework: ("the price went up ten percent in twenty twenty six", "The price went up 10% in 2026.")
+        case .technical: ("okay so can you, um, make the search faster and also add tests", "Make the search faster and add tests.")
+        case .everyday: ("um so I think we should, we should meet on Friday", "I think we should meet on Friday.")
+        case .writing: ("I went running in the, in the spring and I noticed, um, the mornings were cooler", "I went running in the spring and I noticed the mornings were cooler.")
+        }
+    }
+}
+
+// MARK: - Provider & Cost
+
+/// Where cleanup runs and what WorkFlow estimates it costs: the provider and
+/// its secure key, the monthly estimated-cost stop, and this month's usage.
+struct ProviderCostSettingsView: View {
+    @ObservedObject var viewModel: SettingsViewModel
+    let onShowCleanup: () -> Void
+    @Environment(\.colorScheme) private var colorScheme
 
     @State private var providerID: CleanupProviderID
     @State private var ollamaBaseURL: String
@@ -16,18 +218,19 @@ struct CleanupSettingsView: View {
     @State private var compatibleModelID: String
     @State private var compatibleTimeout: Double
     @State private var compatibleAPIKey = ""
-    @State private var hasCompatibleAPIKey = false
     @State private var azureEndpoint: String
     @State private var azureDeployment: String
     @State private var azureTimeout: Double
     @State private var azureReasoningDeployment: Bool
     @State private var azureAPIKey = ""
-    @State private var hasAzureAPIKey = false
     @State private var providerStatus = ""
     @State private var isTesting = false
+    @State private var showsUsage = false
+    @State private var keyPendingRemoval: CleanupProviderID?
 
-    init(viewModel: SettingsViewModel) {
+    init(viewModel: SettingsViewModel, onShowCleanup: @escaping () -> Void = {}) {
         self.viewModel = viewModel
+        self.onShowCleanup = onShowCleanup
         let prefs = AppPreferences.shared
         _providerID = State(initialValue: CleanupProviderID(rawValue: prefs.cleanupProviderID) ?? .bedrock)
         _ollamaBaseURL = State(initialValue: prefs.ollamaBaseURL)
@@ -36,42 +239,31 @@ struct CleanupSettingsView: View {
         _compatibleBaseURL = State(initialValue: prefs.openAICompatibleBaseURL)
         _compatibleModelID = State(initialValue: prefs.openAICompatibleModelID)
         _compatibleTimeout = State(initialValue: prefs.openAICompatibleTimeoutSeconds)
-        _hasCompatibleAPIKey = State(initialValue: ((try? CleanupCredentialStore.loadAPIKey(for: .openAICompatible)) ?? nil) != nil)
         _azureEndpoint = State(initialValue: prefs.azureOpenAIEndpoint)
         _azureDeployment = State(initialValue: prefs.azureOpenAIDeployment)
         _azureTimeout = State(initialValue: prefs.azureOpenAITimeoutSeconds)
         _azureReasoningDeployment = State(initialValue: prefs.azureOpenAIReasoningDeployment)
-        _hasAzureAPIKey = State(initialValue: ((try? CleanupCredentialStore.loadAPIKey(for: .azureOpenAI)) ?? nil) != nil)
+    }
+
+    /// "Amazon Bedrock · Nova Micro", naming the priced model plainly.
+    static func summary(of destination: CleanupProviderDestination) -> String {
+        if destination.providerID == .bedrock, BedrockPricing.supports(modelID: destination.model) {
+            return "Amazon Bedrock · Nova Micro"
+        }
+        return destination.summary
     }
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 16) {
-                overviewCard
-                CustomCleanupFiltersCard(writingFilter: writingFilter)
-                    .settingsCard()
-                providerCard
-                efficiencyCard
-                usageCard
-                if let lastError = viewModel.bedrockLastErrorMessage {
-                    VStack(alignment: .leading, spacing: 6) {
-                        Label("Last cleanup used the local fallback", systemImage: "exclamationmark.triangle.fill")
-                            .font(.subheadline.weight(.medium))
-                            .foregroundColor(.orange)
-                        Text(lastError)
-                            .font(.caption)
-                            .textSelection(.enabled)
-                        if let date = viewModel.bedrockLastErrorDate {
-                            Text(date, style: .relative)
-                                .font(.caption2)
-                                .foregroundColor(.secondary)
-                        }
-                    }
-                    .settingsCard()
-                }
-                privacyCard
+        VStack(alignment: .leading, spacing: 22) {
+            SettingsPaneHeader(
+                title: "Provider & Cost",
+                subtitle: "Where AI cleanup runs, and what WorkFlow estimates it costs."
+            )
+            providerGroup
+            if let lastError = viewModel.bedrockLastErrorMessage {
+                lastErrorGroup(lastError)
             }
-            .padding()
+            costGroup
         }
         .task { await viewModel.refreshBedrockUsage() }
         .onReceive(NotificationCenter.default.publisher(for: RecordingStore.recordingsDidUpdateNotification)) { _ in
@@ -91,390 +283,495 @@ struct CleanupSettingsView: View {
         .onChange(of: azureDeployment) { _, value in AppPreferences.shared.azureOpenAIDeployment = value }
         .onChange(of: azureTimeout) { _, value in AppPreferences.shared.azureOpenAITimeoutSeconds = value }
         .onChange(of: azureReasoningDeployment) { _, value in AppPreferences.shared.azureOpenAIReasoningDeployment = value }
-    }
-
-    private var overviewCard: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack(alignment: .top) {
-                VStack(alignment: .leading, spacing: 3) {
-                    Text("AI transcript cleanup")
-                        .font(.headline)
-                    Text("Speech recognition and audio stay on your Mac. Cleanup sends only transcript text to the provider you select.")
-                        .font(.caption)
-                        .foregroundColor(.secondary)
-                }
-                Spacer()
-                Toggle("", isOn: $viewModel.bedrockCleanupEnabled)
-                    .labelsHidden()
-                    .toggleStyle(.switch)
-                    .accessibilityLabel("Enable AI transcript cleanup")
-                    .accessibilityValue(viewModel.bedrockCleanupEnabled ? "On" : "Off")
-            }
-
-            Picker("Cleanup provider", selection: $providerID) {
-                ForEach(CleanupProviderID.allCases) { provider in
-                    Text(provider.displayName).tag(provider)
-                }
-            }
-            .pickerStyle(.segmented)
-            .labelsHidden()
-            .disabled(!viewModel.bedrockCleanupEnabled)
-
-            Divider()
-
-            VStack(alignment: .leading, spacing: 7) {
-                Text("Writing mode")
-                    .font(.subheadline.weight(.medium))
-                WritingFilterPicker(
-                    selection: writingFilter.selectionBinding,
-                    customFilters: writingFilter.filters
-                )
-                .labelsHidden()
-                .accessibilityHint("Controls how the selected provider rewrites future dictations")
-                Text(writingFilter.selectionDescription)
-                    .font(.caption)
-                    .foregroundColor(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
+        .confirmationDialog(
+            "Remove the \(keyPendingRemoval?.displayName ?? "") key from Keychain?",
+            isPresented: Binding(
+                get: { keyPendingRemoval != nil },
+                set: { if !$0 { keyPendingRemoval = nil } }
+            ),
+            titleVisibility: .visible,
+            presenting: keyPendingRemoval
+        ) { provider in
+            Button("Remove Key", role: .destructive) { removeKey(for: provider) }
+            Button("Cancel", role: .cancel) {}
+        } message: { _ in
+            Text("Cleanup with this provider stops until you add a key again. Dictations keep their original transcript.")
         }
-        .settingsCard()
     }
 
-    @ViewBuilder
-    private var providerCard: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            switch providerID {
-            case .bedrock:
-                bedrockFields
-            case .ollama:
-                ollamaFields
-            case .openAICompatible:
-                compatibleFields
-            case .azureOpenAI:
-                azureFields
-            }
+    // MARK: Provider
 
+    private var providerGroup: some View {
+        SettingsGroup(
+            title: "Provider",
+            footer: "Keys are kept in macOS Keychain and remote providers must use HTTPS. Audio never leaves this Mac; only transcript text is sent."
+        ) {
+            SettingsRow(title: "Cleanup provider", detail: providerDetail) {
+                Picker("Cleanup provider", selection: $providerID) {
+                    ForEach(CleanupProviderID.allCases) { provider in
+                        Text(provider.displayName).tag(provider)
+                    }
+                }
+                .pickerStyle(.menu)
+                .labelsHidden()
+                .fixedSize()
+                .accessibilityLabel("Cleanup provider")
+            }
+            if !viewModel.bedrockCleanupEnabled {
+                SettingsDivider()
+                SettingsNotice(
+                    title: "AI cleanup is off",
+                    detail: "You can connect a provider now and turn cleanup on in Cleanup."
+                ) {
+                    SettingsLinkButton(title: "Cleanup", action: onShowCleanup)
+                }
+            }
+            SettingsDivider()
+            switch providerID {
+            case .bedrock: bedrockFields
+            case .ollama: ollamaFields
+            case .openAICompatible: compatibleFields
+            case .azureOpenAI: azureFields
+            }
             if !currentStatus.isEmpty {
                 Text(currentStatus)
                     .font(.caption)
-                    .foregroundColor(currentStatus.localizedCaseInsensitiveContains("failed") ? .orange : .secondary)
+                    .foregroundStyle(currentStatus.localizedCaseInsensitiveContains("failed") ? Color.orange : Color.secondary)
                     .textSelection(.enabled)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.horizontal, 14)
+                    .padding(.bottom, 12)
+                    .accessibilityLabel("Connection status: \(currentStatus)")
             }
         }
-        .settingsCard()
+    }
+
+    private var providerDetail: String {
+        switch providerID {
+        case .bedrock: "Pay as you go on your AWS account. Nova Micro is the recommended low-cost model."
+        case .ollama: "Runs on this Mac. No account, key, or API bill."
+        case .openAICompatible: "OpenAI, OpenRouter, LM Studio, or any chat-completions service."
+        case .azureOpenAI: "A chat deployment in your Azure OpenAI or Microsoft Foundry resource."
+        }
     }
 
     private var bedrockFields: some View {
         Group {
-            HStack {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("Amazon Bedrock")
-                        .font(.headline)
-                    Text("Best fit for your AWS credits. Nova Micro is the recommended low-cost model.")
-                        .font(.caption)
-                        .foregroundColor(.secondary)
-                }
-                Spacer()
-                Link("Create API key", destination: URL(string: "https://console.aws.amazon.com/bedrock/home#/api-keys")!)
-                    .font(.caption)
-            }
-
-            SecureField(
-                viewModel.hasBedrockAPIKey ? "Stored in Keychain (enter to replace)" : "Bedrock API key",
-                text: $viewModel.bedrockAPIKeyInput
+            keyRow(
+                title: "API key",
+                prompt: "Bedrock API key",
+                text: $viewModel.bedrockAPIKeyInput,
+                isStored: viewModel.hasBedrockAPIKey,
+                accessibilityLabel: "Amazon Bedrock API key",
+                link: ("Create a key", URL(string: "https://console.aws.amazon.com/bedrock/home#/api-keys")!)
             )
-            .textFieldStyle(.roundedBorder)
-            .accessibilityLabel("Amazon Bedrock API key")
-            .accessibilityHint("Stored securely in macOS Keychain after a successful connection test")
-
-            LabeledContent("AWS region") {
-                TextField("us-east-1", text: $viewModel.bedrockRegion)
-                    .textFieldStyle(.roundedBorder)
-                    .frame(width: 260)
-            }
-            LabeledContent("Model ID") {
-                TextField("Model ID", text: $viewModel.bedrockModelID)
-                    .textFieldStyle(.roundedBorder)
-                    .frame(width: 360)
-            }
+            SettingsDivider()
+            textRow("Region", prompt: "us-east-1", text: $viewModel.bedrockRegion, width: 160)
+            SettingsDivider()
+            textRow(
+                "Model",
+                detail: BedrockPricing.supports(modelID: viewModel.bedrockModelID) ? "Nova Micro, with a verified price." : nil,
+                prompt: "Model ID",
+                text: $viewModel.bedrockModelID,
+                width: 240
+            )
+            SettingsDivider()
             timeoutRow(value: $viewModel.bedrockTimeoutSeconds, range: 0.5...20)
-
-            HStack {
-                Toggle("Monthly estimated-cost stop", isOn: $viewModel.bedrockMonthlyBudgetEnabled)
-                    .accessibilityHint("For models with verified pricing, uses local text after the monthly estimate reaches the limit")
-                Spacer()
-                if viewModel.bedrockMonthlyBudgetEnabled {
-                    Stepper(
-                        BedrockPricing.formatUSD(viewModel.bedrockMonthlyBudgetUSD),
-                        value: $viewModel.bedrockMonthlyBudgetUSD,
-                        in: 0.05...10,
-                        step: 0.05
-                    )
-                    .frame(width: 150)
-                    .accessibilityLabel("Monthly Bedrock estimated-cost stop")
-                    .accessibilityValue(BedrockPricing.formatUSD(viewModel.bedrockMonthlyBudgetUSD))
-                }
-            }
-
-            if !BedrockPricing.supports(modelID: viewModel.bedrockModelID) {
-                Text("This model has no verified price in WorkFlow, so the monthly stop cannot be enforced. Use Recommended defaults for a bounded estimate.")
-                    .font(.caption)
-                    .foregroundColor(.orange)
-            }
-
-            HStack {
-                Button {
-                    Task { await viewModel.saveAndTestBedrock() }
-                } label: {
-                    testLabel(active: viewModel.isTestingBedrock, title: "Save & Test")
-                }
-                .buttonStyle(.borderedProminent)
-                .disabled(viewModel.isTestingBedrock)
-                .accessibilityLabel(viewModel.isTestingBedrock ? "Testing Amazon Bedrock connection" : "Save API key and test Amazon Bedrock")
-
-                Button("Recommended defaults") { viewModel.useRecommendedBedrockDefaults() }
-                if viewModel.hasBedrockAPIKey {
-                    Button("Remove key", role: .destructive) { viewModel.clearBedrockCredential() }
-                }
+            SettingsDivider()
+            actionsRow(
+                testTitle: "Save & Test",
+                isTesting: viewModel.isTestingBedrock,
+                testAccessibility: viewModel.isTestingBedrock ? "Testing Amazon Bedrock connection" : "Save API key and test Amazon Bedrock",
+                test: { Task { await viewModel.saveAndTestBedrock() } },
+                canRemoveKey: viewModel.hasBedrockAPIKey
+            ) {
+                Button("Recommended Defaults") { viewModel.useRecommendedBedrockDefaults() }
+                    .help("Nova Micro in us-east-1 with a 3-second timeout")
             }
         }
     }
 
     private var ollamaFields: some View {
         Group {
-            HStack {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("Ollama on this Mac")
-                        .font(.headline)
-                    Text("No account, API key, or per-token bill. The transcript never leaves this Mac.")
-                        .font(.caption)
-                        .foregroundColor(.secondary)
-                }
-                Spacer()
-                Link("Get Ollama", destination: URL(string: "https://ollama.com/download/mac")!)
-                    .font(.caption)
+            SettingsRow(title: "Setup", detail: "Install Ollama, then run `ollama pull \(ollamaModelID)` once in Terminal.") {
+                SettingsWebLink("Get Ollama", destination: URL(string: "https://ollama.com/download/mac")!)
             }
-
-            Text("Install Ollama, then run `ollama pull \(ollamaModelID)` once in Terminal.")
-                .font(.caption.monospaced())
-                .textSelection(.enabled)
-
-            LabeledContent("Server") {
-                TextField("http://localhost:11434", text: $ollamaBaseURL)
-                    .textFieldStyle(.roundedBorder)
-                    .frame(width: 360)
-            }
-            LabeledContent("Model") {
-                TextField("llama3.2:3b", text: $ollamaModelID)
-                    .textFieldStyle(.roundedBorder)
-                    .frame(width: 360)
-            }
+            SettingsDivider()
+            textRow("Server", prompt: "http://localhost:11434", text: $ollamaBaseURL, width: 240)
+            SettingsDivider()
+            textRow("Model", prompt: "llama3.2:3b", text: $ollamaModelID, width: 240)
+            SettingsDivider()
             timeoutRow(value: $ollamaTimeout, range: 1...60)
-
-            Button {
-                Task { await testProvider() }
-            } label: {
-                testLabel(active: isTesting, title: "Test local Ollama")
-            }
-            .buttonStyle(.borderedProminent)
-            .disabled(isTesting)
+            SettingsDivider()
+            actionsRow(
+                testTitle: "Test Ollama",
+                isTesting: isTesting,
+                testAccessibility: isTesting ? "Testing Ollama" : "Test Ollama on this Mac",
+                test: { Task { await testProvider() } },
+                canRemoveKey: false
+            ) { EmptyView() }
         }
     }
 
     private var compatibleFields: some View {
         Group {
-            VStack(alignment: .leading, spacing: 2) {
-                Text("OpenAI-compatible API")
-                    .font(.headline)
-                Text("Connect OpenAI, OpenRouter, LM Studio, Together, or another service that implements chat completions.")
-                    .font(.caption)
-                    .foregroundColor(.secondary)
-            }
-
-            LabeledContent("Base URL") {
-                TextField("https://api.example.com/v1", text: $compatibleBaseURL)
-                    .textFieldStyle(.roundedBorder)
-                    .frame(width: 360)
-            }
-            LabeledContent("Model") {
-                TextField("Provider model ID", text: $compatibleModelID)
-                    .textFieldStyle(.roundedBorder)
-                    .frame(width: 360)
-            }
-            SecureField(
-                hasCompatibleAPIKey ? "Stored in Keychain (enter to replace)" : "API key",
-                text: $compatibleAPIKey
+            textRow("Base URL", prompt: "https://api.example.com/v1", text: $compatibleBaseURL, width: 240)
+            SettingsDivider()
+            textRow("Model", prompt: "Provider model ID", text: $compatibleModelID, width: 240)
+            SettingsDivider()
+            keyRow(
+                title: "API key",
+                prompt: "API key",
+                text: $compatibleAPIKey,
+                isStored: viewModel.hasCompatibleAPIKey,
+                accessibilityLabel: "OpenAI-compatible API key",
+                link: nil
             )
-            .textFieldStyle(.roundedBorder)
-            .accessibilityLabel("OpenAI-compatible API key")
-            .accessibilityHint("Stored securely in macOS Keychain after a successful connection test")
+            SettingsDivider()
             timeoutRow(value: $compatibleTimeout, range: 1...60)
-
-            HStack {
-                Button {
-                    Task { await testProvider() }
-                } label: {
-                    testLabel(active: isTesting, title: "Save & Test")
-                }
-                .buttonStyle(.borderedProminent)
-                .disabled(isTesting)
-
-                if hasCompatibleAPIKey {
-                    Button("Remove key", role: .destructive) { removeKey(for: .openAICompatible) }
-                }
-            }
-
-            Text("Pricing depends on the service and model. \(AppIdentity.productName) records token counts but does not invent a dollar estimate when provider pricing is unknown.")
-                .font(.caption)
-                .foregroundColor(.secondary)
+            SettingsDivider()
+            actionsRow(
+                testTitle: "Save & Test",
+                isTesting: isTesting,
+                testAccessibility: isTesting ? "Testing the OpenAI-compatible connection" : "Save API key and test the OpenAI-compatible connection",
+                test: { Task { await testProvider() } },
+                canRemoveKey: viewModel.hasCompatibleAPIKey
+            ) { EmptyView() }
         }
     }
 
     private var azureFields: some View {
         Group {
-            HStack {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("Azure OpenAI")
-                        .font(.headline)
-                    Text("Use a chat deployment in your Azure OpenAI or Microsoft Foundry resource. Usage bills to that Azure subscription; whether credits apply is between you and Microsoft.")
-                        .font(.caption)
-                        .foregroundColor(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-                Spacer()
-                Link("Open Foundry", destination: URL(string: "https://ai.azure.com")!)
-                    .font(.caption)
+            SettingsRow(title: "Foundry", detail: "Usage bills to your Azure subscription; whether credits apply is up to Microsoft.") {
+                SettingsWebLink("Open Foundry", destination: URL(string: "https://ai.azure.com")!)
             }
-
-            LabeledContent("Endpoint") {
-                TextField("https://YOUR-RESOURCE.openai.azure.com", text: $azureEndpoint)
-                    .textFieldStyle(.roundedBorder)
-                    .frame(width: 360)
-                    .accessibilityLabel("Azure OpenAI endpoint")
-            }
-            LabeledContent("Deployment") {
-                TextField("Deployment name, e.g. gpt-4.1-nano", text: $azureDeployment)
-                    .textFieldStyle(.roundedBorder)
-                    .frame(width: 360)
-                    .accessibilityLabel("Azure OpenAI deployment name")
-            }
-            SecureField(
-                hasAzureAPIKey ? "Stored in Keychain (enter to replace)" : "Azure OpenAI API key",
-                text: $azureAPIKey
+            SettingsDivider()
+            textRow("Endpoint", prompt: "https://YOUR-RESOURCE.openai.azure.com", text: $azureEndpoint, width: 240, accessibilityLabel: "Azure OpenAI endpoint")
+            SettingsDivider()
+            textRow("Deployment", prompt: "e.g. gpt-4.1-nano", text: $azureDeployment, width: 240, accessibilityLabel: "Azure OpenAI deployment name")
+            SettingsDivider()
+            keyRow(
+                title: "API key",
+                prompt: "Azure OpenAI API key",
+                text: $azureAPIKey,
+                isStored: viewModel.hasAzureAPIKey,
+                accessibilityLabel: "Azure OpenAI API key",
+                link: nil
             )
-            .textFieldStyle(.roundedBorder)
-            .accessibilityLabel("Azure OpenAI API key")
-            .accessibilityHint("Stored securely in macOS Keychain after a successful connection test")
-            Toggle("Reasoning model deployment (o-series or GPT-5)", isOn: $azureReasoningDeployment)
-                .help("Reasoning deployments reject temperature, so WorkFlow sends a low reasoning effort and extra completion headroom instead.")
+            SettingsDivider()
+            SettingsToggleRow(
+                title: "Reasoning deployment",
+                detail: "For o-series or GPT-5, which reject temperature; WorkFlow sends a low reasoning effort instead.",
+                isOn: $azureReasoningDeployment
+            )
+            SettingsDivider()
             timeoutRow(value: $azureTimeout, range: 1...60)
-
-            HStack {
-                Button {
-                    Task { await testProvider() }
-                } label: {
-                    testLabel(active: isTesting, title: "Save & Test")
-                }
-                .buttonStyle(.borderedProminent)
-                .disabled(isTesting)
-                .accessibilityLabel(isTesting ? "Testing Azure OpenAI connection" : "Save API key and test Azure OpenAI")
-
-                if hasAzureAPIKey {
-                    Button("Remove key", role: .destructive) { removeKey(for: .azureOpenAI) }
-                }
-            }
-
-            Text("\(AppIdentity.productName) calls the Azure OpenAI v1 API with your deployment name and records token counts. It does not invent a dollar estimate for Azure pricing.")
-                .font(.caption)
-                .foregroundColor(.secondary)
+            SettingsDivider()
+            actionsRow(
+                testTitle: "Save & Test",
+                isTesting: isTesting,
+                testAccessibility: isTesting ? "Testing Azure OpenAI connection" : "Save API key and test Azure OpenAI",
+                test: { Task { await testProvider() } },
+                canRemoveKey: viewModel.hasAzureAPIKey
+            ) { EmptyView() }
         }
     }
 
-    private var usageCard: some View {
-        let usage = viewModel.bedrockUsageSummary
-        return VStack(alignment: .leading, spacing: 8) {
-            HStack(alignment: .firstTextBaseline) {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("This month")
-                        .font(.headline)
-                    Text("Recorded cleanup usage across every provider")
-                        .font(.caption)
-                        .foregroundColor(.secondary)
-                }
-                Spacer()
-                Text(BedrockPricing.formatUSD(usage.estimatedCostUSD))
-                    .font(.title2.weight(.semibold).monospacedDigit())
-            }
-            Text("\(usage.cleanedDictations) cleaned · \(usage.localCleanedDictations) free local · \(usage.fallbackDictations) fallbacks\(usage.filterDraftRequests > 0 ? " · \(usage.filterDraftRequests) filter drafts" : "") · \(usage.inputTokens) input / \(usage.outputTokens) output tokens")
-                .font(.caption)
-                .foregroundColor(.secondary)
-            if usage.unpricedDictations > 0 {
-                Text("\(usage.unpricedDictations) request(s) used custom or unknown pricing and are excluded from the dollar total.")
-                    .font(.caption)
-                    .foregroundColor(.orange)
-            }
-            Text("Nova Micro example: 100 short dictations/day is roughly $0.04/month at the checked AWS price. Ollama API cost is $0; electricity and hardware are yours.")
-                .font(.caption)
-                .foregroundColor(.secondary)
-            if viewModel.bedrockMonthlyBudgetEnabled {
-                let remaining = max(0, viewModel.bedrockMonthlyBudgetUSD - usage.estimatedCostUSD)
-                Text("Bedrock limit: \(BedrockPricing.formatUSD(viewModel.bedrockMonthlyBudgetUSD)) · \(BedrockPricing.formatUSD(remaining)) estimated remaining")
-                    .font(.caption.weight(.medium))
-                    .foregroundColor(remaining > 0 ? .secondary : .orange)
-            }
-            Link("AWS pricing · checked \(BedrockPricing.asOfDate)", destination: BedrockPricing.pricingURL)
-                .font(.caption)
-        }
-        .settingsCard()
-    }
-
-    private var efficiencyCard: some View {
-        let summary = viewModel.tokenEfficiencySummary
-        return VStack(alignment: .leading, spacing: 10) {
+    private func keyRow(
+        title: String,
+        prompt: String,
+        text: Binding<String>,
+        isStored: Bool,
+        accessibilityLabel: String,
+        link: (String, URL)?
+    ) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: WFSpace.md) {
             VStack(alignment: .leading, spacing: 2) {
-                Text("Writing efficiency this month")
-                    .font(.headline)
-                Text("Estimated source tokens ÷ final tokens for successful cleanups")
-                    .font(.caption)
-                    .foregroundColor(.secondary)
+                Text(title)
+                    .font(.system(size: 13))
+                if isStored {
+                    Label("Stored in Keychain", systemImage: "lock.fill")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                } else if let link {
+                    SettingsWebLink(link.0, destination: link.1)
+                }
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            SecureField(isStored ? "Enter a new key to replace it" : prompt, text: text)
+                .textFieldStyle(.roundedBorder)
+                .frame(width: 240)
+                .accessibilityLabel(accessibilityLabel)
+                .accessibilityHint("Saved to macOS Keychain only after a successful connection test")
+        }
+        .settingsRowPadding()
+    }
 
+    private func textRow(
+        _ title: String,
+        detail: String? = nil,
+        prompt: String,
+        text: Binding<String>,
+        width: CGFloat,
+        accessibilityLabel: String? = nil
+    ) -> some View {
+        SettingsRow(title: title, detail: detail) {
+            TextField(prompt, text: text)
+                .textFieldStyle(.roundedBorder)
+                .frame(width: width)
+                .accessibilityLabel(accessibilityLabel ?? title)
+        }
+    }
+
+    private func timeoutRow(value: Binding<Double>, range: ClosedRange<Double>) -> some View {
+        SettingsRow(title: "Timeout", detail: "A slower reply keeps your original transcript.") {
+            Stepper(value: value, in: range, step: 0.5) {
+                Text("\(value.wrappedValue, specifier: "%.1f") s")
+                    .font(.callout.monospacedDigit())
+            }
+            .fixedSize()
+            .accessibilityLabel("Timeout")
+            .accessibilityValue("\(String(format: "%.1f", value.wrappedValue)) seconds")
+        }
+    }
+
+    private func actionsRow<Extra: View>(
+        testTitle: String,
+        isTesting: Bool,
+        testAccessibility: String,
+        test: @escaping () -> Void,
+        canRemoveKey: Bool,
+        @ViewBuilder extra: () -> Extra
+    ) -> some View {
+        HStack(spacing: WFSpace.sm) {
+            Button(action: test) {
+                if isTesting {
+                    HStack(spacing: 6) {
+                        ProgressView().controlSize(.small)
+                        Text("Testing…")
+                    }
+                } else {
+                    Text(testTitle)
+                }
+            }
+            .buttonStyle(.borderedProminent)
+            .disabled(isTesting)
+            .accessibilityLabel(testAccessibility)
+            extra()
+            Spacer(minLength: 0)
+            if canRemoveKey {
+                Button("Remove Key…", role: .destructive) { keyPendingRemoval = providerID }
+            }
+        }
+        .controlSize(.regular)
+        .settingsRowPadding()
+    }
+
+    private var currentStatus: String {
+        providerID == .bedrock ? viewModel.bedrockStatus : providerStatus
+    }
+
+    // MARK: Last error
+
+    private func lastErrorGroup(_ message: String) -> some View {
+        SettingsGroup {
+            SettingsNotice(
+                title: "The last cleanup request didn’t finish",
+                detail: message == TranscriptCleanupPipeline.safeFailureMessage
+                    ? "That dictation kept its original transcript. Save & Test checks the connection."
+                    : message
+            ) {
+                if let date = viewModel.bedrockLastErrorDate {
+                    Text(date.formatted(.relative(presentation: .named)))
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize()
+                }
+            }
+        }
+    }
+
+    // MARK: Cost
+
+    private var costGroup: some View {
+        let usage = viewModel.bedrockUsageSummary
+        let limit = viewModel.bedrockMonthlyBudgetUSD
+        let spent = usage.estimatedCostUSD
+        let stopEnabled = viewModel.bedrockMonthlyBudgetEnabled
+        return VStack(alignment: .leading, spacing: 7) {
+            HStack {
+                Text("Estimated cost")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(.secondary)
+                    .accessibilityAddTraits(.isHeader)
+                Spacer()
+                if providerID == .bedrock {
+                    SettingsWebLink("AWS pricing", destination: BedrockPricing.pricingURL)
+                }
+            }
+            .padding(.horizontal, 2)
+            VStack(alignment: .leading, spacing: 0) {
+                VStack(alignment: .leading, spacing: 10) {
+                    HStack(alignment: .firstTextBaseline, spacing: 8) {
+                        Text(BedrockPricing.formatUSD(spent))
+                            .font(.system(size: 30, weight: .semibold, design: .rounded).monospacedDigit())
+                        Text("this month")
+                            .font(.callout)
+                            .foregroundStyle(.secondary)
+                        Spacer()
+                        if stopEnabled {
+                            Text("of \(BedrockPricing.formatUSD(limit))")
+                                .font(.callout.monospacedDigit())
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                    .accessibilityElement(children: .ignore)
+                    .accessibilityLabel("Estimated cost this month: \(BedrockPricing.formatUSD(spent))\(stopEnabled ? " of a \(BedrockPricing.formatUSD(limit)) stop" : "")")
+                    if stopEnabled {
+                        ProgressView(value: min(spent, limit), total: max(limit, 0.0001))
+                            .tint(spent >= limit ? Color.orange : ThemePalette.ink(colorScheme))
+                            .accessibilityHidden(true)
+                        Text(spent >= limit
+                             ? "Stop reached: Bedrock requests pause until next month."
+                             : "\(BedrockPricing.formatUSD(max(0, limit - spent))) left before Bedrock requests pause.")
+                            .font(.caption.weight(.medium))
+                            .foregroundStyle(spent >= limit ? Color.orange : Color.secondary)
+                    }
+                }
+                .settingsRowPadding()
+                .padding(.vertical, 4)
+                SettingsDivider()
+                SettingsRow(
+                    title: "Monthly stop",
+                    detail: "At this estimate, Bedrock cleanup, filter drafting, and Learn pause until next month, and dictations keep their original transcript. It’s an estimate, not a billing cap."
+                ) {
+                    HStack(spacing: WFSpace.sm) {
+                        if stopEnabled {
+                            Stepper(value: $viewModel.bedrockMonthlyBudgetUSD, in: 0.05...10, step: 0.05) {
+                                Text(BedrockPricing.formatUSD(viewModel.bedrockMonthlyBudgetUSD))
+                                    .font(.callout.monospacedDigit())
+                            }
+                            .fixedSize()
+                            .accessibilityLabel("Stop amount")
+                            .accessibilityValue(BedrockPricing.formatUSD(viewModel.bedrockMonthlyBudgetUSD))
+                        }
+                        Toggle("Monthly stop", isOn: $viewModel.bedrockMonthlyBudgetEnabled)
+                            .toggleStyle(.switch)
+                            .controlSize(.small)
+                            .labelsHidden()
+                            .accessibilityLabel("Monthly estimated-cost stop")
+                            .accessibilityHint("Pauses Bedrock requests when this month’s estimate reaches the amount")
+                    }
+                }
+                if providerID == .bedrock, !BedrockPricing.supports(modelID: viewModel.bedrockModelID) {
+                    SettingsDivider()
+                    SettingsNotice(
+                        title: "No verified price for this model",
+                        detail: "WorkFlow can’t estimate it, so the stop can’t apply. Recommended Defaults switch to Nova Micro."
+                    ) { EmptyView() }
+                }
+                SettingsDivider()
+                SettingsDisclosureRow(
+                    title: "Usage this month",
+                    detail: "\(countLabel(usage.cleanedDictations, singular: "dictation", plural: "dictations")) cleaned · \(usage.inputTokens + usage.outputTokens) tokens",
+                    isExpanded: $showsUsage
+                )
+                if showsUsage {
+                    usageDetails(usage)
+                }
+            }
+            .settingsSurface()
+            Text(costFooter)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+                .padding(.horizontal, 2)
+        }
+    }
+
+    private var costFooter: String {
+        switch providerID {
+        case .bedrock:
+            "Estimated from token counts at the AWS price checked \(BedrockPricing.asOfDate). Your AWS bill is authoritative."
+        case .ollama:
+            "Ollama runs on this Mac, so cleanup has no API cost. The stop applies only to Amazon Bedrock."
+        case .openAICompatible, .azureOpenAI:
+            "WorkFlow counts tokens for \(providerID.displayName) but doesn’t estimate its prices; usage bills to your account. The stop applies only to Amazon Bedrock."
+        }
+    }
+
+    @ViewBuilder
+    private func usageDetails(_ usage: BedrockUsageSummary) -> some View {
+        SettingsDivider()
+        valueRow("Cleaned", "\(usage.cleanedDictations)")
+        SettingsDivider()
+        valueRow("Kept the original transcript", "\(usage.fallbackDictations)",
+                 detail: "Cleanup didn’t finish, or the stop was reached.")
+        if usage.localCleanedDictations > 0 {
+            SettingsDivider()
+            valueRow("Cleaned on this Mac", "\(usage.localCleanedDictations)")
+        }
+        if usage.filterDraftRequests > 0 {
+            SettingsDivider()
+            valueRow("Filter drafts", "\(usage.filterDraftRequests)")
+        }
+        SettingsDivider()
+        valueRow("Tokens", "\(usage.inputTokens) in · \(usage.outputTokens) out")
+        if usage.unpricedDictations > 0 {
+            SettingsDivider()
+            SettingsNotice(
+                title: "\(countLabel(usage.unpricedDictations, singular: "request", plural: "requests")) without a price",
+                detail: "They used a provider or model WorkFlow can’t price, so they aren’t in the total."
+            ) { EmptyView() }
+        }
+        SettingsDivider()
+        efficiencyRows
+    }
+
+    private func valueRow(_ title: String, _ value: String, detail: String? = nil) -> some View {
+        SettingsRow(title: title, detail: detail) {
+            Text(value)
+                .font(.callout.monospacedDigit())
+                .foregroundStyle(.secondary)
+        }
+        .accessibilityElement(children: .combine)
+    }
+
+    private var efficiencyRows: some View {
+        let summary = viewModel.tokenEfficiencySummary
+        return VStack(alignment: .leading, spacing: 8) {
+            Text("Writing efficiency")
+                .font(.system(size: 13))
+            Text("Estimated source tokens ÷ final tokens for successful cleanups, measured on this Mac (\(LocalTokenEstimator.identifier)), not provider billing.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
             ForEach(CleanupMode.allCases) { mode in
                 HStack {
                     Text(mode.displayName)
+                        .font(.callout)
                     Spacer()
                     if let metric = summary[mode] {
-                        Text(TokenEfficiencyFormatter.ratio(metric.geometricMeanRatio))
-                            .font(.subheadline.weight(.semibold).monospacedDigit())
-                        Text("· \(metric.sampleCount) sample\(metric.sampleCount == 1 ? "" : "s")")
-                            .font(.caption)
-                            .foregroundColor(.secondary)
+                        Text("\(TokenEfficiencyFormatter.ratio(metric.geometricMeanRatio)) · \(countLabel(metric.sampleCount, singular: "sample", plural: "samples"))")
+                            .font(.caption.monospacedDigit())
+                            .foregroundStyle(.secondary)
                     } else {
                         Text("No samples yet")
                             .font(.caption)
-                            .foregroundColor(.secondary)
+                            .foregroundStyle(.secondary)
                     }
                 }
                 .accessibilityElement(children: .combine)
             }
-
-            if let homeworkComparison = technicalComparison(over: .homework) {
-                Label(homeworkComparison, systemImage: "chart.bar.xaxis")
-                    .font(.caption.weight(.medium))
-                    .foregroundColor(ThemePalette.linkText(colorScheme))
+            ForEach([CleanupMode.homework, .everyday], id: \.self) { mode in
+                if let comparison = technicalComparison(over: mode) {
+                    Label(comparison, systemImage: "chart.bar.xaxis")
+                        .font(.caption.weight(.medium))
+                        .foregroundStyle(ThemePalette.linkText(colorScheme))
+                }
             }
-            if let everydayComparison = technicalComparison(over: .everyday) {
-                Label(everydayComparison, systemImage: "chart.bar.xaxis")
-                    .font(.caption.weight(.medium))
-                    .foregroundColor(ThemePalette.linkText(colorScheme))
-            }
-
-            Text("These are local estimates from the text before and after cleanup (\(LocalTokenEstimator.identifier)), not provider billing tokens. Failed or budget-limited cleanups are excluded.")
-                .font(.caption2)
-                .foregroundColor(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
         }
-        .settingsCard()
+        .settingsRowPadding()
     }
 
     private func technicalComparison(over mode: CleanupMode) -> String? {
@@ -486,38 +783,7 @@ struct CleanupSettingsView: View {
         return String(format: "%@ is %.2f× as token-efficient as Technical", mode.displayName, 1 / advantage)
     }
 
-    private var privacyCard: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Label("Fail-safe by design", systemImage: "lock.shield")
-                .font(.headline)
-            Text("Provider keys use macOS Keychain. Remote servers must use HTTPS. If cleanup times out, fails, exceeds its budget, or rewrites too aggressively, \(AppIdentity.productName) keeps the local transcript instead of losing your dictation.")
-                .font(.caption)
-                .foregroundColor(.secondary)
-        }
-        .settingsCard()
-    }
-
-    private var currentStatus: String {
-        providerID == .bedrock ? viewModel.bedrockStatus : providerStatus
-    }
-
-    private func timeoutRow(value: Binding<Double>, range: ClosedRange<Double>) -> some View {
-        HStack {
-            Text("Fallback timeout")
-            Spacer()
-            Stepper("\(value.wrappedValue, specifier: "%.1f") seconds", value: value, in: range, step: 0.5)
-                .frame(width: 190)
-        }
-    }
-
-    @ViewBuilder
-    private func testLabel(active: Bool, title: String) -> some View {
-        if active {
-            ProgressView().controlSize(.small)
-        } else {
-            Label(title, systemImage: "checkmark.shield")
-        }
-    }
+    // MARK: Connection test
 
     @MainActor
     private func testProvider() async {
@@ -598,13 +864,21 @@ struct CleanupSettingsView: View {
         }
     }
 
-    private func removeKey(for account: CleanupCredentialAccount) {
-        do {
-            try CleanupCredentialStore.deleteAPIKey(for: account)
-            setKeyState(stored: false, for: account)
-            providerStatus = "API key removed from Keychain."
-        } catch {
-            providerStatus = error.localizedDescription
+    private func removeKey(for provider: CleanupProviderID) {
+        switch provider {
+        case .bedrock:
+            viewModel.clearBedrockCredential()
+        case .openAICompatible, .azureOpenAI:
+            let account: CleanupCredentialAccount = provider == .azureOpenAI ? .azureOpenAI : .openAICompatible
+            do {
+                try CleanupCredentialStore.deleteAPIKey(for: account)
+                setKeyState(stored: false, for: account)
+                providerStatus = "API key removed from Keychain."
+            } catch {
+                providerStatus = error.localizedDescription
+            }
+        case .ollama:
+            break
         }
     }
 
@@ -613,14 +887,18 @@ struct CleanupSettingsView: View {
         switch account {
         case .openAICompatible:
             compatibleAPIKey = ""
-            hasCompatibleAPIKey = stored
+            viewModel.hasCompatibleAPIKey = stored
         case .azureOpenAI:
             azureAPIKey = ""
-            hasAzureAPIKey = stored
+            viewModel.hasAzureAPIKey = stored
         }
     }
 }
 
+// MARK: - Personalize
+
+/// Teach WorkFlow your style: learning from finished writing, personal
+/// vocabulary, rules for particular apps, and a backup of both.
 struct PersonalizationSettingsView: View {
     private struct RunningApp: Identifiable, Hashable {
         let bundleID: String
@@ -634,172 +912,206 @@ struct PersonalizationSettingsView: View {
         let appRules: [TargetAppRule]
     }
 
+    let learningSession: CorrectionLearningSession?
+
     @State private var vocabulary = VocabularyStore.load()
     @State private var rules = TargetAppRuleStore.load()
     @State private var runningApps: [RunningApp] = []
     @State private var selectedBundleID = ""
-    @State private var meetingCleanupEnabled = AppPreferences.shared.meetingCleanupEnabled
     @State private var archiveStatus = ""
 
+    init(learningSession: CorrectionLearningSession? = nil) {
+        self.learningSession = learningSession
+    }
+
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 16) {
-                CorrectionLearningCard()
-                    .settingsCard()
-                vocabularyCard
-                appRulesCard
-                meetingsCard
-                backupCard
-            }
-            .padding()
+        VStack(alignment: .leading, spacing: 22) {
+            SettingsPaneHeader(
+                title: "Personalize",
+                subtitle: "Teach WorkFlow how you write and the words you use."
+            )
+            CorrectionLearningCard(session: learningSession)
+                .padding(16)
+                .settingsSurface()
+            vocabularyGroup
+            appRulesGroup
+            backupGroup
         }
         .onAppear { refreshRunningApps() }
         .onChange(of: vocabulary) { _, value in VocabularyStore.save(value) }
         .onChange(of: rules) { _, value in TargetAppRuleStore.save(value) }
-        .onChange(of: meetingCleanupEnabled) { _, value in AppPreferences.shared.meetingCleanupEnabled = value }
     }
 
-    private var vocabularyCard: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack {
+    private var vocabularyGroup: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(alignment: .top) {
                 VStack(alignment: .leading, spacing: 2) {
                     Text("Personal vocabulary")
                         .font(.headline)
-                    Text("Correct names, products, and technical terms with literal whole-phrase matches.")
+                    Text("Fix names, products, and terms the recognizer gets wrong. Whole phrases only, applied on this Mac before cleanup.")
                         .font(.caption)
-                        .foregroundColor(.secondary)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
                 Spacer()
+                Text("\(vocabulary.count) of \(VocabularyStore.maximumEntries)")
+                    .font(.caption.monospacedDigit())
+                    .foregroundStyle(.secondary)
+                    .padding(.top, 2)
                 Button {
                     vocabulary.append(VocabularyEntry(spoken: "", replacement: ""))
                 } label: {
                     Label("Add", systemImage: "plus")
                 }
                 .disabled(vocabulary.count >= VocabularyStore.maximumEntries)
+                .accessibilityLabel("Add a vocabulary replacement")
             }
 
             if vocabulary.isEmpty {
-                Text("Example: spoken “fable orchestrator” → spelling “Fable Orchestrator”")
+                Text("For example, heard as “fable orchestrator” → write as “Fable Orchestrator”.")
                     .font(.caption)
-                    .foregroundColor(.secondary)
+                    .foregroundStyle(.secondary)
+            } else {
+                HStack(spacing: WFSpace.sm) {
+                    Color.clear.frame(width: 32, height: 1)
+                    Text("Heard as").frame(maxWidth: .infinity, alignment: .leading)
+                    Color.clear.frame(width: 14, height: 1)
+                    Text("Write as").frame(maxWidth: .infinity, alignment: .leading)
+                    Color.clear.frame(width: 18, height: 1)
+                }
+                .font(.caption.weight(.medium))
+                .foregroundStyle(.secondary)
+                .accessibilityHidden(true)
             }
 
-            ForEach($vocabulary) { $entry in
-                HStack {
+            ForEach(Array($vocabulary.enumerated()), id: \.element.id) { index, $entry in
+                let name = Self.accessibilityName(index: index, entry: entry)
+                HStack(spacing: WFSpace.sm) {
                     Toggle("", isOn: $entry.isEnabled)
+                        .toggleStyle(.switch)
+                        .controlSize(.mini)
                         .labelsHidden()
-                        .accessibilityLabel("Enable vocabulary replacement from \(entry.spoken) to \(entry.replacement)")
+                        .frame(width: 32)
+                        .accessibilityLabel("Use \(name)")
                     TextField("What speech recognition writes", text: $entry.spoken)
                         .textFieldStyle(.roundedBorder)
+                        .accessibilityLabel("Heard as, \(name)")
                     Image(systemName: "arrow.right")
-                        .foregroundColor(.secondary)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .frame(width: 14)
+                        .accessibilityHidden(true)
                     TextField("Preferred spelling", text: $entry.replacement)
                         .textFieldStyle(.roundedBorder)
+                        .accessibilityLabel("Write as, \(name)")
                     Button(role: .destructive) {
                         vocabulary.removeAll { $0.id == entry.id }
                     } label: {
                         Image(systemName: "trash")
+                            .foregroundStyle(.secondary)
                     }
                     .buttonStyle(.plain)
-                    .accessibilityLabel("Delete vocabulary replacement")
+                    .frame(width: 18)
+                    .help("Delete this replacement")
+                    .accessibilityLabel("Delete \(name)")
                 }
             }
         }
-        .settingsCard()
+        .padding(16)
+        .settingsSurface()
     }
 
-    private var appRulesCard: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            VStack(alignment: .leading, spacing: 2) {
-                Text("Per-app behavior")
-                    .font(.headline)
-                Text("Choose cleanup and paste behavior by the app that was focused when recording began.")
-                    .font(.caption)
-                    .foregroundColor(.secondary)
-            }
+    /// What VoiceOver calls a vocabulary row, even before its fields are filled.
+    static func accessibilityName(index: Int, entry: VocabularyEntry) -> String {
+        entry.spoken.isEmpty && entry.replacement.isEmpty
+            ? "replacement \(index + 1)"
+            : "replacement from \(entry.spoken) to \(entry.replacement)"
+    }
 
-            HStack {
-                Picker("Running app", selection: $selectedBundleID) {
-                    Text("Choose a running app").tag("")
-                    ForEach(runningApps) { app in
-                        Text("\(app.name) — \(app.bundleID)").tag(app.bundleID)
+    private var appRulesGroup: some View {
+        SettingsGroup(
+            title: "Per-app rules",
+            footer: "A rule applies to the app that was in front when recording began."
+        ) {
+            SettingsRow(title: "Add an app", detail: "Change cleanup, pasting, or style for one app.") {
+                HStack(spacing: WFSpace.sm) {
+                    Picker("Running app", selection: $selectedBundleID) {
+                        Text("Choose a running app").tag("")
+                        ForEach(runningApps) { app in
+                            Text(app.name).tag(app.bundleID)
+                        }
                     }
+                    .pickerStyle(.menu)
+                    .labelsHidden()
+                    .frame(maxWidth: 200)
+                    .accessibilityLabel("Running app")
+                    Button("Add") { addSelectedApp() }
+                        .disabled(selectedBundleID.isEmpty || rules.contains { $0.bundleID == selectedBundleID })
+                        .accessibilityLabel("Add a rule for the chosen app")
+                    Button {
+                        refreshRunningApps()
+                    } label: {
+                        Image(systemName: "arrow.clockwise")
+                    }
+                    .buttonStyle(.borderless)
+                    .help("Refresh running apps")
+                    .accessibilityLabel("Refresh running apps")
                 }
-                Button("Add app") { addSelectedApp() }
-                    .disabled(selectedBundleID.isEmpty || rules.contains { $0.bundleID == selectedBundleID })
-                Button {
-                    refreshRunningApps()
-                } label: {
-                    Image(systemName: "arrow.clockwise")
-                }
-                .help("Refresh running apps")
-                .accessibilityLabel("Refresh running apps")
             }
-
             ForEach($rules) { $rule in
+                SettingsDivider()
                 VStack(alignment: .leading, spacing: 8) {
                     HStack {
                         Text(rule.appName)
-                            .font(.subheadline.weight(.semibold))
+                            .font(.system(size: 13, weight: .semibold))
                         Text(rule.bundleID)
                             .font(.caption.monospaced())
-                            .foregroundColor(.secondary)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                            .truncationMode(.middle)
                         Spacer()
                         Button(role: .destructive) {
                             rules.removeAll { $0.id == rule.id }
                         } label: {
                             Image(systemName: "trash")
+                                .foregroundStyle(.secondary)
                         }
                         .buttonStyle(.plain)
+                        .help("Delete this rule")
+                        .accessibilityLabel("Delete the rule for \(rule.appName)")
                     }
                     HStack {
                         Picker("Cleanup", selection: $rule.cleanupBehavior) {
                             ForEach(TargetCleanupBehavior.allCases) { Text($0.displayName).tag($0) }
                         }
+                        .fixedSize()
                         Picker("Paste", selection: $rule.pasteBehavior) {
                             ForEach(TargetPasteBehavior.allCases) { Text($0.displayName).tag($0) }
                         }
+                        .fixedSize()
                     }
-                    TextField("Optional cleanup style, e.g. concise Slack message", text: $rule.cleanupInstruction)
+                    TextField("Optional style, e.g. concise Slack message", text: $rule.cleanupInstruction)
                         .textFieldStyle(.roundedBorder)
+                        .accessibilityLabel("Cleanup style for \(rule.appName)")
                 }
-                .padding(10)
-                .background(Color.secondary.opacity(0.06))
-                .clipShape(RoundedRectangle(cornerRadius: 8))
+                .settingsRowPadding()
             }
         }
-        .settingsCard()
     }
 
-    private var meetingsCard: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Toggle("Clean up meeting transcripts", isOn: $meetingCleanupEnabled)
-                .font(.headline)
-            Text("Meeting mode records until you stop it, saves a named item in History, and never pastes into another app. Cleanup is off by default so long transcripts stay local and free.")
-                .font(.caption)
-                .foregroundColor(.secondary)
-        }
-        .settingsCard()
-    }
-
-    private var backupCard: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text("Backup personalization")
-                .font(.headline)
-            Text("Export or import vocabulary and app rules as JSON. API keys are intentionally never included.")
-                .font(.caption)
-                .foregroundColor(.secondary)
-            HStack {
-                Button("Export JSON") { exportArchive() }
-                Button("Import JSON") { importArchive() }
-                if !archiveStatus.isEmpty {
-                    Text(archiveStatus)
-                        .font(.caption)
-                        .foregroundColor(.secondary)
+    private var backupGroup: some View {
+        SettingsGroup(
+            title: "Backup",
+            footer: "Vocabulary and per-app rules as JSON. API keys are never included."
+        ) {
+            SettingsRow(title: "Personalization file", detail: archiveStatus.isEmpty ? nil : archiveStatus) {
+                HStack(spacing: WFSpace.sm) {
+                    Button("Export…") { exportArchive() }
+                    Button("Import…") { importArchive() }
                 }
+                .controlSize(.small)
             }
         }
-        .settingsCard()
     }
 
     private func refreshRunningApps() {
@@ -853,14 +1165,5 @@ struct PersonalizationSettingsView: View {
         } catch {
             archiveStatus = "Import failed: \(error.localizedDescription)"
         }
-    }
-}
-
-private extension View {
-    func settingsCard() -> some View {
-        padding()
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(Color(.controlBackgroundColor).opacity(0.3))
-            .clipShape(RoundedRectangle(cornerRadius: 12))
     }
 }

@@ -6,7 +6,7 @@ This runbook lets a local coding agent install and verify WorkFlow without recei
 
 - Never ask the user to paste an AWS or other provider key into chat, a terminal command, an environment variable, a source file, or a GitHub secret for normal app use.
 - Never read or print WorkFlow Keychain items.
-- The agent may navigate to WorkFlow's Cleanup settings; the user types the key into the secure field and selects **Save & Test**.
+- The agent may navigate to WorkFlow's **Settings → Provider & Cost**; the user types the key into the secure field and selects **Save & Test**.
 - Apple-account, Keychain, Microphone, Accessibility, and Input Monitoring dialogs remain user-confirmed steps.
 
 ## Agent procedure
@@ -36,6 +36,7 @@ This runbook lets a local coding agent install and verify WorkFlow without recei
      -only-testing:OpenSuperWhisperTests/DictationFailureRecoveryTests \
      -only-testing:OpenSuperWhisperTests/QueuedAudioRetentionTests \
      -only-testing:OpenSuperWhisperTests/SettingsRequestTests \
+     -only-testing:OpenSuperWhisperTests/SettingsLayoutTests \
      -only-testing:OpenSuperWhisperTests/ClipboardRestoreTests \
      -only-testing:OpenSuperWhisperTests/OnboardingShortcutOptionTests \
      -only-testing:OpenSuperWhisperTests/EscapeCancelConfirmationTests \
@@ -88,7 +89,7 @@ This runbook lets a local coding agent install and verify WorkFlow without recei
 7. Verify `WorkFlow.app` is running, its visible version is current, and its bundle identifier is `com.picturesuo.WorkFlow`. For an upgrade, confirm preferences and History were copied from the legacy identity; never delete the legacy data automatically.
 8. Have the user perform one short dictation with their selected shortcut in a disposable text field. Confirm the newest spoken text appears and History contains the same result.
 9. Set **Technical** in the WorkFlow menu-bar menu and have the user dictate a verbose technical request. Confirm History labels it Technical and shows a source-to-final token estimate. Repeat with Homework only when the user wants to validate long-form behavior; do not fabricate samples in their History.
-10. For Bedrock or Azure OpenAI, open Cleanup settings, let the user enter the key, then let the user choose **Save & Test**. For Azure, the user also enters the resource endpoint and deployment name. Confirm a successful status with token counts. Leave the key field blank in all captured logs and screenshots.
+10. For Bedrock or Azure OpenAI, open **Settings → Provider & Cost**, let the user enter the key, then let the user choose **Save & Test**. For Azure, the user also enters the resource endpoint and deployment name. Confirm a successful status with token counts. Leave the key field blank in all captured logs and screenshots.
 11. To verify Writing mode or learning, let the user select **Writing** (or another mode), dictate into a disposable document, edit it, then paste the whole finished document under **Settings → Personalize → Learn from finished writing** (also reached from **Learn…** beside the writing mode in the main window) and select **Learn**. Confirm the outcome names the matched dictations and the learned preferences listed for that mode. Do not fabricate samples in their History.
 12. To verify custom filters, let the user create one under **Settings → Cleanup → Custom filters** (for example **Everyday with digits**), select it in the menu-bar menu, and dictate a sentence with a spoken number. Confirm History labels the result with the filter name. Do not fabricate samples in their History. To verify AI drafting, let the user choose **Create with AI**, type or speak a request (and optionally paste a finished example), press **Send**, review the proposal, and save it.
 
