@@ -101,6 +101,7 @@ class ContentViewModel: ObservableObject {
     @Published var transcriptionService = TranscriptionService.shared
     @Published var transcriptionQueue = TranscriptionQueue.shared
     @Published var recordingStore = RecordingStore.shared
+    var cleanupPipeline = TranscriptCleanupPipeline.shared
     private let history = RecordingHistoryModel { query, limit, offset in
         if query.isEmpty {
             return try await RecordingStore.shared.fetchRecordings(limit: limit, offset: offset)
@@ -257,74 +258,109 @@ class ContentViewModel: ObservableObject {
             guard let self = self else { return }
             
             if let tempURL = await self.recorder.stopRecording(sessionID: sessionID) {
-                do {
-                    print("start decoding...")
-                    let duration = await AudioUtil.audioDuration(url: tempURL)
-                    let rawText = try await transcriptionService.transcribeAudio(url: tempURL, settings: Settings())
-                    let cleanup = await TranscriptCleanupPipeline.shared.finalize(rawText)
-                    let text = cleanup.text
-
-                    if text.isEmpty {
-                        try? FileManager.default.removeItem(at: tempURL)
-                        print("No speech detected, dictation discarded")
-                    } else {
-                        let timestamp = Date()
-                        let recordingId = UUID()
-                        let fileName = AudioRecorder.recordingFileName(id: recordingId)
-                        let newRecording = Recording(
-                            id: recordingId,
-                            timestamp: timestamp,
-                            fileName: fileName,
-                            transcription: text,
-                            duration: duration,
-                            status: .completed,
-                            progress: 1.0,
-                            sourceFileURL: nil,
-                            cleanupSource: cleanup.source,
-                            cleanupInputTokens: cleanup.inputTokens,
-                            cleanupOutputTokens: cleanup.outputTokens,
-                            cleanupModelID: cleanup.modelID,
-                            cleanupRequested: cleanup.source != .disabled,
-                            cleanupMode: cleanup.cleanupMode,
-                            cleanupFilterName: cleanup.customFilterName,
-                            cleanupFilterInstructions: cleanup.customFilterInstructions,
-                            rawTokenEstimate: cleanup.rawTokenEstimate,
-                            finalTokenEstimate: cleanup.finalTokenEstimate,
-                            tokenEstimatorID: cleanup.tokenEstimatorID
-                        )
-
-                        try recorder.moveTemporaryRecording(from: tempURL, to: newRecording.url)
-                        let source = DictationSource(
-                            recordingID: recordingId,
-                            recognizerText: rawText,
-                            cleanup: cleanup,
-                            fallbackFilter: CustomCleanupFilterStore.currentSnapshot(),
-                            disposition: .notInserted
-                        )
-
-                        do {
-                            try await self.recordingStore.addRecordingSync(newRecording, source: source)
-                        } catch {
-                            // The move succeeded, but no history row owns this file.
-                            try? FileManager.default.removeItem(at: newRecording.url)
-                            throw error
-                        }
-
-                    }
-                } catch {
-                    self.recordingError = "The recording could not be transcribed or saved. Please try again."
-                    print("Audio-file transcription failed.")
-                    try? FileManager.default.removeItem(at: tempURL)
-                }
-
-                await MainActor.run {
-                    self.state = .idle
-                }
+                await self.finishRecording(audioAt: tempURL)
             } else {
                 await MainActor.run {
                     self.state = .idle
                 }
             }
+        }
+    }
+
+    /// Transcribes, cleans up, and saves one recording made in this window.
+    func finishRecording(audioAt tempURL: URL) async {
+        print("start decoding...")
+        let duration = await AudioUtil.audioDuration(url: tempURL)
+        let rawText: String
+        do {
+            rawText = try await transcriptionService.transcribeAudio(url: tempURL, settings: Settings())
+        } catch is CancellationError {
+            try? FileManager.default.removeItem(at: tempURL)
+            state = .idle
+            return
+        } catch {
+            print("Audio-file transcription failed; the audio is kept in History.")
+            let saved = await recordingStore.addFailedDictation(
+                audioAt: tempURL,
+                error: error,
+                duration: duration,
+                selectedFilter: cleanupPipeline.selectedFilter(),
+                cleanupRequested: cleanupPipeline.cleanupRequested(targetBundleID: nil),
+                targetBundleID: nil,
+                recordingStartedAt: nil,
+                keepAudio: recorder.keepTemporaryRecording
+            )
+            recordingError = saved
+                ? "WorkFlow couldn’t transcribe this recording. Its audio is saved in History, so you can select Regenerate to try again."
+                : "The recording could not be transcribed or saved. Please try again."
+            state = .idle
+            return
+        }
+
+        do {
+            let cleanup = await cleanupPipeline.finalize(rawText)
+            let text = cleanup.text
+
+            if text.isEmpty {
+                try? FileManager.default.removeItem(at: tempURL)
+                print("No speech detected, dictation discarded")
+            } else {
+                let timestamp = Date()
+                let recordingId = UUID()
+                let fileName = AudioRecorder.recordingFileName(id: recordingId)
+                var newRecording = Recording(
+                    id: recordingId,
+                    timestamp: timestamp,
+                    fileName: fileName,
+                    transcription: text,
+                    duration: duration,
+                    status: .completed,
+                    progress: 1.0,
+                    sourceFileURL: nil,
+                    cleanupSource: cleanup.source,
+                    cleanupInputTokens: cleanup.inputTokens,
+                    cleanupOutputTokens: cleanup.outputTokens,
+                    cleanupModelID: cleanup.modelID,
+                    cleanupRequested: cleanup.source != .disabled,
+                    cleanupMode: cleanup.cleanupMode,
+                    cleanupFilterName: cleanup.customFilterName,
+                    cleanupFilterInstructions: cleanup.customFilterInstructions,
+                    rawTokenEstimate: cleanup.rawTokenEstimate,
+                    finalTokenEstimate: cleanup.finalTokenEstimate,
+                    tokenEstimatorID: cleanup.tokenEstimatorID
+                )
+
+                // A failed move must not lose the transcript: it is still
+                // saved, with whatever audio is left.
+                let audioURL = recorder.keepTemporaryRecording(tempURL, at: newRecording.url)
+                if audioURL != newRecording.url {
+                    newRecording.sourceFileURL = audioURL?.path
+                }
+                let source = DictationSource(
+                    recordingID: recordingId,
+                    recognizerText: rawText,
+                    cleanup: cleanup,
+                    fallbackFilter: cleanupPipeline.selectedFilter(),
+                    disposition: .notInserted
+                )
+
+                do {
+                    try await self.recordingStore.addRecordingSync(newRecording, source: source)
+                } catch {
+                    // No history row owns this audio.
+                    if let audioURL { try? FileManager.default.removeItem(at: audioURL) }
+                    throw error
+                }
+
+            }
+        } catch {
+            self.recordingError = "The recording could not be saved to History. Please try again."
+            print("Saving the recording failed.")
+            try? FileManager.default.removeItem(at: tempURL)
+        }
+
+        await MainActor.run {
+            self.state = .idle
         }
     }
 
@@ -345,6 +381,7 @@ struct ContentView: View {
     @StateObject private var meetingController = MeetingSessionController.shared
     @Environment(\.colorScheme) private var colorScheme
     @State private var isSettingsPresented = false
+    @State private var settingsTab = 0
     @State private var searchText = ""
     @State private var debouncedSearchText = ""
     @State private var showDeleteConfirmation = false
@@ -454,6 +491,7 @@ struct ContentView: View {
                                 help: "Settings",
                                 accessibilityLabel: "Open settings"
                             ) {
+                                settingsTab = 0
                                 isSettingsPresented.toggle()
                             }
                         }
@@ -580,7 +618,7 @@ struct ContentView: View {
         }
         .fileDropHandler()
         .sheet(isPresented: $isSettingsPresented) {
-            SettingsView()
+            SettingsView(initialTab: settingsTab)
         }
         .alert("Start meeting recording", isPresented: $showMeetingNamePrompt) {
             TextField("Meeting name", text: $meetingTitle)
@@ -624,7 +662,8 @@ struct ContentView: View {
         } message: {
             Text(viewModel.historyDeletionError ?? "Please try again.")
         }
-        .onReceive(NotificationCenter.default.publisher(for: .openSettings)) { _ in
+        .onReceive(NotificationCenter.default.publisher(for: .openSettings)) { notification in
+            settingsTab = notification.object as? Int ?? 0
             isSettingsPresented = true
         }
         .onDisappear { searchTask?.cancel() }
@@ -742,7 +781,8 @@ private struct DictationControls: View {
             shortcut: shortcut,
             writingSelection: writingFilter.selectionBinding,
             customFilters: writingFilter.filters,
-            writingHelp: writingFilter.selectionDescription
+            writingHelp: writingFilter.selectionDescription,
+            onLearn: { NotificationCenter.default.post(name: .openSettings, object: SettingsView.personalizeTab) }
         ) {
             if viewModel.isRecording {
                 viewModel.startDecoding()
@@ -793,6 +833,8 @@ struct DictationDock: View {
     @Binding var writingSelection: CleanupFilterSelection
     var customFilters: [CustomCleanupFilter] = []
     var writingHelp = ""
+    /// Opens Learn from finished writing; the dock shows no link without it.
+    var onLearn: (() -> Void)?
     let onRecord: () -> Void
     @Environment(\.colorScheme) private var colorScheme
 
@@ -826,8 +868,12 @@ struct DictationDock: View {
                         .accessibilityHidden(true)
                     Spacer(minLength: 0)
                     writingPicker.fixedSize()
+                    learnLink
                 }
-                writingPicker.frame(maxWidth: .infinity, alignment: .leading)
+                HStack(spacing: WFSpace.md) {
+                    writingPicker.frame(maxWidth: .infinity, alignment: .leading)
+                    learnLink
+                }
             }
         }
         .padding(.horizontal, WFSpace.xl)
@@ -844,6 +890,20 @@ struct DictationDock: View {
             .help(writingHelp)
             .accessibilityLabel("Writing mode")
             .accessibilityHint("Changes how AI cleanup rewrites future dictations")
+    }
+
+    @ViewBuilder
+    private var learnLink: some View {
+        if let onLearn {
+            Button("Learn…", action: onLearn)
+                .buttonStyle(.borderless)
+                .font(.caption.weight(.medium))
+                .foregroundStyle(ThemePalette.linkText(colorScheme))
+                .fixedSize()
+                .help("Teach a writing mode your style from a document you finished")
+                .accessibilityLabel("Learn from finished writing")
+                .accessibilityHint("Opens Personalize settings")
+        }
     }
 
     /// Ready shows the brand ink, live recording is red, work in progress

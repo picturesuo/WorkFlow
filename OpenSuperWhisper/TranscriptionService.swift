@@ -206,8 +206,17 @@ class TranscriptionService: ObservableObject {
     }
 }
 
-enum TranscriptionError: Error {
+enum TranscriptionError: LocalizedError {
     case contextInitializationFailed
     case audioConversionFailed
     case processingFailed
+
+    /// Shown in History next to Regenerate, so it names what went wrong.
+    var errorDescription: String? {
+        switch self {
+        case .contextInitializationFailed: "The speech model could not be loaded."
+        case .audioConversionFailed: "The audio could not be converted."
+        case .processingFailed: "The speech model could not process the audio."
+        }
+    }
 }

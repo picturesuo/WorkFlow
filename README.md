@@ -39,7 +39,7 @@ Digit formatting and every mode's style need AI cleanup. With cleanup off, WorkF
 
 ## Learn from your finished writing
 
-Open **Settings → Personalization → Learn from finished writing**, paste a whole document you finished from your dictations or drop it in as a file, choose Homework, Technical, Everyday, or Writing, and select **Learn**. PDF, Word (.docx and .doc), RTF, OpenDocument, Markdown, and plain text files work, up to 100,000 characters; PDFs lose their page numbers and running headers, and a scanned or password-protected PDF is refused because it has no readable text. Text you did not dictate is simply ignored. WorkFlow finds the dictations in History that the document came from, even across several dictations, repeated takes, or reordered paragraphs, and compares what it produced with what you kept. Only small style edits it can match with confidence count; rewritten content, changed values, quotations, and text it cannot attribute are left out, and a document with no confident match teaches nothing.
+Open **Settings → Personalize → Learn from finished writing** (or select **Learn…** beside the writing mode, or **Writing Mode → Learn from Finished Writing…** in the menu bar), paste a whole document you finished from your dictations or drop it in as a file, choose Homework, Technical, Everyday, or Writing, and select **Learn**. PDF, Word (.docx and .doc), RTF, OpenDocument, Markdown, and plain text files work, up to 100,000 characters; PDFs lose their page numbers and running headers, and a scanned or password-protected PDF is refused because it has no readable text. Text you did not dictate is simply ignored. WorkFlow finds the dictations in History that the document came from, even across several dictations, repeated takes, or reordered paragraphs, and compares what it produced with what you kept. Only small style edits it can match with confidence count; rewritten content, changed values, quotations, and text it cannot attribute are left out, and a document with no confident match teaches nothing.
 
 The short matched edits, never the document or the rest of History, go to your cleanup provider, which can only name preferences from a fixed list, such as a spelling, a filler to drop, semicolon joins, or digits. WorkFlow checks each one against your edits before applying it to that mode alone, at once. Each learned preference is listed with where it came from, and can be switched off, deleted, or reset per mode; turning learning off stops both learning and applying. Custom filters are never changed.
 
@@ -99,10 +99,11 @@ xcodebuild test \
   -skip-testing:OpenSuperWhisperTests/ClipboardUtilKeyboardLayoutTests \
   -skip-testing:OpenSuperWhisperTests/KeyboardLayoutProviderTests \
   -skip-testing:OpenSuperWhisperTests/IndicatorWindowGeometryTests/testWindowKeepsPanelSizeAfterPresent \
-  CODE_SIGNING_ALLOWED=NO
+  CODE_SIGNING_ALLOWED=NO \
+  PRODUCT_BUNDLE_IDENTIFIER=com.picturesuo.WorkFlow.fmtest
 ```
 
-The skipped suites launch TextEdit, switch the keyboard layout, or show a panel; run them interactively. Releases follow [docs/RELEASING.md](docs/RELEASING.md).
+The skipped suites launch TextEdit, switch the keyboard layout, or show a panel; run them interactively. The separate bundle identifier keeps the test host out of WorkFlow's own preferences. Releases follow [docs/RELEASING.md](docs/RELEASING.md).
 
 </details>
 

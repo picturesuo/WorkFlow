@@ -827,8 +827,15 @@ struct SettingsView: View {
     @StateObject private var permissionsManager = PermissionsManager()
     @Environment(\.dismiss) var dismiss
     @State private var isRecordingNewShortcut = false
-    @State private var selectedTab = 0
+    @State private var selectedTab: Int
     @State private var previousModelURL: URL?
+
+    /// The tab holding Learn from finished writing, vocabulary, and app rules.
+    static let personalizeTab = 4
+
+    init(initialTab: Int = 0) {
+        _selectedTab = State(initialValue: initialTab)
+    }
     
     private var sheetSize: CGSize {
         let visibleFrame = NSScreen.main?.visibleFrame.size ?? CGSize(width: 1280, height: 800)
@@ -870,7 +877,7 @@ struct SettingsView: View {
                 .tabItem {
                     Label("Personalize", systemImage: "slider.horizontal.3")
                 }
-                .tag(4)
+                .tag(Self.personalizeTab)
             
             // Advanced Settings
             advancedSettings

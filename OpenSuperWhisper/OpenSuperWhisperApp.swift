@@ -13,7 +13,7 @@ import UniformTypeIdentifiers
 
 @main
 struct OpenSuperWhisperApp: App {
-    static let isRunningTests = NSClassFromString("XCTestCase") != nil
+    nonisolated static let isRunningTests = NSClassFromString("XCTestCase") != nil
 
     @StateObject private var appState = AppState()
     @NSApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
@@ -332,6 +332,15 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
                 )
             }
         }
+        cleanupModeMenu.addItem(.separator())
+        let learnItem = NSMenuItem(
+            title: "Learn from Finished Writing…",
+            action: #selector(openLearning),
+            keyEquivalent: ""
+        )
+        learnItem.target = self
+        learnItem.toolTip = "Teach a writing mode your style from a document you finished"
+        cleanupModeMenu.addItem(learnItem)
         cleanupModeItem.submenu = cleanupModeMenu
         menu.addItem(cleanupModeItem)
         
@@ -419,6 +428,11 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
     
     @objc private func openApp() {
         showMainWindow()
+    }
+
+    @objc private func openLearning() {
+        showMainWindow()
+        NotificationCenter.default.post(name: .openSettings, object: SettingsView.personalizeTab)
     }
 
     @objc private func toggleMeeting() {

@@ -20,7 +20,7 @@ This runbook lets a local coding agent install and verify WorkFlow without recei
    brew install cmake libomp rust
    ```
 
-3. Run the focused deterministic tests before installation:
+3. Run the focused deterministic tests before installation. The test host runs under its own bundle identifier, so the tests never read or change WorkFlow's preferences:
 
    ```bash
    DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer \
@@ -29,8 +29,11 @@ This runbook lets a local coding agent install and verify WorkFlow without recei
      -derivedDataPath build \
      -destination 'platform=macOS,arch=arm64' \
      CODE_SIGNING_ALLOWED=NO \
+     PRODUCT_BUNDLE_IDENTIFIER=com.picturesuo.WorkFlow.fmtest \
      -only-testing:OpenSuperWhisperTests/RenamedAppMigrationTests \
      -only-testing:OpenSuperWhisperTests/LatestDictationGateTests \
+     -only-testing:OpenSuperWhisperTests/LatestDictationDeliveryTests \
+     -only-testing:OpenSuperWhisperTests/DictationFailureRecoveryTests \
      -only-testing:OpenSuperWhisperTests/ClipboardRestoreTests \
      -only-testing:OpenSuperWhisperTests/OnboardingShortcutOptionTests \
      -only-testing:OpenSuperWhisperTests/EscapeCancelConfirmationTests \
@@ -49,6 +52,9 @@ This runbook lets a local coding agent install and verify WorkFlow without recei
      -only-testing:OpenSuperWhisperTests/FilterAssistantLayoutTests \
      -only-testing:OpenSuperWhisperTests/BrandPaletteTests \
      -only-testing:OpenSuperWhisperTests/BrandLayoutTests \
+     -only-testing:OpenSuperWhisperTests/MeaningPreservationGuardTests \
+     -only-testing:OpenSuperWhisperTests/CleanupReplyCompletenessTransportTests \
+     -only-testing:OpenSuperWhisperTests/RecognizerToCleanupTraceTests \
      -only-testing:OpenSuperWhisperTests/CustomFilterHistoryTests \
      -only-testing:OpenSuperWhisperTests/NumericPreservationGuardTests \
      -only-testing:OpenSuperWhisperTests/DictationSourceEvidenceTests \
@@ -58,8 +64,11 @@ This runbook lets a local coding agent install and verify WorkFlow without recei
      -only-testing:OpenSuperWhisperTests/LearnedPreferenceScopeTests \
      -only-testing:OpenSuperWhisperTests/CorrectionLearningSessionTests \
      -only-testing:OpenSuperWhisperTests/CorrectionLearningLayoutTests \
-     -only-testing:OpenSuperWhisperTests/DocumentTextExtractorTests
+     -only-testing:OpenSuperWhisperTests/DocumentTextExtractorTests \
+     -only-testing:OpenSuperWhisperTests/DictationLearningFlowTests
    ```
+
+   `RecognizerToCleanupTraceTests` skips itself unless the Parakeet v3 model is already cached. `DictationLearningFlowTests` uses scripted stand-ins for the recognizer and providers, so it proves the dictation-to-learning plumbing, not real provider quality.
 
 4. Install the app. The WorkFlow ivory ribbon icon is already included in the repository:
 
@@ -74,7 +83,7 @@ This runbook lets a local coding agent install and verify WorkFlow without recei
 8. Have the user perform one short dictation with their selected shortcut in a disposable text field. Confirm the newest spoken text appears and History contains the same result.
 9. Set **Technical** in the WorkFlow menu-bar menu and have the user dictate a verbose technical request. Confirm History labels it Technical and shows a source-to-final token estimate. Repeat with Homework only when the user wants to validate long-form behavior; do not fabricate samples in their History.
 10. For Bedrock or Azure OpenAI, open Cleanup settings, let the user enter the key, then let the user choose **Save & Test**. For Azure, the user also enters the resource endpoint and deployment name. Confirm a successful status with token counts. Leave the key field blank in all captured logs and screenshots.
-11. To verify Writing mode or learning, let the user select **Writing** (or another mode), dictate into a disposable document, edit it, then paste the whole finished document under **Settings → Personalization → Learn from finished writing** and select **Learn**. Confirm the outcome names the matched dictations and the learned preferences listed for that mode. Do not fabricate samples in their History.
+11. To verify Writing mode or learning, let the user select **Writing** (or another mode), dictate into a disposable document, edit it, then paste the whole finished document under **Settings → Personalize → Learn from finished writing** (also reached from **Learn…** beside the writing mode in the main window) and select **Learn**. Confirm the outcome names the matched dictations and the learned preferences listed for that mode. Do not fabricate samples in their History.
 12. To verify custom filters, let the user create one under **Settings → Cleanup → Custom filters** (for example **Everyday with digits**), select it in the menu-bar menu, and dictate a sentence with a spoken number. Confirm History labels the result with the filter name. Do not fabricate samples in their History. To verify AI drafting, let the user choose **Create with AI**, type or speak a request (and optionally paste a finished example), press **Send**, review the proposal, and save it.
 
 ## Definition of done

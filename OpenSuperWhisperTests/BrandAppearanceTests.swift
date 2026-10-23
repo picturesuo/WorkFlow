@@ -151,7 +151,8 @@ final class BrandLayoutTests: XCTestCase {
         for scheme in [ColorScheme.light, .dark] {
             let bitmap = try render(AnyView(VStack(spacing: 8) {
                 ForEach(Array(states.enumerated()), id: \.offset) { _, status in
-                    DictationDock(status: status, shortcut: "fn", writingSelection: .constant(.builtIn(.everyday)), onRecord: {})
+                    DictationDock(status: status, shortcut: "fn", writingSelection: .constant(.builtIn(.everyday)),
+                                  onLearn: {}, onRecord: {})
                 }
             }.background(ThemePalette.windowBackground(scheme))), name: "brand-dock-states", width: 440, scheme: scheme)
             XCTAssertEqual(purplePixels(in: bitmap), 0, "dock \(scheme)")
@@ -160,11 +161,11 @@ final class BrandLayoutTests: XCTestCase {
         XCTAssertEqual(DictationDockStatus.ready.detail(shortcut: ""), "Click the microphone to start")
     }
 
-    func testOnboardingSettingsAndIndicatorSurfaces() throws {
+    func testOnboardingAndSettingsSurfaces() throws {
         CustomCleanupFilterStore.save([CustomCleanupFilterStore.examples[0]], to: defaults)
         CustomCleanupFilterStore.select(.custom(CustomCleanupFilterStore.examples[0].id), in: defaults)
         for scheme in [ColorScheme.light, .dark] {
-            var bitmaps = [
+            let bitmaps = [
                 try render(AnyView(OnboardingWelcomeHeader().padding(20).frame(maxWidth: .infinity, alignment: .leading)
                     .background(ThemePalette.windowBackground(scheme))), name: "brand-onboarding-header", width: 440, scheme: scheme),
                 try render(AnyView(HistoryEmptyState(isSearching: false).background(ThemePalette.windowBackground(scheme))),
@@ -177,16 +178,28 @@ final class BrandLayoutTests: XCTestCase {
                     PermissionRow(isGranted: false, title: "Microphone Access", description: "Required for audio recording", action: {})
                 }.padding().background(Color(.windowBackgroundColor))), name: "brand-settings-controls", width: 440, scheme: scheme),
             ]
-            bitmaps.append(try render(AnyView(HStack(spacing: 8) {
-                RecordingIndicator(isBlinking: false).frame(width: 24)
-                Text("Recording...").font(.system(size: 13, weight: .medium)).foregroundColor(.white)
-            }
-            .padding(.horizontal, 24)
-            .frame(width: IndicatorWindow.cardSize.width, height: IndicatorWindow.cardSize.height, alignment: .leading)
-            .background(BrandPalette.charcoal.opacity(0.9), in: RoundedRectangle(cornerRadius: 24))
-            .padding(20)), name: "brand-indicator-recording", width: 240, scheme: scheme))
             for bitmap in bitmaps {
                 XCTAssertEqual(purplePixels(in: bitmap), 0, "\(scheme)")
+            }
+        }
+    }
+
+    func testIndicatorMessagesFitTheCardAndStayOnBrand() throws {
+        let viewModel = IndicatorViewModel(
+            latestDictationGate: LatestDictationGate(),
+            transcriptionService: TranscriptionService(engine: ControlledTranscriptionEngine { _ in })
+        )
+        defer { viewModel.cleanup() }
+        let states: [RecordingState] = [
+            .connecting, .recording, .decoding, .busy, .noMicrophone,
+            .recordingFailed, .transcriptionFailed, .pasteFailed, .clipboardFailed
+        ]
+        for scheme in [ColorScheme.light, .dark] {
+            for state in states {
+                viewModel.state = state
+                let bitmap = try render(AnyView(IndicatorWindow(viewModel: viewModel)),
+                                        name: "brand-indicator-\(state)", width: IndicatorWindow.windowSize.width, scheme: scheme)
+                XCTAssertEqual(purplePixels(in: bitmap), 0, "\(state) \(scheme)")
             }
         }
     }
@@ -259,7 +272,8 @@ private struct MainWindowFixture: View {
             }
             .padding(.horizontal, WFSpace.xl)
             Spacer(minLength: WFSpace.md)
-            DictationDock(status: status, shortcut: "fn", writingSelection: .constant(.builtIn(.technical)), onRecord: {})
+            DictationDock(status: status, shortcut: "fn", writingSelection: .constant(.builtIn(.technical)),
+                          onLearn: {}, onRecord: {})
         }
         .frame(height: 640)
         .background(ThemePalette.windowBackground(scheme))

@@ -10,6 +10,7 @@ enum RecordingState {
     case busy
     case noMicrophone
     case recordingFailed
+    case transcriptionFailed
     case pasteFailed
     case clipboardFailed
 }
@@ -41,24 +42,29 @@ class IndicatorViewModel: ObservableObject {
     
     private let recordingStore: RecordingStore
     private let transcriptionService: TranscriptionService
-    private let transcriptionQueue: TranscriptionQueue
+    // Resolved on first use: the shared queue loads the speech engine.
+    private lazy var transcriptionQueue: TranscriptionQueue = .shared
     private let cleanupPipeline: TranscriptCleanupPipeline
     private let latestDictationGate: LatestDictationGate
     private var dictationGeneration: UInt64?
     var recorderSessionID: UUID?
     private let pasteTarget: PasteTarget?
+    private let delivery: ((String) -> DictationDisposition)?
     
     init(
         pasteTarget: PasteTarget? = nil,
         latestDictationGate: LatestDictationGate? = nil,
-        transcriptionService: TranscriptionService? = nil
+        transcriptionService: TranscriptionService? = nil,
+        recordingStore: RecordingStore? = nil,
+        cleanupPipeline: TranscriptCleanupPipeline? = nil,
+        delivery: ((String) -> DictationDisposition)? = nil
     ) {
-        self.recordingStore = RecordingStore.shared
+        self.recordingStore = recordingStore ?? .shared
         self.transcriptionService = transcriptionService ?? .shared
-        self.transcriptionQueue = TranscriptionQueue.shared
-        self.cleanupPipeline = TranscriptCleanupPipeline.shared
+        self.cleanupPipeline = cleanupPipeline ?? .shared
         self.latestDictationGate = latestDictationGate ?? .shared
         self.pasteTarget = pasteTarget
+        self.delivery = delivery
         
         recorder.$isConnecting
             .receive(on: RunLoop.main)
@@ -225,107 +231,7 @@ class IndicatorViewModel: ObservableObject {
             let generation = self.dictationGeneration ?? self.latestDictationGate.begin()
             
             if let tempURL = await self.recorder.stopRecording(sessionID: sessionID) {
-                do {
-                    print("start decoding...")
-                    let duration = await AudioUtil.audioDuration(url: tempURL)
-                    let rawText = try await transcriptionService.transcribeAudio(url: tempURL, settings: Settings())
-                    
-                    if rawText.isEmpty {
-                        try? FileManager.default.removeItem(at: tempURL)
-                        print("No speech detected, dictation discarded")
-                    } else {
-                        let filter = CustomCleanupFilterStore.currentSnapshot()
-                        self.isFinalizing = true
-                        let cleanup = await self.cleanupPipeline.finalize(
-                            rawText,
-                            targetBundleID: self.pasteTarget?.bundleID,
-                            filterOverride: filter
-                        )
-                        self.isFinalizing = false
-
-                        let text = cleanup.text
-                        guard !text.isEmpty else {
-                            try? FileManager.default.removeItem(at: tempURL)
-                            print("Cleanup produced an empty dictation; discarded")
-                            self.delegate?.didFinishDecoding(self)
-                            return
-                        }
-
-                        let timestamp = Date()
-                        let recordingId = UUID()
-                        let fileName = AudioRecorder.recordingFileName(id: recordingId)
-                        let newRecording = Recording(
-                            id: recordingId,
-                            timestamp: timestamp,
-                            fileName: fileName,
-                            transcription: text,
-                            duration: duration,
-                            status: .completed,
-                            progress: 1.0,
-                            sourceFileURL: nil,
-                            cleanupSource: cleanup.source,
-                            cleanupInputTokens: cleanup.inputTokens,
-                            cleanupOutputTokens: cleanup.outputTokens,
-                            cleanupModelID: cleanup.modelID,
-                            cleanupRequested: cleanup.source != .disabled,
-                            targetBundleID: self.pasteTarget?.bundleID,
-                            cleanupMode: cleanup.cleanupMode,
-                            cleanupFilterName: cleanup.customFilterName,
-                            cleanupFilterInstructions: cleanup.customFilterInstructions,
-                            rawTokenEstimate: cleanup.rawTokenEstimate,
-                            finalTokenEstimate: cleanup.finalTokenEstimate,
-                            tokenEstimatorID: cleanup.tokenEstimatorID
-                        )
-                        
-                        try recorder.moveTemporaryRecording(from: tempURL, to: newRecording.url)
-
-                        // claimIfCurrent is process-wide and one-shot, so an older
-                        // session finishing late cannot paste over a newer dictation.
-                        let isCurrent = self.latestDictationGate.claimIfCurrent(generation)
-                        let disposition = isCurrent ? self.deliver(text) : .staleSkipped
-                        let attemptedDelivery = [.pasteSent, .pasteFailed, .copiedOnly].contains(disposition)
-                        let source = DictationSource(
-                            recordingID: recordingId,
-                            recordingStartedAt: recordingStartedAt,
-                            recognizerText: rawText,
-                            cleanup: cleanup,
-                            fallbackFilter: filter,
-                            disposition: disposition,
-                            insertedText: attemptedDelivery ? Self.applyPostProcessing(text) : nil
-                        )
-                        await MainActor.run {
-                            self.recordingStore.addRecording(newRecording, source: source)
-                        }
-
-                        guard isCurrent else {
-                            print("Saved stale or already-pasted dictation generation \(generation) without pasting")
-                            self.delegate?.didFinishDecoding(self)
-                            return
-                        }
-                        
-                        guard disposition != .pasteFailed else {
-                            let recoveryState: RecordingState =
-                                NSPasteboard.general.string(forType: .string) == Self.applyPostProcessing(text)
-                                ? .pasteFailed
-                                : .clipboardFailed
-                            showAutoDismissingMessage(recoveryState)
-                            return
-                        }
-                        print(
-                            "Final transcript source=\(cleanup.source) " +
-                            "inputTokens=\(cleanup.inputTokens.map(String.init) ?? "unknown") " +
-                            "outputTokens=\(cleanup.outputTokens.map(String.init) ?? "unknown")"
-                        )
-                    }
-                } catch {
-                    self.isFinalizing = false
-                    print("Audio transcription failed.")
-                    try? FileManager.default.removeItem(at: tempURL)
-                }
-                
-                await MainActor.run {
-                    self.delegate?.didFinishDecoding(self)
-                }
+                await self.finishDictation(audioAt: tempURL, generation: generation, recordingStartedAt: recordingStartedAt)
             } else {
                 print("!!! Not found record url !!!")
                 
@@ -335,7 +241,135 @@ class IndicatorViewModel: ObservableObject {
             }
         }
     }
-    
+
+    /// Transcribes, cleans up, saves, and delivers one stopped dictation.
+    func finishDictation(audioAt tempURL: URL, generation: UInt64, recordingStartedAt: Date?) async {
+        let duration = await AudioUtil.audioDuration(url: tempURL)
+        do {
+            print("start decoding...")
+            let rawText = try await transcriptionService.transcribeAudio(url: tempURL, settings: Settings())
+            
+            if rawText.isEmpty {
+                try? FileManager.default.removeItem(at: tempURL)
+                print("No speech detected, dictation discarded")
+            } else {
+                let filter = cleanupPipeline.selectedFilter()
+                self.isFinalizing = true
+                let cleanup = await self.cleanupPipeline.finalize(
+                    rawText,
+                    targetBundleID: self.pasteTarget?.bundleID,
+                    filterOverride: filter
+                )
+                self.isFinalizing = false
+
+                let text = cleanup.text
+                guard !text.isEmpty else {
+                    try? FileManager.default.removeItem(at: tempURL)
+                    print("Cleanup produced an empty dictation; discarded")
+                    self.delegate?.didFinishDecoding(self)
+                    return
+                }
+
+                let timestamp = Date()
+                let recordingId = UUID()
+                let fileName = AudioRecorder.recordingFileName(id: recordingId)
+                var newRecording = Recording(
+                    id: recordingId,
+                    timestamp: timestamp,
+                    fileName: fileName,
+                    transcription: text,
+                    duration: duration,
+                    status: .completed,
+                    progress: 1.0,
+                    sourceFileURL: nil,
+                    cleanupSource: cleanup.source,
+                    cleanupInputTokens: cleanup.inputTokens,
+                    cleanupOutputTokens: cleanup.outputTokens,
+                    cleanupModelID: cleanup.modelID,
+                    cleanupRequested: cleanup.source != .disabled,
+                    targetBundleID: self.pasteTarget?.bundleID,
+                    cleanupMode: cleanup.cleanupMode,
+                    cleanupFilterName: cleanup.customFilterName,
+                    cleanupFilterInstructions: cleanup.customFilterInstructions,
+                    rawTokenEstimate: cleanup.rawTokenEstimate,
+                    finalTokenEstimate: cleanup.finalTokenEstimate,
+                    tokenEstimatorID: cleanup.tokenEstimatorID
+                )
+                
+                // A failed move must not lose the transcript: it is still
+                // delivered and saved, with whatever audio is left.
+                let audioURL = recorder.keepTemporaryRecording(tempURL, at: newRecording.url)
+                if audioURL != newRecording.url {
+                    newRecording.sourceFileURL = audioURL?.path
+                }
+
+                // claimIfCurrent is process-wide and one-shot, so an older
+                // session finishing late cannot paste over a newer dictation.
+                let isCurrent = self.latestDictationGate.claimIfCurrent(generation)
+                let disposition = isCurrent ? (delivery ?? deliver)(text) : .staleSkipped
+                let attemptedDelivery = [.pasteSent, .pasteFailed, .copiedOnly].contains(disposition)
+                let source = DictationSource(
+                    recordingID: recordingId,
+                    recordingStartedAt: recordingStartedAt,
+                    recognizerText: rawText,
+                    cleanup: cleanup,
+                    fallbackFilter: filter,
+                    disposition: disposition,
+                    insertedText: attemptedDelivery ? Self.applyPostProcessing(text) : nil
+                )
+                await MainActor.run {
+                    self.recordingStore.addRecording(newRecording, source: source)
+                }
+
+                guard isCurrent else {
+                    print("Saved stale or already-pasted dictation generation \(generation) without pasting")
+                    self.delegate?.didFinishDecoding(self)
+                    return
+                }
+                
+                guard disposition != .pasteFailed else {
+                    let recoveryState: RecordingState =
+                        NSPasteboard.general.string(forType: .string) == Self.applyPostProcessing(text)
+                        ? .pasteFailed
+                        : .clipboardFailed
+                    showAutoDismissingMessage(recoveryState)
+                    return
+                }
+                print(
+                    "Final transcript source=\(cleanup.source) " +
+                    "inputTokens=\(cleanup.inputTokens.map(String.init) ?? "unknown") " +
+                    "outputTokens=\(cleanup.outputTokens.map(String.init) ?? "unknown")"
+                )
+            }
+        } catch is CancellationError {
+            self.isFinalizing = false
+            print("Audio transcription cancelled.")
+            try? FileManager.default.removeItem(at: tempURL)
+        } catch {
+            self.isFinalizing = false
+            print("Audio transcription failed; the audio is kept in History.")
+            _ = await recordingStore.addFailedDictation(
+                audioAt: tempURL,
+                error: error,
+                duration: duration,
+                selectedFilter: cleanupPipeline.selectedFilter(),
+                cleanupRequested: cleanupPipeline.cleanupRequested(targetBundleID: pasteTarget?.bundleID),
+                targetBundleID: pasteTarget?.bundleID,
+                recordingStartedAt: recordingStartedAt,
+                keepAudio: recorder.keepTemporaryRecording
+            )
+            // A newer dictation owns the indicator; its own outcome is shown.
+            if latestDictationGate.isCurrent(generation) {
+                showAutoDismissingMessage(.transcriptionFailed)
+                return
+            }
+        }
+        
+        await MainActor.run {
+            self.delegate?.didFinishDecoding(self)
+        }
+    }
+
     /// Delivers the text as the app rule and preferences ask and reports
     /// what was done. A posted Cmd+V is not proof the target inserted it.
     func deliver(_ text: String) -> DictationDisposition {
@@ -489,6 +523,8 @@ struct IndicatorWindow: View {
                     Text("Connecting...")
                         .font(.system(size: 13, weight: .medium))
                         .foregroundColor(.white)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.85)
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
                 
@@ -502,11 +538,15 @@ struct IndicatorWindow: View {
                             .font(.system(size: 12, weight: .semibold))
                             .foregroundColor(.orange)
                             .transition(.opacity)
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.85)
                     } else {
                         Text("Recording...")
                             .font(.system(size: 13, weight: .medium))
                             .foregroundColor(.white)
                             .transition(.opacity)
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.85)
                     }
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -522,6 +562,8 @@ struct IndicatorWindow: View {
                     Text(viewModel.isFinalizing ? "Refining..." : "Transcribing...")
                         .font(.system(size: 13, weight: .medium))
                         .foregroundColor(.white)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.85)
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
                 
@@ -534,6 +576,8 @@ struct IndicatorWindow: View {
                     Text("Processing...")
                         .font(.system(size: 13, weight: .semibold))
                         .foregroundColor(.orange)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.85)
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
 
@@ -546,6 +590,8 @@ struct IndicatorWindow: View {
                     Text("No microphone")
                         .font(.system(size: 13, weight: .semibold))
                         .foregroundColor(.orange)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.85)
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
 
@@ -558,6 +604,22 @@ struct IndicatorWindow: View {
                     Text("Recording failed")
                         .font(.system(size: 13, weight: .semibold))
                         .foregroundColor(.orange)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.85)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+
+            case .transcriptionFailed:
+                HStack(spacing: 8) {
+                    Image(systemName: "exclamationmark.triangle")
+                        .foregroundColor(.orange)
+                        .frame(width: 24)
+
+                    Text("Transcription failed")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundColor(.orange)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.85)
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
 
@@ -567,9 +629,11 @@ struct IndicatorWindow: View {
                         .foregroundColor(.orange)
                         .frame(width: 24)
 
-                    Text("Paste failed — copied instead")
+                    Text("Copied, not pasted")
                         .font(.system(size: 13, weight: .semibold))
                         .foregroundColor(.orange)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.85)
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
 
@@ -579,9 +643,11 @@ struct IndicatorWindow: View {
                         .foregroundColor(.orange)
                         .frame(width: 24)
 
-                    Text("Paste failed — saved in History")
+                    Text("Not pasted, in History")
                         .font(.system(size: 13, weight: .semibold))
                         .foregroundColor(.orange)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.85)
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
 
@@ -589,7 +655,7 @@ struct IndicatorWindow: View {
                 EmptyView()
             }
         }
-        .padding(.horizontal, 24)
+        .padding(.horizontal, 16)
         .frame(height: Self.cardSize.height)
         .background {
             rect

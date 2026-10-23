@@ -1321,14 +1321,17 @@ final class KeyboardLayoutProviderTests: XCTestCase {
 
 @MainActor
 final class AddSpaceAfterSentenceTests: XCTestCase {
+    private var savedPreference: Any?
     
     override func setUp() {
         super.setUp()
+        savedPreference = UserDefaults.standard.object(forKey: "addSpaceAfterSentence")
         AppPreferences.shared.addSpaceAfterSentence = true
     }
     
     override func tearDown() {
-        AppPreferences.shared.addSpaceAfterSentence = true
+        // Restore whatever the host had, including no value at all.
+        UserDefaults.standard.set(savedPreference, forKey: "addSpaceAfterSentence")
         super.tearDown()
     }
     

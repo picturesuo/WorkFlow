@@ -11,6 +11,7 @@ struct CorrectionLearningCard: View {
     @State private var isConfirmingReset = false
     @State private var isChoosingFile = false
     @State private var isDropTargeted = false
+    @Environment(\.colorScheme) private var colorScheme
     private let defaults: UserDefaults
 
     @MainActor
@@ -28,11 +29,12 @@ struct CorrectionLearningCard: View {
         LearnedPreferenceStore.preferences(from: preferencesData).filter { $0.mode == session.mode }
     }
 
+    /// Where Learn sends data, stated next to the button that sends it.
     private var disclosure: String {
         let destination = session.destination.isOnThisMac
             ? "\(session.destination.summary), on this Mac"
             : session.destination.summary
-        return "WorkFlow matches the document to your History on this Mac. Only the short edits it can match, with a few words around each, are sent to \(destination). The document and any file you add are read on this Mac and not saved. New dictations keep their original transcript on this Mac until you delete them from History; older History has no original, so only WorkFlow's saved text is compared."
+        return "Learn sends only the short edits it matches to your History, with a few words around each, to \(destination). The document and any file you add are read on this Mac and not saved."
     }
 
     var body: some View {
@@ -54,15 +56,23 @@ struct CorrectionLearningCard: View {
                     .accessibilityValue(learningEnabled ? "On" : "Off")
             }
 
-            Picker("Mode", selection: $session.mode) {
-                ForEach(CleanupMode.allCases) { mode in
-                    Text(mode.displayName).tag(mode)
+            HStack(spacing: 10) {
+                Text("Learn for")
+                    .font(.subheadline)
+                    .foregroundColor(.secondary)
+                    .accessibilityHidden(true)
+                Picker("Mode to learn for", selection: $session.mode) {
+                    ForEach(CleanupMode.allCases) { mode in
+                        Text(mode.displayName).tag(mode)
+                    }
                 }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+                .fixedSize()
+                .disabled(session.isLearning)
+                .accessibilityLabel("Mode to learn for")
+                Spacer(minLength: 0)
             }
-            .pickerStyle(.segmented)
-            .labelsHidden()
-            .disabled(session.isLearning)
-            .accessibilityLabel("Mode to learn for")
 
             DocumentDropEditor(
                 text: $session.document,
@@ -85,16 +95,11 @@ struct CorrectionLearningCard: View {
             .overlay {
                 if isDropTargeted || session.isLoadingFile {
                     RoundedRectangle(cornerRadius: 6)
-                        .strokeBorder(Color.accentColor, style: StrokeStyle(lineWidth: 2, dash: [6, 4]))
+                        .strokeBorder(ThemePalette.ink(colorScheme).opacity(0.45), style: StrokeStyle(lineWidth: 2, dash: [6, 4]))
                         .allowsHitTesting(false)
                 }
             }
             .accessibilityLabel("Finished document")
-
-            Text(disclosure)
-                .font(.caption)
-                .foregroundColor(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
 
             HStack(spacing: 10) {
                 if session.isLearning {
@@ -121,6 +126,11 @@ struct CorrectionLearningCard: View {
                     .foregroundColor(session.document.count > CorrectionAligner.maximumDocumentLength ? .orange : .secondary)
                 Spacer()
             }
+
+            Text(disclosure)
+                .font(.caption)
+                .foregroundColor(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
 
             if let error = session.errorMessage {
                 Text(error)
@@ -191,6 +201,11 @@ struct CorrectionLearningCard: View {
                     .accessibilityLabel("Delete learned preference: \(preference.instruction)")
                 }
             }
+
+            Text("New dictations keep their original transcript on this Mac until you delete them from History. Older History has none, so only WorkFlow’s saved text is compared.")
+                .font(.caption2)
+                .foregroundColor(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
         }
         .fileImporter(
             isPresented: $isChoosingFile,

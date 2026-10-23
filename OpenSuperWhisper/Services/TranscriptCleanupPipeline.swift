@@ -160,6 +160,16 @@ final class TranscriptCleanupPipeline {
         )
     }
 
+    /// The filter a dictation stopped now would use, captured once per dictation.
+    func selectedFilter() -> CleanupFilterSnapshot {
+        filterProvider()
+    }
+
+    /// Whether `finalize` would clean up a dictation for this app.
+    func cleanupRequested(targetBundleID: String?) -> Bool {
+        TargetAppRuleStore.cleanupEnabled(rule: appRuleProvider(targetBundleID), globalDefault: isEnabled())
+    }
+
     func finalize(
         _ rawTranscript: String,
         targetBundleID: String? = nil,

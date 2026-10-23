@@ -375,6 +375,18 @@ class AudioRecorder: NSObject, ObservableObject {
 
         try FileManager.default.moveItem(at: tempURL, to: finalURL)
     }
+
+    /// Moves a finished recording into History. If that fails, audio still at
+    /// its temporary path stays there; nil means no audio is left.
+    func keepTemporaryRecording(_ tempURL: URL, at finalURL: URL) -> URL? {
+        do {
+            try moveTemporaryRecording(from: tempURL, to: finalURL)
+            return finalURL
+        } catch {
+            print("Could not move the recording into History.")
+            return FileManager.default.fileExists(atPath: tempURL.path) ? tempURL : nil
+        }
+    }
     
     func playRecording(url: URL) {
         // Stop current playback if any

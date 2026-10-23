@@ -73,6 +73,10 @@ struct Recording: Identifiable, Codable, FetchableRecord, PersistableRecord, Equ
     }
 
     static var recordingsDirectory: URL {
+        // The test host is the real-identity app: its audio never goes into the user's History folder.
+        if OpenSuperWhisperApp.isRunningTests {
+            return FileManager.default.temporaryDirectory.appendingPathComponent("WorkFlowTestRecordings")
+        }
         let applicationSupport = FileManager.default.urls(
             for: .applicationSupportDirectory, in: .userDomainMask
         ).first!
@@ -167,9 +171,7 @@ class RecordingStore: ObservableObject {
             }
             try self.init(
                 database: isTesting ? DatabaseQueue() : DatabaseQueue(path: dbPath.path),
-                recordingsDirectory: isTesting
-                    ? FileManager.default.temporaryDirectory.appendingPathComponent("WorkFlowTestRecordings")
-                    : appDirectory.appendingPathComponent("recordings"),
+                recordingsDirectory: Recording.recordingsDirectory,
                 cancelQueuedRecording: { TranscriptionQueue.shared.cancelRecording($0) },
                 stopPlayback: { urls in
                     let recorder = AudioRecorder.shared
@@ -512,6 +514,60 @@ class RecordingStore: ObservableObject {
         try await dbQueue.write { db in
             try recording.insert(db)
             try source?.insert(db)
+        }
+    }
+
+    /// Keeps a dictation the recognizer failed on as a failed row with its
+    /// audio, the way the queue keeps its failures, so Regenerate can retry
+    /// it. `keepAudio` moves the audio into History and returns where it is
+    /// left. Returns whether History saved the row.
+    func addFailedDictation(
+        audioAt tempURL: URL,
+        error: Error,
+        duration: TimeInterval,
+        selectedFilter: CleanupFilterSnapshot,
+        cleanupRequested: Bool,
+        targetBundleID: String?,
+        recordingStartedAt: Date?,
+        keepAudio: (URL, URL) -> URL?
+    ) async -> Bool {
+        let filter = cleanupRequested ? selectedFilter : nil
+        let id = UUID()
+        var recording = Recording(
+            id: id,
+            timestamp: Date(),
+            fileName: AudioRecorder.recordingFileName(id: id),
+            transcription: TranscriptionQueue.failedTranscriptionText(error),
+            duration: duration,
+            status: .failed,
+            progress: 0,
+            sourceFileURL: nil,
+            cleanupRequested: cleanupRequested,
+            targetBundleID: targetBundleID,
+            cleanupMode: filter?.mode,
+            cleanupFilterName: filter?.customName,
+            cleanupFilterInstructions: filter?.customInstructions
+        )
+        let audioURL = keepAudio(tempURL, recording.url)
+        if audioURL != recording.url {
+            recording.sourceFileURL = audioURL?.path
+        }
+        do {
+            try await addRecordingSync(
+                recording,
+                source: DictationSource(
+                    recordingID: id,
+                    recordingStartedAt: recordingStartedAt,
+                    disposition: .pending,
+                    filter: selectedFilter
+                )
+            )
+            return true
+        } catch {
+            // No History row owns this audio.
+            if let audioURL { try? FileManager.default.removeItem(at: audioURL) }
+            print("Failed to save the failed dictation to History.")
+            return false
         }
     }
 

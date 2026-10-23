@@ -209,6 +209,11 @@ class TranscriptionQueue: ObservableObject {
         startProcessingQueue()
     }
 
+    /// The History text of a dictation whose transcription failed.
+    nonisolated static func failedTranscriptionText(_ error: Error) -> String {
+        "Failed to transcribe: \(error.localizedDescription)"
+    }
+
     nonisolated static func shouldDiscardEmptyDictation(
         text: String,
         sourceURL: URL,
@@ -408,7 +413,7 @@ class TranscriptionQueue: ObservableObject {
                 if await discardCancelledOutput(recording) { return }
                 await recordingStore.updateRecordingProgressOnlySync(
                     recording.id,
-                    transcription: "Failed to transcribe: \(error.localizedDescription)",
+                    transcription: Self.failedTranscriptionText(error),
                     progress: 0.0,
                     status: .failed,
                     isRegeneration: false
