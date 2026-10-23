@@ -5,6 +5,7 @@ enum OpenAIChatCleanupError: LocalizedError, Equatable {
     case invalidResponse
     case requestFailed(statusCode: Int, message: String)
     case emptyResponse
+    case incompleteResponse
     case unsafeRewrite
 
     var errorDescription: String? {
@@ -13,6 +14,7 @@ enum OpenAIChatCleanupError: LocalizedError, Equatable {
         case .invalidResponse: "The cleanup provider returned an invalid response."
         case .requestFailed(let statusCode, let message): "Cleanup request failed (HTTP \(statusCode)): \(message)"
         case .emptyResponse: "The cleanup provider returned no transcript."
+        case .incompleteResponse: "The cleanup provider stopped before finishing the transcript."
         case .unsafeRewrite: "The cleanup provider changed the transcript too aggressively."
         }
     }
@@ -76,13 +78,18 @@ final class OpenAIChatCleanupService: TranscriptCleanupProviding, CleanupChatCom
             return CleanupProviderResult(text: "", inputTokens: 0, outputTokens: 0, modelID: modelID)
         }
 
-        let result = try await complete(
+        let (result, stopReason) = try await send(
             ProviderChatRequest(
                 systemPrompt: systemPrompt,
                 messages: [ProviderChatMessage(role: .user, content: "RAW_TRANSCRIPTION:\n\(raw)")],
                 maxOutputTokens: CleanupTokenBudget.outputTokenLimit(for: raw, mode: cleanupMode)
             )
         )
+        // A reply cut off at the token limit or by a content filter reads as
+        // a valid but shorter rewrite and would drop the end of the dictation.
+        guard !Self.incompleteStopReasons.contains(stopReason ?? "") else {
+            throw OpenAIChatCleanupError.incompleteResponse
+        }
 
         do {
             let cleaned = try CleanupGuard.postprocess(
@@ -104,7 +111,14 @@ final class OpenAIChatCleanupService: TranscriptCleanupProviding, CleanupChatCom
         }
     }
 
+    /// OpenAI and Azure report `finish_reason`; Ollama reports `done_reason`.
+    static let incompleteStopReasons: Set<String> = ["length", "content_filter"]
+
     func complete(_ chat: ProviderChatRequest) async throws -> CleanupProviderResult {
+        try await send(chat).result
+    }
+
+    private func send(_ chat: ProviderChatRequest) async throws -> (result: CleanupProviderResult, stopReason: String?) {
         let model = modelID.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !model.isEmpty else {
             throw OpenAIChatCleanupError.invalidConfiguration(
@@ -181,23 +195,25 @@ final class OpenAIChatCleanupService: TranscriptCleanupProviding, CleanupChatCom
 
         if providerID == .ollama {
             let decoded = try JSONDecoder().decode(OllamaResponse.self, from: result.data)
-            return CleanupProviderResult(
+            let reply = CleanupProviderResult(
                 text: decoded.message.content,
                 inputTokens: decoded.promptEvalCount,
                 outputTokens: decoded.evalCount,
                 modelID: model
             )
+            return (reply, decoded.doneReason)
         }
         let decoded = try JSONDecoder().decode(OpenAIResponse.self, from: result.data)
-        guard let content = decoded.choices.first?.message.content else {
+        guard let choice = decoded.choices.first else {
             throw OpenAIChatCleanupError.invalidResponse
         }
-        return CleanupProviderResult(
-            text: content,
+        let reply = CleanupProviderResult(
+            text: choice.message.content,
             inputTokens: decoded.usage?.promptTokens,
             outputTokens: decoded.usage?.completionTokens,
             modelID: model
         )
+        return (reply, choice.finishReason)
     }
 
     private func endpointURL() throws -> URL {
@@ -324,7 +340,14 @@ private struct OllamaRequest: Encodable {
 }
 
 private struct OpenAIResponse: Decodable {
-    struct Choice: Decodable { let message: ChatMessage }
+    struct Choice: Decodable {
+        let message: ChatMessage
+        let finishReason: String?
+        enum CodingKeys: String, CodingKey {
+            case message
+            case finishReason = "finish_reason"
+        }
+    }
     struct Usage: Decodable {
         let promptTokens: Int?
         let completionTokens: Int?
@@ -341,10 +364,12 @@ private struct OllamaResponse: Decodable {
     let message: ChatMessage
     let promptEvalCount: Int?
     let evalCount: Int?
+    let doneReason: String?
     enum CodingKeys: String, CodingKey {
         case message
         case promptEvalCount = "prompt_eval_count"
         case evalCount = "eval_count"
+        case doneReason = "done_reason"
     }
 }
 

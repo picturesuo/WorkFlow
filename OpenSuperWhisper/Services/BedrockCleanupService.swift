@@ -26,6 +26,7 @@ enum BedrockCleanupError: LocalizedError, Equatable {
     case invalidResponse
     case requestFailed(statusCode: Int, message: String)
     case emptyResponse
+    case incompleteResponse
     case unsafeRewrite
 
     var errorDescription: String? {
@@ -38,6 +39,8 @@ enum BedrockCleanupError: LocalizedError, Equatable {
             "Bedrock request failed (HTTP \(statusCode)): \(message)"
         case .emptyResponse:
             "Bedrock returned no cleaned transcript."
+        case .incompleteResponse:
+            "Bedrock stopped before finishing the cleaned transcript."
         case .unsafeRewrite:
             "Bedrock changed the transcript too aggressively."
         }
@@ -81,7 +84,7 @@ final class BedrockCleanupService {
             return BedrockCleanupResponse(text: "", inputTokens: 0, outputTokens: 0)
         }
 
-        let response = try await complete(
+        let (response, stopReason) = try await send(
             ProviderChatRequest(
                 systemPrompt: systemPrompt,
                 messages: [ProviderChatMessage(role: .user, content: "RAW_TRANSCRIPTION:\n\(raw)")],
@@ -90,6 +93,11 @@ final class BedrockCleanupService {
             apiKey: apiKey,
             configuration: configuration
         )
+        // A reply cut off at the token limit or by a content filter reads as
+        // a valid but shorter rewrite and would drop the end of the dictation.
+        guard !Self.incompleteStopReasons.contains(stopReason ?? "") else {
+            throw BedrockCleanupError.incompleteResponse
+        }
 
         let cleaned: String
         do {
@@ -119,12 +127,22 @@ final class BedrockCleanupService {
         )
     }
 
+    static let incompleteStopReasons: Set<String> = ["max_tokens", "guardrail_intervened", "content_filtered"]
+
     /// Sends one Converse request and returns the raw reply text, unvalidated.
     func complete(
         _ chat: ProviderChatRequest,
         apiKey: String,
         configuration: BedrockCleanupConfiguration
     ) async throws -> BedrockCleanupResponse {
+        try await send(chat, apiKey: apiKey, configuration: configuration).response
+    }
+
+    private func send(
+        _ chat: ProviderChatRequest,
+        apiKey: String,
+        configuration: BedrockCleanupConfiguration
+    ) async throws -> (response: BedrockCleanupResponse, stopReason: String?) {
         let region = configuration.region.trimmingCharacters(in: .whitespacesAndNewlines)
         let modelID = configuration.modelID.trimmingCharacters(in: .whitespacesAndNewlines)
         let token = apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -174,11 +192,12 @@ final class BedrockCleanupService {
         guard let text = decoded.output.message.content.first?.text else {
             throw BedrockCleanupError.invalidResponse
         }
-        return BedrockCleanupResponse(
+        let response = BedrockCleanupResponse(
             text: text,
             inputTokens: decoded.usage?.inputTokens,
             outputTokens: decoded.usage?.outputTokens
         )
+        return (response, decoded.stopReason)
     }
 
 }
@@ -222,6 +241,7 @@ private struct ConverseResponse: Decodable {
     }
 
     let output: Output
+    let stopReason: String?
     let usage: Usage?
 }
 
