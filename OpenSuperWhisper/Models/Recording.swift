@@ -87,6 +87,17 @@ struct Recording: Identifiable, Codable, FetchableRecord, PersistableRecord, Equ
     var url: URL {
         Self.recordingsDirectory.appendingPathComponent(fileName)
     }
+
+    /// The audio this row can still play or regenerate from: its History file,
+    /// else audio kept at its temporary path after a failed move; nil if none is left.
+    var playableAudioURL: URL? {
+        let fileManager = FileManager.default
+        if fileManager.fileExists(atPath: url.path) { return url }
+        if let sourceFileURL, !sourceFileURL.isEmpty, fileManager.fileExists(atPath: sourceFileURL) {
+            return URL(fileURLWithPath: sourceFileURL)
+        }
+        return nil
+    }
     
     var isPending: Bool {
         status == .pending || status == .converting || status == .transcribing
@@ -369,6 +380,18 @@ class RecordingStore: ObservableObject {
         }
     }
     
+    /// Every audio path History still points to outside its own folder:
+    /// queued sources, failed queue items, and audio kept after a failed move.
+    nonisolated func referencedAudioPaths() async throws -> Set<String> {
+        try await dbQueue.read { db in
+            let paths = try String.fetchAll(
+                db,
+                Recording.select(Recording.Columns.sourceFileURL).filter(Recording.Columns.sourceFileURL != nil)
+            )
+            return Set(paths.filter { !$0.isEmpty }.map { URL(fileURLWithPath: $0).standardizedFileURL.path })
+        }
+    }
+
     nonisolated func fetchRecordings(limit: Int, offset: Int) async throws -> [Recording] {
         try await dbQueue.read { db in
             try Recording
@@ -776,7 +799,7 @@ class RecordingStore: ObservableObject {
     }
 
     nonisolated func updateSourceFileURL(_ id: UUID, sourceURL: String) async throws {
-        try await dbQueue.write { db in
+        _ = try await dbQueue.write { db in
             try Recording
                 .filter(Recording.Columns.id == id)
                 .updateAll(db, [

@@ -51,7 +51,7 @@ To make a mode more specific, open **Settings → Cleanup → Custom filters**, 
 
 WorkFlow launches at login and stays available in the menu bar by default. Dictation works entirely locally before any API is configured.
 
-If you sometimes press Escape accidentally, enable **Settings → Shortcuts → Ignore Esc while recording**. Escape will then leave active dictations recording; use the configured recording shortcut to finish normally.
+If you sometimes press Escape accidentally, enable **Settings → Shortcuts → Ignore Esc while recording**. Escape will then leave active dictations recording; use the configured recording shortcut to finish normally. Escape while a stopped dictation is still transcribing cancels its paste either way; the text stays in History.
 
 ## Optional Bedrock cleanup
 

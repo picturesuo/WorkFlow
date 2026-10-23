@@ -166,6 +166,48 @@ final class DictationFailureRecoveryTests: XCTestCase {
         XCTAssertEqual(rows.first?.status, .completed)
     }
 
+    // Esc cancels a dictation that is still transcribing (the indicator's
+    // contract, see EscapeCancelConfirmationTests): nothing is pasted, and the
+    // words are kept in History.
+    func testEscWhileTranscribingSavesTheDictationWithoutPasting() async throws {
+        let audio = try makeAudio()
+        let entered = expectation(description: "Transcription started")
+        let engine = ControlledTranscriptionEngine { _ in entered.fulfill() }
+        let fixture = try Fixture(engine: engine)
+        fixture.viewModel.state = .decoding
+        let generation = fixture.gate.begin()
+        let finishing = Task {
+            await fixture.viewModel.finishDictation(audioAt: audio, generation: generation, recordingStartedAt: nil)
+        }
+        await fulfillment(of: [entered], timeout: 2)
+
+        XCTAssertTrue(ShortcutManager.escapeCancels(activeRecording: false, indicatorState: .decoding),
+                      "Before the fix Esc was swallowed once the recording stopped")
+        // What IndicatorWindowManager.requestCancel does when Esc is accepted.
+        XCTAssertTrue(fixture.viewModel.handleCancelRequest())
+        fixture.viewModel.cancelRecording()
+        fixture.viewModel.cleanup()
+        engine.finish(audio, text: "Send the draft to the team")
+        await finishing.value
+
+        XCTAssertEqual(fixture.delivery.texts, [], "Nothing is pasted after Esc")
+        let rows = try await fixture.rows(count: 1)
+        let row = try XCTUnwrap(rows.first, "The words are kept in History")
+        defer { try? FileManager.default.removeItem(at: row.url) }
+        XCTAssertEqual(row.transcription, "Send the draft to the team")
+        let source = try await fixture.store.dictationSource(for: row.id)
+        XCTAssertEqual(source?.disposition.rawValue, "cancelled")
+        XCTAssertNil(source?.insertedText)
+        XCTAssertEqual(fixture.finish.count, 1)
+    }
+
+    func testEscReachesOnlyARecordingOrAStoppedDictation() {
+        XCTAssertTrue(ShortcutManager.escapeCancels(activeRecording: true, indicatorState: .recording))
+        XCTAssertFalse(ShortcutManager.escapeCancels(activeRecording: false, indicatorState: nil), "No indicator, nothing to cancel")
+        XCTAssertFalse(ShortcutManager.escapeCancels(activeRecording: false, indicatorState: .pasteFailed),
+                       "A delivered dictation's message is not a cancel target")
+    }
+
     private func makeAudio() throws -> URL {
         let url = directory.appendingPathComponent("\(UUID().uuidString).wav")
         try Data("synthetic audio bytes".utf8).write(to: url)
@@ -254,7 +296,7 @@ private final class FinishSpy: IndicatorViewDelegate {
 private final class ScriptedEngine: TranscriptionEngine {
     let isModelLoaded = true
     let engineName = "Scripted fixture"
-    private let result: Result<String, Error>
+    var result: Result<String, Error>
 
     init(_ result: Result<String, Error>) {
         self.result = result
@@ -265,5 +307,124 @@ private final class ScriptedEngine: TranscriptionEngine {
     func cancelTranscription() {}
     func transcribeAudio(url: URL, settings: Settings) async throws -> String {
         try result.get()
+    }
+}
+
+/// Queued failures (meetings, imports, dictations stopped while the queue was
+/// busy) keep their audio where the temporary sweep cannot reach it, and
+/// History-referenced temporary audio survives the launch sweep.
+@MainActor
+final class QueuedAudioRetentionTests: XCTestCase {
+    private var temporaryAudio: [URL] = []
+
+    override func tearDownWithError() throws {
+        for url in temporaryAudio { try? FileManager.default.removeItem(at: url) }
+    }
+
+    func testFailedQueuedAudioMovesIntoHistoryAndRegeneratesAfterTheSweep() async throws {
+        let store = try makeIsolatedStore()
+        let engine = ScriptedEngine(.failure(TranscriptionError.processingFailed))
+        let queue = TranscriptionQueue(
+            transcriptionService: TranscriptionService(engine: engine),
+            recordingStore: store,
+            cleanupPipeline: makeLocalPipeline()
+        )
+        try FileManager.default.createDirectory(at: AudioRecorder.temporaryRecordingsDirectory, withIntermediateDirectories: true)
+        let recorded = AudioRecorder.temporaryRecordingsDirectory.appendingPathComponent("\(UUID().uuidString).wav")
+        try Data("synthetic meeting audio".utf8).write(to: recorded)
+        temporaryAudio.append(recorded)
+
+        await queue.addFileToQueue(url: recorded, mode: .meeting)
+        var row = try await settledRow(in: store, queue: queue)
+        defer { try? FileManager.default.removeItem(at: row.url) }
+        XCTAssertEqual(row.status, .failed)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: row.url.path),
+                      "Before the fix the audio stayed in the temporary folder")
+        XCTAssertFalse(FileManager.default.fileExists(atPath: recorded.path))
+        XCTAssertEqual(row.sourceFileURL, row.url.path)
+
+        // A day later the launch sweep runs; History's audio is outside its reach.
+        if FileManager.default.fileExists(atPath: recorded.path) {
+            try FileManager.default.setAttributes([.modificationDate: Date().addingTimeInterval(-2 * 86_400)], ofItemAtPath: recorded.path)
+        }
+        let referenced = try await store.referencedAudioPaths()
+        AudioRecorder.sweepTemporaryRecordings(
+            in: AudioRecorder.temporaryRecordingsDirectory, olderThan: AudioRecorder.temporaryFileMaxAge, keeping: referenced
+        )
+        XCTAssertTrue(FileManager.default.fileExists(atPath: row.url.path))
+
+        engine.result = .success("We agreed to ship on Friday")
+        await queue.requeueRecording(row)
+        row = try await settledRow(in: store, queue: queue)
+        XCTAssertEqual(row.status, .completed)
+        XCTAssertEqual(row.transcription, "We agreed to ship on Friday")
+        XCTAssertTrue(FileManager.default.fileExists(atPath: row.url.path))
+
+        try await store.deleteRecordingSync(row)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: row.url.path), "Deleting the History item deletes its audio")
+    }
+
+    func testLaunchSweepKeepsTemporaryAudioThatHistoryStillUses() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("QueuedAudioRetentionTests-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        func file(_ name: String, daysOld: Double) throws -> URL {
+            let url = directory.appendingPathComponent(name)
+            try Data([1]).write(to: url)
+            try FileManager.default.setAttributes([.modificationDate: Date().addingTimeInterval(-daysOld * 86_400)], ofItemAtPath: url.path)
+            return url
+        }
+        let kept = try file("kept-after-failed-move.wav", daysOld: 3)
+        let stale = try file("abandoned.wav", daysOld: 3)
+        let fresh = try file("recording-now.wav", daysOld: 0)
+
+        AudioRecorder.sweepTemporaryRecordings(in: directory, olderThan: AudioRecorder.temporaryFileMaxAge, keeping: [kept.path])
+
+        XCTAssertTrue(FileManager.default.fileExists(atPath: kept.path), "Before the fix History's audio was swept after a day")
+        XCTAssertFalse(FileManager.default.fileExists(atPath: stale.path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: fresh.path))
+    }
+
+    func testHistoryReportsTheTemporaryAudioItStillUses() async throws {
+        let store = try makeIsolatedStore()
+        let kept = Recording(id: UUID(), timestamp: Date(), fileName: "a.wav", transcription: "Kept", duration: 1,
+                             status: .completed, progress: 1, sourceFileURL: "/private/tmp/x/../x/kept.wav")
+        let plain = Recording(id: UUID(), timestamp: Date(), fileName: "b.wav", transcription: "Plain", duration: 1,
+                              status: .completed, progress: 1)
+        try await store.addRecordingSync(kept)
+        try await store.addRecordingSync(plain)
+        let referenced = try await store.referencedAudioPaths()
+        XCTAssertEqual(referenced, ["/private/tmp/x/kept.wav"])
+    }
+
+    func testRegenerateNeverReplacesATranscriptWhoseAudioIsGone() async throws {
+        let store = try makeIsolatedStore()
+        let queue = TranscriptionQueue(
+            transcriptionService: TranscriptionService(engine: ScriptedEngine(.success("unused"))),
+            recordingStore: store,
+            cleanupPipeline: makeLocalPipeline()
+        )
+        let row = Recording(id: UUID(), timestamp: Date(), fileName: "\(UUID().uuidString).wav", transcription: "Call the vendor at noon",
+                            duration: 4, status: .completed, progress: 1)
+        try await store.addRecordingSync(row)
+        XCTAssertNil(row.playableAudioURL, "No audio is offered for playback")
+
+        await queue.requeueRecording(row)
+
+        let saved = try await store.fetchRecordings(limit: 1, offset: 0).first
+        XCTAssertEqual(saved?.transcription, "Call the vendor at noon", "Before the fix the transcript became an error message")
+        XCTAssertEqual(saved?.status, .completed)
+    }
+
+    /// Waits for the queue to finish and returns the newest row.
+    private func settledRow(in store: RecordingStore, queue: TranscriptionQueue) async throws -> Recording {
+        for _ in 0..<300 {
+            if let row = try await store.fetchRecordings(limit: 1, offset: 0).first, !row.isPending, !queue.isProcessing {
+                return row
+            }
+            try await Task.sleep(nanoseconds: 10_000_000)
+        }
+        let newest = try await store.fetchRecordings(limit: 1, offset: 0).first
+        return try XCTUnwrap(newest)
     }
 }

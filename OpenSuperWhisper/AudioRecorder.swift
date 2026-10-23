@@ -76,7 +76,11 @@ class AudioRecorder: NSObject, ObservableObject {
     static let shared = AudioRecorder()
     
     static var temporaryRecordingsDirectory: URL {
-        FileManager.default.temporaryDirectory.appendingPathComponent("temp_recordings")
+        // The app is not sandboxed, so its temporary folder is shared with the
+        // test host; tests keep their own.
+        FileManager.default.temporaryDirectory.appendingPathComponent(
+            OpenSuperWhisperApp.isRunningTests ? "WorkFlowTestTempRecordings" : "temp_recordings"
+        )
     }
     
     override private init() {
@@ -84,9 +88,6 @@ class AudioRecorder: NSObject, ObservableObject {
         
         super.init()
         createTemporaryDirectoryIfNeeded()
-        workQueue.async { [temporaryDirectory] in
-            Self.cleanupOldTemporaryFiles(in: temporaryDirectory, olderThan: Self.temporaryFileMaxAge)
-        }
         setup()
     }
     
@@ -139,7 +140,20 @@ class AudioRecorder: NSObject, ObservableObject {
         }
     }
     
-    static func cleanupOldTemporaryFiles(in directory: URL, olderThan maxAge: TimeInterval) {
+    /// Removes stale temporary recordings except those History still uses.
+    static func sweepTemporaryRecordings(in directory: URL, olderThan maxAge: TimeInterval, keeping referencedPaths: Set<String>) {
+        cleanupOldTemporaryFiles(in: directory, olderThan: maxAge, keeping: referencedPaths)
+    }
+
+    /// Runs the sweep on the recorder's queue once History has said which
+    /// temporary recordings it still uses.
+    func sweepTemporaryRecordings(keeping referencedPaths: Set<String>) {
+        workQueue.async { [temporaryDirectory] in
+            Self.sweepTemporaryRecordings(in: temporaryDirectory, olderThan: Self.temporaryFileMaxAge, keeping: referencedPaths)
+        }
+    }
+
+    static func cleanupOldTemporaryFiles(in directory: URL, olderThan maxAge: TimeInterval, keeping referencedPaths: Set<String> = []) {
         let fileManager = FileManager.default
         guard let files = try? fileManager.contentsOfDirectory(
             at: directory,
@@ -147,7 +161,7 @@ class AudioRecorder: NSObject, ObservableObject {
         ) else { return }
         
         let cutoff = Date().addingTimeInterval(-maxAge)
-        for file in files {
+        for file in files where !referencedPaths.contains(file.standardizedFileURL.path) {
             let values = try? file.resourceValues(forKeys: [.contentModificationDateKey])
             if let modified = values?.contentModificationDate, modified < cutoff {
                 try? fileManager.removeItem(at: file)

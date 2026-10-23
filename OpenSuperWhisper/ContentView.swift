@@ -662,10 +662,7 @@ struct ContentView: View {
         } message: {
             Text(viewModel.historyDeletionError ?? "Please try again.")
         }
-        .onReceive(NotificationCenter.default.publisher(for: .openSettings)) { notification in
-            settingsTab = notification.object as? Int ?? 0
-            isSettingsPresented = true
-        }
+        .modifier(OpenSettingsRequests(isPresented: $isSettingsPresented, tab: $settingsTab))
         .onDisappear { searchTask?.cancel() }
     }
 }
@@ -782,7 +779,7 @@ private struct DictationControls: View {
             writingSelection: writingFilter.selectionBinding,
             customFilters: writingFilter.filters,
             writingHelp: writingFilter.selectionDescription,
-            onLearn: { NotificationCenter.default.post(name: .openSettings, object: SettingsView.personalizeTab) }
+            onLearn: { SettingsRequest.open(tab: SettingsView.personalizeTab) }
         ) {
             if viewModel.isRecording {
                 viewModel.startDecoding()
@@ -1012,15 +1009,19 @@ struct RecordingRow: View {
     @State private var isPlaying = false
 
     var body: some View {
+        // Audio kept at its temporary path after a failed move still plays;
+        // a row with no audio left offers neither playback nor Regenerate.
+        let audioURL = recording.playableAudioURL
         RecordingCard(
             recording: recording,
             searchQuery: searchQuery,
             isPlaying: isPlaying,
+            hasAudio: audioURL != nil,
             onPlay: {
                 if isPlaying {
                     audioRecorder.stopPlaying()
-                } else {
-                    audioRecorder.playRecording(url: recording.url)
+                } else if let audioURL {
+                    audioRecorder.playRecording(url: audioURL)
                 }
             },
             onCopy: {
@@ -1032,7 +1033,7 @@ struct RecordingRow: View {
         )
         .onReceive(
             audioRecorder.$isPlaying.combineLatest(audioRecorder.$currentlyPlayingURL)
-                .map { playing, url in playing && url == recording.url }
+                .map { playing, url in playing && url != nil && url == audioURL }
                 .removeDuplicates()
         ) { isPlaying = $0 }
     }
@@ -1044,6 +1045,7 @@ struct RecordingCard: View {
     let recording: Recording
     let searchQuery: String
     let isPlaying: Bool
+    var hasAudio = true
     let onPlay: () -> Void
     let onCopy: () -> Void
     let onDelete: () -> Void
@@ -1176,11 +1178,11 @@ struct RecordingCard: View {
     private var recordingActions: some View {
         HStack(spacing: 2) {
             cardAction(isPlaying ? "stop.fill" : "play.fill", label: isPlaying ? "Stop recording playback" : "Play recording", tint: isPlaying ? .red : .secondary, action: onPlay)
-                .disabled(isPending || recording.status == .failed)
+                .disabled(isPending || recording.status == .failed || !hasAudio)
             cardAction("doc.on.doc", label: "Copy entire transcription", action: onCopy)
                 .disabled(displayText.isEmpty || recording.status == .failed)
             cardAction("arrow.clockwise", label: "Regenerate transcription", action: onRegenerate)
-                .disabled(isPending)
+                .disabled(isPending || !hasAudio)
             cardAction("trash", label: "Delete transcription", action: onDelete)
         }
         .fixedSize()
@@ -1354,7 +1356,7 @@ struct TranscriptionView: View {
             
             guard !Task.isCancelled else { return }
             
-            await MainActor.run {
+            await MainActor.run { [attributedString] in
                 guard !Task.isCancelled else { return }
                 self.highlightedAttributedString = attributedString
             }

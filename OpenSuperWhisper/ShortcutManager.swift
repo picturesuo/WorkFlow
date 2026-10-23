@@ -65,7 +65,9 @@ class ShortcutManager {
 
         KeyboardShortcuts.onKeyUp(for: .escape) { [weak self] in
             Task { @MainActor in
-                if self?.activeVm != nil, IndicatorWindowManager.shared.requestCancel() {
+                let indicatorState = IndicatorWindowManager.shared.viewModel?.state
+                if Self.escapeCancels(activeRecording: self?.activeVm != nil, indicatorState: indicatorState),
+                   IndicatorWindowManager.shared.requestCancel() {
                     self?.activeVm = nil
                 }
             }
@@ -73,6 +75,13 @@ class ShortcutManager {
         KeyboardShortcuts.disable(.escape)
     }
     
+    /// Whether Esc reaches the indicator's cancel: a recording this manager
+    /// started, or a stopped dictation still transcribing, which the shortcut
+    /// no longer tracks but the indicator still shows.
+    static func escapeCancels(activeRecording: Bool, indicatorState: RecordingState?) -> Bool {
+        activeRecording || indicatorState == .decoding
+    }
+
     private func setupRecordingTrigger() {
         let modifierKey = ModifierKey(rawValue: AppPreferences.shared.modifierOnlyHotkey) ?? .none
         let secondaryModifierKey = ModifierKey(rawValue: AppPreferences.shared.secondaryModifierOnlyHotkey) ?? .none

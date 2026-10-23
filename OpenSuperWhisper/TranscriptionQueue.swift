@@ -16,10 +16,22 @@ class TranscriptionQueue: ObservableObject {
     private var cancelledRecordingIds: Set<UUID> = []
     private var progressCancellable: AnyCancellable?
 
-    private init() {
-        self.transcriptionService = TranscriptionService.shared
-        self.recordingStore = RecordingStore.shared
-        self.cleanupPipeline = TranscriptCleanupPipeline.shared
+    private convenience init() {
+        self.init(
+            transcriptionService: TranscriptionService.shared,
+            recordingStore: RecordingStore.shared,
+            cleanupPipeline: TranscriptCleanupPipeline.shared
+        )
+    }
+
+    init(
+        transcriptionService: TranscriptionService,
+        recordingStore: RecordingStore,
+        cleanupPipeline: TranscriptCleanupPipeline
+    ) {
+        self.transcriptionService = transcriptionService
+        self.recordingStore = recordingStore
+        self.cleanupPipeline = cleanupPipeline
         setupProgressObserver()
     }
     
@@ -181,6 +193,9 @@ class TranscriptionQueue: ObservableObject {
         }.value
         
         guard let sourceURL = sourceURL else {
+            // Never replace a transcript with this message; only a row with
+            // nothing to keep says its audio is gone.
+            guard recording.status == .failed || recording.transcription.isEmpty else { return }
             await recordingStore.updateRecordingProgressOnlySync(
                 recording.id,
                 transcription: "Cannot regenerate: audio file not found",
@@ -411,6 +426,13 @@ class TranscriptionQueue: ObservableObject {
                 _ = await discardCancelledOutput(recording)
             } catch {
                 if await discardCancelledOutput(recording) { return }
+                // Our own recordings leave the temporary folder, which is swept
+                // after a day, so Regenerate can still find them later.
+                if sourceURL.path.hasPrefix(AudioRecorder.temporaryRecordingsDirectory.path),
+                   let kept = AudioRecorder.shared.keepTemporaryRecording(sourceURL, at: recording.url),
+                   kept != sourceURL {
+                    try? await recordingStore.updateSourceFileURL(recording.id, sourceURL: kept.path)
+                }
                 await recordingStore.updateRecordingProgressOnlySync(
                     recording.id,
                     transcription: Self.failedTranscriptionText(error),

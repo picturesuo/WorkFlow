@@ -47,6 +47,8 @@ class IndicatorViewModel: ObservableObject {
     private let cleanupPipeline: TranscriptCleanupPipeline
     private let latestDictationGate: LatestDictationGate
     private var dictationGeneration: UInt64?
+    /// Esc after the recording stopped: finish into History, paste nothing.
+    private var isDeliveryCancelled = false
     var recorderSessionID: UUID?
     private let pasteTarget: PasteTarget?
     private let delivery: ((String) -> DictationDisposition)?
@@ -305,8 +307,10 @@ class IndicatorViewModel: ObservableObject {
 
                 // claimIfCurrent is process-wide and one-shot, so an older
                 // session finishing late cannot paste over a newer dictation.
-                let isCurrent = self.latestDictationGate.claimIfCurrent(generation)
-                let disposition = isCurrent ? (delivery ?? deliver)(text) : .staleSkipped
+                let isCurrent = !isDeliveryCancelled && self.latestDictationGate.claimIfCurrent(generation)
+                let disposition: DictationDisposition = isCurrent
+                    ? (delivery ?? deliver)(text)
+                    : isDeliveryCancelled ? .cancelled : .staleSkipped
                 let attemptedDelivery = [.pasteSent, .pasteFailed, .copiedOnly].contains(disposition)
                 let source = DictationSource(
                     recordingID: recordingId,
@@ -358,8 +362,8 @@ class IndicatorViewModel: ObservableObject {
                 recordingStartedAt: recordingStartedAt,
                 keepAudio: recorder.keepTemporaryRecording
             )
-            // A newer dictation owns the indicator; its own outcome is shown.
-            if latestDictationGate.isCurrent(generation) {
+            // A newer dictation owns the indicator, and a cancelled one has none.
+            if latestDictationGate.isCurrent(generation), !isDeliveryCancelled {
                 showAutoDismissingMessage(.transcriptionFailed)
                 return
             }
@@ -444,7 +448,11 @@ class IndicatorViewModel: ObservableObject {
     func cancelRecording() {
         hideTimer?.invalidate()
         hideTimer = nil
-        guard let sessionID = recorderSessionID else { return }
+        guard let sessionID = recorderSessionID else {
+            // The recording already stopped: its words still reach History.
+            isDeliveryCancelled = true
+            return
+        }
         recorderSessionID = nil
         recorder.cancelRecording(sessionID: sessionID)
     }

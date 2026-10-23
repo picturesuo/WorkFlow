@@ -459,7 +459,7 @@ class SettingsViewModel: ObservableObject {
         downloadingModelName = model.name
         downloadProgress = 0.0
         
-        downloadTask = Task {
+        downloadTask = Task { [self] in
             do {
                 let filename = model.filename
                 
@@ -566,7 +566,7 @@ class SettingsViewModel: ObservableObject {
         
         var wasCancelled = false
         
-        downloadTask = Task {
+        downloadTask = Task { [self] in
             do {
                 let version: AsrModelVersion = model.version == "v2" ? .v2 : .v3
                 
@@ -819,6 +819,44 @@ struct Settings {
         self.useBeamSearch = prefs.useBeamSearch
         self.beamSize = prefs.beamSize
         self.useAsianAutocorrect = prefs.useAsianAutocorrect
+    }
+}
+
+/// The one route into Settings: Cmd+, the menu bar, and the dock's
+/// Learn link all ask for a tab here.
+@MainActor
+enum SettingsRequest {
+    /// Waits until a main window shows it, so a request made before that
+    /// window exists (a menu-bar-only launch) is not lost.
+    private static var pendingTab: Int?
+
+    static func open(tab: Int = 0) {
+        pendingTab = tab
+        NotificationCenter.default.post(name: .openSettings, object: nil)
+    }
+
+    /// Hands the waiting request to one window.
+    static func take() -> Int? {
+        defer { pendingTab = nil }
+        return pendingTab
+    }
+}
+
+/// Presents Settings on the requested tab.
+struct OpenSettingsRequests: ViewModifier {
+    @Binding var isPresented: Bool
+    @Binding var tab: Int
+
+    func body(content: Content) -> some View {
+        content
+            .onAppear(perform: presentPendingRequest)
+            .onReceive(NotificationCenter.default.publisher(for: .openSettings)) { _ in presentPendingRequest() }
+    }
+
+    private func presentPendingRequest() {
+        guard let requested = SettingsRequest.take() else { return }
+        tab = requested
+        isPresented = true
     }
 }
 

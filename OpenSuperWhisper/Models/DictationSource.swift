@@ -15,6 +15,8 @@ enum DictationDisposition: String, Codable, Equatable {
     case savedOnly = "saved_only"
     /// A newer dictation started first, so this one was saved without pasting.
     case staleSkipped = "stale_skipped"
+    /// Esc after the recording stopped: saved without pasting.
+    case cancelled
     /// A path that never pastes: the main window, imports, and the queue.
     case notInserted = "not_inserted"
 }

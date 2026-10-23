@@ -43,7 +43,7 @@ struct OpenSuperWhisperApp: App {
                     if let delegate = NSApplication.shared.delegate as? AppDelegate {
                         delegate.showMainWindow()
                     }
-                    NotificationCenter.default.post(name: .openSettings, object: nil)
+                    SettingsRequest.open()
                 }
                 .keyboardShortcut(",", modifiers: .command)
             }
@@ -160,6 +160,12 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
         }
 
         OpenSuperWhisperApp.startTranscriptionQueue()
+        // Stale temporary recordings go only once History says which ones it
+        // still uses (queued, or kept after a failed move); if it cannot say, none go.
+        Task { @MainActor in
+            guard let referenced = try? await RecordingStore.shared.referencedAudioPaths() else { return }
+            AudioRecorder.shared.sweepTemporaryRecordings(keeping: referenced)
+        }
         observeMicrophoneChanges()
         observeMeetingChanges()
         
@@ -191,8 +197,9 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
     private func startRecordingRetentionSchedule() {
         cleanupOutdatedRecordings()
         
+        // Scheduled on the main run loop, so it fires on the main actor.
         let timer = Timer.scheduledTimer(withTimeInterval: 24 * 60 * 60, repeats: true) { [weak self] _ in
-            self?.cleanupOutdatedRecordings()
+            MainActor.assumeIsolated { self?.cleanupOutdatedRecordings() }
         }
         timer.tolerance = 60 * 60
         recordingRetentionTimer = timer
@@ -432,7 +439,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
 
     @objc private func openLearning() {
         showMainWindow()
-        NotificationCenter.default.post(name: .openSettings, object: SettingsView.personalizeTab)
+        SettingsRequest.open(tab: SettingsView.personalizeTab)
     }
 
     @objc private func toggleMeeting() {
