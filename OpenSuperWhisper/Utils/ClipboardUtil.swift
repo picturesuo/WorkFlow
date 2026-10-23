@@ -29,11 +29,25 @@ class ClipboardUtil {
 
     /// Pastes text and restores original clipboard (legacy behavior)
     @discardableResult
-    static func insertText(_ text: String, targetPID: pid_t? = nil) -> Bool {
-        let pasteboard = NSPasteboard.general
-
-        // Save current pasteboard contents
-        let savedContents = saveCurrentPasteboardContents(from: pasteboard)
+    static func insertText(
+        _ text: String,
+        targetPID: pid_t? = nil,
+        pasteboard: NSPasteboard = .general,
+        restoreDelay: TimeInterval = clipboardRestoreDelay,
+        paste: ((pid_t?) -> Bool)? = nil
+    ) -> Bool {
+        // Save current pasteboard contents. A paste still waiting to restore
+        // the user's clipboard left its transcript there, so a paste that
+        // starts before then keeps the user's contents, not that transcript.
+        let savedContents: PasteboardContents?
+        if let pending = pendingRestore,
+           pending.pasteboard == pasteboard.name,
+           pending.changeCount == pasteboard.changeCount {
+            savedContents = pending.contents
+        } else {
+            savedContents = saveCurrentPasteboardContents(from: pasteboard)
+        }
+        pendingRestore = nil
 
         // Set new text to pasteboard
         pasteboard.declareTypes([.string], owner: nil)
@@ -41,7 +55,7 @@ class ClipboardUtil {
         let changeCountAfterCopy = pasteboard.changeCount
 
         // Simulate Cmd+V using layout-aware keycode resolution
-        guard simulatePaste(targetPID: targetPID) else {
+        guard (paste ?? simulatePaste(targetPID:))(targetPID) else {
             // Keep the newest transcript available for a manual Cmd+V. In
             // particular, do not restore stale clipboard contents on failure.
             return false
@@ -52,12 +66,25 @@ class ClipboardUtil {
         // a different changeCount means the user (or another app) took over
         // the clipboard and restoring would clobber their data.
         if let contents = savedContents {
-            DispatchQueue.main.asyncAfter(deadline: .now() + clipboardRestoreDelay) {
+            pendingRestore = (pasteboard.name, contents, changeCountAfterCopy)
+            DispatchQueue.main.asyncAfter(deadline: .now() + restoreDelay) {
+                // A newer paste took over this restore.
+                guard pendingRestore?.pasteboard == pasteboard.name,
+                      pendingRestore?.changeCount == changeCountAfterCopy else { return }
+                pendingRestore = nil
                 restoreIfUnchanged(contents, expectedChangeCount: changeCountAfterCopy, pasteboard: pasteboard)
             }
         }
         return true
     }
+
+    /// The user's clipboard a paste will restore, and the change count of the
+    /// transcript it put there. Pastes run on the main thread.
+    private static var pendingRestore: (
+        pasteboard: NSPasteboard.Name,
+        contents: PasteboardContents,
+        changeCount: Int
+    )?
 
     @discardableResult
     static func restoreIfUnchanged(_ contents: PasteboardContents,

@@ -342,6 +342,76 @@ final class ClipboardRestoreTests: XCTestCase {
         XCTAssertEqual(pasteboard.string(forType: .string), "copied by user during the delay")
     }
 
+    /// Pastes into the private pasteboard and counts the Cmd+V posts instead
+    /// of sending them.
+    private func insert(_ text: String, posts: inout Int) -> Bool {
+        var posted = 0
+        let inserted = ClipboardUtil.insertText(text, pasteboard: pasteboard, restoreDelay: 0.2) { _ in
+            posted += 1
+            return true
+        }
+        posts += posted
+        return inserted
+    }
+
+    private func waitForRestore() {
+        let restored = expectation(description: "Restore delay elapsed")
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { restored.fulfill() }
+        wait(for: [restored], timeout: 2)
+    }
+
+    func testBackToBackPastesRestoreTheUsersClipboardNotTheFirstTranscript() {
+        _ = setString("user's own clipboard")
+        var posts = 0
+
+        XCTAssertTrue(insert("first dictation", posts: &posts))
+        XCTAssertTrue(insert("second dictation", posts: &posts))
+        XCTAssertEqual(pasteboard.string(forType: .string), "second dictation")
+        waitForRestore()
+
+        XCTAssertEqual(posts, 2)
+        XCTAssertEqual(pasteboard.string(forType: .string), "user's own clipboard")
+    }
+
+    func testBackToBackPastesKeepWhatTheUserCopiedAfterThem() {
+        _ = setString("user's own clipboard")
+        var posts = 0
+
+        XCTAssertTrue(insert("first dictation", posts: &posts))
+        XCTAssertTrue(insert("second dictation", posts: &posts))
+        _ = setString("copied by user during the delay")
+        waitForRestore()
+
+        XCTAssertEqual(posts, 2)
+        XCTAssertEqual(pasteboard.string(forType: .string), "copied by user during the delay")
+    }
+
+    func testSeparatePastesEachRestoreTheUsersClipboard() {
+        _ = setString("user's own clipboard")
+        var posts = 0
+
+        XCTAssertTrue(insert("first dictation", posts: &posts))
+        waitForRestore()
+        XCTAssertEqual(pasteboard.string(forType: .string), "user's own clipboard")
+        _ = setString("user's next clipboard")
+        XCTAssertTrue(insert("second dictation", posts: &posts))
+        waitForRestore()
+
+        XCTAssertEqual(posts, 2)
+        XCTAssertEqual(pasteboard.string(forType: .string), "user's next clipboard")
+    }
+
+    func testFailedPasteKeepsTheNewestTranscriptAndRestoresNothing() {
+        _ = setString("user's own clipboard")
+        var posts = 0
+
+        XCTAssertTrue(insert("first dictation", posts: &posts))
+        XCTAssertFalse(ClipboardUtil.insertText("second dictation", pasteboard: pasteboard, restoreDelay: 0.2) { _ in false })
+        waitForRestore()
+
+        XCTAssertEqual(pasteboard.string(forType: .string), "second dictation")
+    }
+
     func testRestoreDelay_coversSlowPasteConsumers() {
         XCTAssertGreaterThanOrEqual(ClipboardUtil.clipboardRestoreDelay, 1.0,
                                     "Browsers and Electron apps can service Cmd+V hundreds of ms after posting")
