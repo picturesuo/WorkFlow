@@ -499,7 +499,7 @@ enum CorrectionAligner {
     static let minimumSimilarity = 0.6
     static let maximumEditWords = 5
     static let maximumCandidateTokens = 2_500
-    static let maximumDocumentLength = 20_000
+    static let maximumDocumentLength = 100_000
 
     private enum Operation: Equatable {
         case equal(Int, Int)
@@ -710,9 +710,20 @@ enum CorrectionAligner {
             let final = CorrectionText.joined(rightSlice, in: documentText)
             let isQuoted = rightSlice.indices.contains { quoted.contains(window.lowerBound + $0) }
                 || quoted.contains(documentPosition)
+            // Added words that span a line break, or fill a line of their
+            // own, may be a neighboring column, heading, or footnote of an
+            // imported layout rather than the user's edit, so they are too
+            // uncertain to learn from.
+            let crossesLine = rightSlice.contains(where: \.isWord) && inserted.first.map { first in
+                let start = window.lowerBound + first
+                let end = window.lowerBound + inserted[inserted.count - 1]
+                return (start..<end).contains(where: lineEnds.contains)
+                    || (lineEnds.contains(start - 1) && lineEnds.contains(end))
+            } ?? false
             guard leftSlice.filter(\.isWord).count <= maximumEditWords,
                   rightSlice.filter(\.isWord).count <= maximumEditWords,
                   !isQuoted,
+                  !crossesLine,
                   CorrectionText.numberValues(emitted) == CorrectionText.numberValues(final)
                     || isNumberFormatting(emitted, final) else {
                 excluded += 1

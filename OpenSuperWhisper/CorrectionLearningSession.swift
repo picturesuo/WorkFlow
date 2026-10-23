@@ -2,14 +2,17 @@ import Combine
 import Foundation
 
 /// Learns validated style preferences for one mode from a finished document
-/// the user pastes. Nothing is read from History or sent until `learn()`;
-/// the document itself is never stored, and only short matched edits are
-/// sent to the selected cleanup provider. Learned preferences apply at once.
+/// the user pastes, drops, or chooses as a file. Nothing is read from
+/// History or sent until `learn()`; the document itself is never stored, and
+/// only short matched edits are sent to the selected cleanup provider.
+/// Learned preferences apply at once.
 @MainActor
 final class CorrectionLearningSession: ObservableObject {
     @Published var document = ""
     @Published var mode: CleanupMode
     @Published private(set) var isLearning = false
+    @Published private(set) var isLoadingFile = false
+    @Published private(set) var fileSummary: String?
     @Published private(set) var report: CorrectionLearningReport?
     @Published private(set) var errorMessage: String?
 
@@ -20,6 +23,7 @@ final class CorrectionLearningSession: ObservableObject {
     private let defaults: UserDefaults
     private var generationID: UUID?
     private var learningTask: Task<Void, Never>?
+    private var loadID: UUID?
 
     init(
         mode: CleanupMode = .everyday,
@@ -40,12 +44,13 @@ final class CorrectionLearningSession: ObservableObject {
     }
 
     var canLearn: Bool {
-        !isLearning && LearnedPreferenceStore.isLearningEnabled(in: defaults)
+        !isLearning && !isLoadingFile && LearnedPreferenceStore.isLearningEnabled(in: defaults)
             && !document.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            && document.count <= CorrectionAligner.maximumDocumentLength
     }
 
     func learn() {
-        guard !isLearning else { return }
+        guard !isLearning, !isLoadingFile else { return }
         let document = document.trimmingCharacters(in: .whitespacesAndNewlines)
         do {
             guard LearnedPreferenceStore.isLearningEnabled(in: defaults) else { throw CorrectionLearningError.learningDisabled }
@@ -64,6 +69,7 @@ final class CorrectionLearningSession: ObservableObject {
         isLearning = true
         errorMessage = nil
         report = nil
+        fileSummary = nil
         learningTask = Task { [weak self] in
             guard let self else { return }
             let outcome = await self.run(document: document, mode: mode)
@@ -96,6 +102,49 @@ final class CorrectionLearningSession: ObservableObject {
         }
     }
 
+    static let maximumLoadedCharacters = 4 * CorrectionAligner.maximumDocumentLength
+
+    /// Replaces the document with the text of the given files, read on this
+    /// Mac. Several files join in the order given, separated by a blank line.
+    func load(_ urls: [URL]) {
+        guard !isLearning else { return }
+        var seen = Set<URL>()
+        let urls = urls.filter { seen.insert($0.standardizedFileURL).inserted }
+        guard !urls.isEmpty else { return }
+        let id = UUID()
+        loadID = id
+        isLoadingFile = true
+        errorMessage = nil
+        report = nil
+        fileSummary = nil
+        let limit = Self.maximumLoadedCharacters
+        Task { [weak self] in
+            let result = await Task.detached(priority: .userInitiated) {
+                // A file somewhat over the limit loads so it can be trimmed;
+                // far beyond it, nothing is loaded.
+                Result { try urls.map { try DocumentTextExtractor.text(from: $0, maximumCharacters: limit) } }
+            }.value
+            guard let self, self.loadID == id else { return }
+            self.loadID = nil
+            self.isLoadingFile = false
+            switch result {
+            case .success(let texts) where texts.reduce(0, { $0 + $1.count }) > limit:
+                self.errorMessage = "These files have more than \(limit.formatted()) characters together. Add fewer files or paste only the part you dictated."
+            case .success(let texts):
+                let text = texts.joined(separator: "\n\n")
+                self.document = text
+                let names = urls.count == 1 ? urls[0].lastPathComponent : "\(urls.count) files"
+                var summary = "Loaded \(names): \(text.count.formatted()) characters. Check the text, then select Learn."
+                if text.count > CorrectionAligner.maximumDocumentLength {
+                    summary = "Loaded \(names), but it has \(text.count.formatted()) characters. Remove parts you did not dictate to fit \(CorrectionAligner.maximumDocumentLength.formatted())."
+                }
+                self.fileSummary = summary
+            case .failure(let error):
+                self.errorMessage = (error as? LocalizedError)?.errorDescription ?? "The file could not be read."
+            }
+        }
+    }
+
     func cancel() {
         guard isLearning else { return }
         generationID = nil
@@ -124,7 +173,7 @@ final class CorrectionLearningSession: ObservableObject {
             let edits = alignment.edits
             let matched = alignment.matchedDictations
             let legacy = Set(alignment.passages.filter(\.isLegacy).map(\.candidateID))
-            func report(_ status: CorrectionLearningReport.Status, rejected: Int = 0) -> CorrectionLearningReport {
+            func report(_ status: CorrectionLearningReport.Status, rejected: Int = 0, remaining: Int = 0) -> CorrectionLearningReport {
                 CorrectionLearningReport(
                     status: status,
                     mode: mode,
@@ -134,7 +183,8 @@ final class CorrectionLearningSession: ObservableObject {
                     learnableEdits: edits.count,
                     excludedEdits: alignment.excludedEdits,
                     ambiguousRegions: alignment.ambiguousRegions,
-                    rejectedProposals: rejected
+                    rejectedProposals: rejected,
+                    remainingEdits: remaining
                 )
             }
             guard !alignment.passages.isEmpty else { return .finished(report(.noMatch), [], []) }
@@ -142,8 +192,14 @@ final class CorrectionLearningSession: ObservableObject {
 
             // A repeated submission sends nothing: its edits are already known.
             let known = LearnedPreferenceStore.knownEvidence(for: mode, in: defaults)
-            let fresh = edits.filter { !known.contains($0.fingerprint) }
-            guard !fresh.isEmpty else { return .finished(report(.nothingNew), [], []) }
+            // The same edit repeated in one dictation is one piece of evidence.
+            var seen = known
+            let unreviewed = edits.filter { seen.insert($0.fingerprint).inserted }
+            guard !unreviewed.isEmpty else { return .finished(report(.nothingNew), [], []) }
+            // One request classifies at most one batch; the rest stay
+            // unreviewed for the next Learn.
+            let fresh = Array(unreviewed.prefix(CorrectionLearningPrompt.maximumEdits))
+            let remaining = unreviewed.count - fresh.count
 
             let provider = try chatResolver()
             if provider.providerID == .bedrock, let budget = await budgetProvider(), budget.isExhausted {
@@ -162,9 +218,9 @@ final class CorrectionLearningSession: ObservableObject {
             let proposals = try CorrectionLearningPrompt.parse(result.text)
             let validated = CorrectionPreferenceValidator.validate(proposals, edits: fresh, mode: mode)
             guard !validated.accepted.isEmpty else {
-                return .finished(report(.nothingQualified, rejected: validated.rejected), [], fresh.map(\.fingerprint))
+                return .finished(report(.nothingQualified, rejected: validated.rejected, remaining: remaining), [], fresh.map(\.fingerprint))
             }
-            return .finished(report(.learned, rejected: validated.rejected), validated.accepted, fresh.map(\.fingerprint))
+            return .finished(report(.learned, rejected: validated.rejected, remaining: remaining), validated.accepted, fresh.map(\.fingerprint))
         } catch is CancellationError {
             return .failure("Cancelled. Nothing was learned.")
         } catch let error as URLError where error.code == .timedOut {

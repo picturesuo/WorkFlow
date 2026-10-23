@@ -19,9 +19,9 @@ enum CorrectionLearningError: LocalizedError, Equatable {
     var errorDescription: String? {
         switch self {
         case .emptyDocument:
-            "Paste the finished document first."
+            "Paste the finished document or add a file first."
         case .documentTooLong:
-            "Keep the document to \(CorrectionAligner.maximumDocumentLength) characters or fewer."
+            "Keep the document to \(CorrectionAligner.maximumDocumentLength.formatted()) characters or fewer."
         case .learningDisabled:
             "Learning is off. Turn it on to learn from this document."
         case .budgetReached:
@@ -317,8 +317,18 @@ struct CorrectionLearningReport: Equatable {
     let ambiguousRegions: Int
     var merge = LearnedPreferenceStore.MergeResult()
     var rejectedProposals = 0
+    /// Matched edits left for a later Learn because one request takes at
+    /// most `CorrectionLearningPrompt.maximumEdits`.
+    var remainingEdits = 0
 
     var summary: String {
+        let remaining = remainingEdits > 0
+            ? " \(remainingEdits) more \(remainingEdits == 1 ? "edit is" : "edits are") left; select Learn again to continue."
+            : ""
+        return outcome + remaining
+    }
+
+    private var outcome: String {
         let matched = "\(matchedPassages) matched \(matchedPassages == 1 ? "passage" : "passages") from \(matchedDictations) \(matchedDictations == 1 ? "dictation" : "dictations")"
         let legacy = legacyDictations > 0
             ? " \(legacyDictations) \(legacyDictations == 1 ? "is" : "are") legacy History without the original transcript, so only WorkFlow's saved text was compared."
