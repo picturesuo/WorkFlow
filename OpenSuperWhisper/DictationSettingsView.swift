@@ -75,7 +75,7 @@ struct DictationSettingsView: View {
     private var shortcutGroup: some View {
         SettingsGroup(title: "Shortcut") {
             SettingsRow(title: "Start dictation") {
-                Picker("Start dictation", selection: shortcutBinding) {
+                Picker("Shortcut that starts dictation", selection: shortcutBinding) {
                     Section("Modifier key") {
                         ForEach(ModifierKey.allCases.filter { $0 != .none }) { key in
                             Text(key.displayName).tag(ShortcutChoice.modifier(key))
@@ -89,7 +89,6 @@ struct DictationSettingsView: View {
                 .pickerStyle(.menu)
                 .labelsHidden()
                 .fixedSize()
-                .accessibilityLabel("Shortcut that starts dictation")
             }
 
             switch shortcutChoice {
@@ -99,7 +98,7 @@ struct DictationSettingsView: View {
                     title: "Second key",
                     detail: "Either key starts dictation, for example Control on a keyboard without Fn."
                 ) {
-                    Picker("Second key", selection: $viewModel.secondaryModifierOnlyHotkey) {
+                    Picker("Second key that also starts dictation", selection: $viewModel.secondaryModifierOnlyHotkey) {
                         ForEach(ModifierKey.allCases.filter { $0 != primary }) { key in
                             Text(key.displayName).tag(key)
                         }
@@ -107,7 +106,6 @@ struct DictationSettingsView: View {
                     .pickerStyle(.menu)
                     .labelsHidden()
                     .fixedSize()
-                    .accessibilityLabel("Second key that also starts dictation")
                 }
                 if permissionsManager.hasCompletedInitialCheck && !permissionsManager.isInputMonitoringPermissionGranted {
                     SettingsDivider()
@@ -171,14 +169,13 @@ struct DictationSettingsView: View {
                     ? "Hold the shortcut while you speak and let go to finish. A quick tap keeps listening until you press it again."
                     : "Press the shortcut once to start and again to finish."
             ) {
-                Picker("Recording", selection: $viewModel.holdToRecord) {
+                Picker("How the shortcut records", selection: $viewModel.holdToRecord) {
                     Text("Hold").tag(true)
                     Text("Tap").tag(false)
                 }
                 .pickerStyle(.segmented)
                 .labelsHidden()
                 .fixedSize()
-                .accessibilityLabel("How the shortcut records")
                 .accessibilityValue(viewModel.holdToRecord ? "Hold to talk" : "Tap to start and stop")
             }
         }
@@ -211,11 +208,10 @@ struct DictationSettingsView: View {
                 .labelsHidden()
                 .fixedSize()
                 .disabled(viewModel.isDownloading)
-                .accessibilityLabel("Speech model")
             }
             SettingsDivider()
             SettingsRow(title: "Language") {
-                Picker("Language", selection: $viewModel.selectedLanguage) {
+                Picker("Dictation language", selection: $viewModel.selectedLanguage) {
                     ForEach(viewModel.supportedLanguages, id: \.self) { code in
                         Text(LanguageUtil.languageNames[code] ?? code).tag(code)
                     }
@@ -223,7 +219,6 @@ struct DictationSettingsView: View {
                 .pickerStyle(.menu)
                 .labelsHidden()
                 .fixedSize()
-                .accessibilityLabel("Dictation language")
             }
             if Settings.asianLanguages.contains(viewModel.selectedLanguage) {
                 SettingsDivider()

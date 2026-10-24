@@ -137,6 +137,32 @@ final class SettingsLayoutTests: XCTestCase {
                        "replacement from note book to notebook")
     }
 
+    /// A Picker's hidden title stays in its VoiceOver name, so an extra
+    /// `.accessibilityLabel` made VoiceOver read "Speech model, Speech model".
+    func testPickersSpeakTheirNameOnce() throws {
+        let expected: [SettingsPane: [String]] = [
+            .dictation: ["Shortcut that starts dictation", "Second key that also starts dictation",
+                         "How the shortcut records", "Speech model", "Dictation language"],
+            .cleanup: [],
+            .personalize: ["Mode to learn for", "Running app"],
+            .providerCost: ["Cleanup provider"],
+        ]
+        try withSwiftUIAccessibilityTree {
+            for pane in SettingsPane.allCases {
+                let size = CGSize(width: 720, height: 1400)
+                let host = try hostedView(SettingsView(selection: .constant(pane), credentials: stub(), size: size), size: size)
+                let names = accessibilityLabels(in: host, roles: [.popUpButton, .radioGroup])
+                for name in try XCTUnwrap(expected[pane]) {
+                    XCTAssertTrue(names.contains(name), "\(pane) has a picker VoiceOver reads as “\(name)”; found \(names)")
+                }
+                for name in names {
+                    XCTAssertFalse(name.isEmpty, "\(pane) has a picker without a VoiceOver name")
+                    XCTAssertFalse(name.contains(", "), "\(pane) picker reads its name twice: “\(name)”")
+                }
+            }
+        }
+    }
+
     func testCommandNumberSwitchesPanes() throws {
         final class Selection: ObservableObject { @Published var pane = SettingsPane.dictation }
         struct Host: View {
@@ -322,6 +348,28 @@ final class SettingsLayoutTests: XCTestCase {
     }
 
     private var retainedWindows: [NSWindow] = []
+
+    /// SwiftUI builds its accessibility tree only once an assistive client
+    /// asks, so act as one (the way VoiceOver does) and stop afterwards.
+    private func withSwiftUIAccessibilityTree(_ body: () throws -> Void) rethrows {
+        let setValue = NSSelectorFromString("accessibilitySetValue:forAttribute:")
+        _ = NSApp.perform(setValue, with: NSNumber(value: true), with: "AXEnhancedUserInterface")
+        defer { _ = NSApp.perform(setValue, with: NSNumber(value: false), with: "AXEnhancedUserInterface") }
+        try body()
+    }
+
+    /// The names VoiceOver reads for elements with these roles, in tree order.
+    private func accessibilityLabels(in element: Any, roles: Set<NSAccessibility.Role>, depth: Int = 0) -> [String] {
+        guard depth < 60, let node = element as? NSAccessibilityProtocol else { return [] }
+        var labels: [String] = []
+        if let role = node.accessibilityRole(), roles.contains(role) {
+            labels.append(node.accessibilityLabel() ?? "")
+        }
+        for child in node.accessibilityChildren() ?? [] {
+            labels += accessibilityLabels(in: child, roles: roles, depth: depth + 1)
+        }
+        return labels
+    }
 
     @discardableResult
     private func render<V: View>(_ view: V, size: CGSize, scheme: ColorScheme, name: String?) throws -> NSBitmapImageRep {
