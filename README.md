@@ -8,51 +8,55 @@
   Hold <kbd>Fn</kbd> or a shortcut, speak, and get text written the way you want.
 </p>
 
-WorkFlow is an open-source dictation and meeting-transcription app for the Mac. Speech-to-text runs locally and free with Parakeet or Whisper. An optional AI cleanup pass fixes fillers and punctuation, and custom filters shape it for each kind of work: digits and symbols for math, semicolons and dashes for essays, compact commands for coding agents.
+WorkFlow is a free, open-source dictation and meeting-transcription app for the Mac. Speech-to-text runs on your Mac with Parakeet or Whisper, so there are no transcription API fees. Optional AI cleanup goes through a provider you pick; with Amazon Nova Micro it cost the maintainer about half a cent in September 2026.
 
-## A filter for every kind of work
+## Monthly usage cost
 
-Open **Settings → Cleanup → Custom filters**, choose **Create with AI**, and type or speak what should change:
+Real numbers from the maintainer's Mac for September 2026:
 
-> Write numbers as digits, "square root" as √, and "times" as x with a space on each side.
+- About 260 dictations, roughly 2.8 hours of recording.
+- 253 of them went through AI cleanup with Amazon Nova Micro on Bedrock: about 81K input and 14K output tokens.
+- Estimated cost: **about $0.005**, so half a cent for the whole month.
 
-If the style is hard to describe, name the class or assignment and paste an essay or problem set you already finished; the filter is fitted to it. Nothing leaves the app until you press **Send**, which sends the request, class name, and example to your cleanup provider. It proposes a name, base mode, and instructions; edit them or ask for changes. Nothing is stored until you choose **Save filter**, with **Use for new dictations** checked to make it your writing mode.
+That's an estimate from the token counts WorkFlow recorded, not an AWS bill. It uses AWS's US on-demand price for Nova Micro: $0.035 per million input tokens and $0.14 per million output tokens ([AWS pricing](https://aws.amazon.com/bedrock/pricing/), checked October 24, 2026). Transcription had no API fees. Create with AI and Learn came out in October, so the September number is dictation cleanup only.
 
-Now "the square root of sixteen times three" comes out as `√16 x 3`. The filter is instructed to format, not solve or change, what you said, and WorkFlow checks the output: `twenty five` may become `25`, but a number, √, or × it cannot match to your words makes the dictation keep its original transcript.
+Your number depends on how much you talk, the language, the writing mode, and the provider. **Settings → Provider & Cost** shows this month's estimate as you go.
 
-Three starters ship with the app; each row shows the style it asks for:
+## Monthly running cost
 
-| Filter | Spoken | Asks for |
-|---|---|---|
-| Everyday with digits | twenty five dollars | 25 dollars |
-| Everyday with words | 25 dollars | twenty-five dollars |
-| More hyphens | a well known author | a well-known author |
+**$0 when you're not dictating.** No subscription, no WorkFlow server, and no transcription API fees, since transcription runs on your Mac (electricity and hardware not included). Cleanup bills only when WorkFlow sends your provider something.
 
-Saved filters sit beside the built-in modes in the main window and menu-bar **Writing Mode** menu; each builds on a mode:
+As a thought experiment, talking nonstop for a month with Bedrock cleanup on works out to roughly **$1.60-$2.10** at the prices above (30 days × 24 hours at 150 words a minute and 1.33 tokens a word, output about as long as input, plus a 250-370 token prompt per request, sent once per dictation or per 4,800-character chunk of a long recording). That's a rough range, not a cap or a promise: WorkFlow isn't built as an always-on recorder, Homework mode can write more than you said, and the default **$0.25 monthly stop** pauses Bedrock cleanup after roughly 4-5 days of this, after which dictation keeps your original transcript. Local Ollama cleanup has no per-request fee; Azure OpenAI and other OpenAI-compatible APIs bill at their own rates, which WorkFlow doesn't estimate.
 
-- **Everyday** lightly cleans speech while preserving your natural voice and level of detail.
-- **Technical** produces compact, unambiguous instructions for computers and coding agents.
-- **Homework** develops complete explanations and preserves every idea. Longer output is expected. Quantities come out as digits: "ten percent" becomes `10%`, "twenty twenty six" `2026`, "one hundred five" `105`.
-- **Writing** keeps your own voice for blogs and essays: your vocabulary, rhythm, long connected sentences, semicolons, and inline "(1) … (2)" enumerations. It removes only stutters, filler, and repeated takes.
+## Custom filters
 
-Digit formatting and every mode's style need AI cleanup. With cleanup off, WorkFlow inserts the recognizer's text with only your personal vocabulary applied, whatever mode is selected.
+Make cleanup write the way a class, job, or app wants:
 
-## Learn from your finished writing
+1. Open **Settings → Cleanup → Custom filters**.
+2. Choose **Create with AI** and type or speak what should change, or choose **New filter** and write the instructions yourself.
+3. Review the name, base mode, and instructions, then choose **Save filter**.
 
-Open **Settings → Personalize → Learn from finished writing** (or select **Learn…** beside the writing mode, or **Writing Mode → Learn from Finished Writing…** in the menu bar), paste a whole document you finished from your dictations or drop it in as a file, choose Homework, Technical, Everyday, or Writing, and select **Learn**. PDF, Word (.docx and .doc), RTF, OpenDocument, Markdown, and plain text files work, up to 100,000 characters; PDFs lose their page numbers and running headers, and a scanned or password-protected PDF is refused because it has no readable text. Text you did not dictate is simply ignored. WorkFlow finds the dictations in History that the document came from, even across several dictations, repeated takes, or reordered paragraphs, and compares what it produced with what you kept. Only small style edits it can match with confidence count; rewritten content, changed values, flipped negations, quotations, and text it cannot attribute are left out, and a document with no confident match teaches nothing. A learned spelling never changes a number, negation, contraction, date, or a word's meaning ("possible" → "impossible", "accept" → "except").
+A couple of ideas:
 
-The short matched edits, never the document or the rest of History, go to your cleanup provider, which can only name preferences from a fixed list, such as a spelling, a filler to drop, semicolon joins, or digits. WorkFlow checks each one against your edits before applying it to that mode alone, at once. Each learned preference is listed with where it came from, and can be switched off, deleted, or reset per mode; turning learning off stops both learning and applying. Custom filters are never changed.
+> Write numbers as digits, like "fifteen percent" as 15% and "twenty twenty six" as 2026.
 
-New dictations keep their original transcript on your Mac with their History item so later comparisons can tell recognition fixes, undone cleanup changes, and your own edits apart. Deleting the History item deletes it. History recorded before this has no original, so it is labeled legacy and only WorkFlow's saved text is compared.
+> Join closely related sentences with semicolons.
 
-## Why WorkFlow
+Each filter builds on a built-in mode: **Everyday** (light cleanup in your voice), **Technical** (compact instructions for coding agents), **Homework** (complete explanations, numbers as digits), or **Writing** (your own voice for essays, long sentences and semicolons kept). Saved filters show up next to those modes in the main window and the menu-bar **Writing Mode** menu. Three starters ship with the app: Everyday with digits, Everyday with words, and More hyphens.
 
-- Audio never leaves your Mac; only transcript text reaches the one provider you enable.
-- Cleanup is instructed to edit literally. Output numbers are checked against your words, and a failed or rejected cleanup keeps your original transcript.
-- Filters are plain language, reviewed by you, and work in every app.
-- Transcription is free. AI cleanup is billed by the provider you choose and can cost very little depending on model and use; credit eligibility is up to that provider.
-- Choose Amazon Bedrock, Azure OpenAI, local Ollama, or any OpenAI-compatible API. Keys live in macOS Keychain.
-- Personal vocabulary, per-app rules, meeting recordings saved to History, and search are built in.
+Filters are instructions for the model, not guarantees. WorkFlow checks the numbers in the output against what you said, and if they don't match or cleanup fails, you get your original transcript. Filters need AI cleanup turned on.
+
+With **Create with AI**, nothing leaves your Mac until you press **Send**. You can paste an essay or problem set you already finished as an example; only the name, base mode, and instructions are saved, never the example.
+
+## Learn from finished writing
+
+This is separate from filters. Paste or drop a document you finished from your dictations into **Settings → Personalize → Learn from finished writing**, pick a mode, and choose **Learn**. PDF, Word, RTF, OpenDocument, Markdown, and plain text work, up to 100,000 characters.
+
+WorkFlow matches the document to your History and keeps only small style edits it can confirm, such as a spelling, a dropped filler, semicolon joins, or digits. Edits that change values, negations, or meaning are left out. Each learned preference is checked against your edits, applied to that mode automatically, and can be switched off or deleted. Custom filters are never changed.
+
+## Privacy
+
+Audio never leaves your Mac. With cleanup on, only transcript text goes to the one provider you pick: Amazon Bedrock, Azure OpenAI, local Ollama, or any OpenAI-compatible API. **Send** in Create with AI shares your request and any pasted example. **Learn** shares only the short matched edits with a few words around each; the document itself is read on your Mac and not stored. New dictations keep their original transcript on your Mac until you delete them. Keys live in macOS Keychain, and credentials and transcripts are never logged.
 
 ## Install with your AI
 
@@ -78,10 +82,6 @@ open /Applications/WorkFlow.app
 ```
 
 Requirements: Apple Silicon, macOS 14 or newer, Xcode, Homebrew, Rust, and Git. macOS 26 needs an Apple-issued signing identity so microphone permission works. See the [quickstart](docs/QUICKSTART.md) for permissions and provider setup.
-
-## Privacy
-
-Audio stays on your Mac, including the filter assistant's microphone. Enabling a cleanup provider sends transcript text to it. In the filter assistant, **Send** transmits your request, class name, and pasted example to that provider; **Save filter** stores only the name, base mode, and instructions, never the example. **Learn** sends only the short matched edits from a finished document, with a few words around each; the document or file is read on your Mac and not stored. New dictations keep their original transcript locally until you delete them. Credentials and transcripts are never logged.
 
 ## Development
 
