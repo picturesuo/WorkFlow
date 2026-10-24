@@ -130,7 +130,7 @@ struct DictationSettingsView: View {
                     .fixedSize()
                     .accessibilityLabel("Second key that also starts dictation")
                 }
-                inputMonitoringNotice(keys: primary.displayName)
+                inputMonitoringNotice(holding: "\(primary.displayName) while you hold it")
             case .chord:
                 SettingsDivider()
                 SettingsRow(
@@ -139,7 +139,7 @@ struct DictationSettingsView: View {
                 ) {
                     EmptyView()
                 }
-                inputMonitoringNotice(keys: "Control and Fn")
+                inputMonitoringNotice(holding: "Control and Fn while you hold them")
             case .keyCombination:
                 SettingsDivider()
                 SettingsRow(title: "Key combination", detail: "Works without extra permissions.") {
@@ -182,12 +182,12 @@ struct DictationSettingsView: View {
     static let chordHelp = "Let go of either key to finish. Fn or Control alone does nothing. If the emoji picker, an input source switch, or macOS Dictation also opens, set System Settings › Keyboard › Press 🌐 key to Do Nothing. No Fn key? Use a key combination."
 
     @ViewBuilder
-    private func inputMonitoringNotice(keys: String) -> some View {
+    private func inputMonitoringNotice(holding: String) -> some View {
         if permissionsManager.hasCompletedInitialCheck && !permissionsManager.isInputMonitoringPermissionGranted {
             SettingsDivider()
             SettingsNotice(
                 title: "Turn on Input Monitoring",
-                detail: "macOS needs it to notice \(keys) while you hold them. Until then this shortcut is off. WorkFlow reads only modifier keys and whether another key is pressed, never what you type."
+                detail: "macOS needs it to notice \(holding). Until then this shortcut is off. WorkFlow reads only modifier keys and whether another key is pressed, never what you type."
             ) {
                 Button("Grant…") {
                     permissionsManager.requestInputMonitoringPermissionOrOpenSystemPreferences()
