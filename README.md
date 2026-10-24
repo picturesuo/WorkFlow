@@ -89,6 +89,7 @@ Audio stays on your Mac, including the filter assistant's microphone. Enabling a
 <summary>Headless test command</summary>
 
 ```bash
+WORKFLOW_TEST_BUNDLE_ID="com.picturesuo.WorkFlow.fmtest.run$$"
 DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer \
 xcodebuild test \
   -scheme OpenSuperWhisper \
@@ -100,10 +101,10 @@ xcodebuild test \
   -skip-testing:OpenSuperWhisperTests/KeyboardLayoutProviderTests \
   -skip-testing:OpenSuperWhisperTests/IndicatorWindowGeometryTests/testWindowKeepsPanelSizeAfterPresent \
   CODE_SIGNING_ALLOWED=NO \
-  PRODUCT_BUNDLE_IDENTIFIER=com.picturesuo.WorkFlow.fmtest
+  PRODUCT_BUNDLE_IDENTIFIER="$WORKFLOW_TEST_BUNDLE_ID"
 ```
 
-The skipped suites launch TextEdit, switch the keyboard layout, or show a panel; run them interactively. The separate bundle identifier keeps the test host out of WorkFlow's own preferences. Releases follow [docs/RELEASING.md](docs/RELEASING.md).
+The skipped suites launch TextEdit, switch the keyboard layout, or show a panel; run them interactively. The separate bundle identifier keeps the test host out of WorkFlow's own preferences, and the shell PID suffix gives each run its own preferences domain so concurrent runs do not overwrite each other. Pass the same `WORKFLOW_TEST_BUNDLE_ID` to `build-for-testing` and `test-without-building` when you split the steps. Releases follow [docs/RELEASING.md](docs/RELEASING.md).
 
 </details>
 
