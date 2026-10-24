@@ -79,6 +79,7 @@ final class NumericPreservationGuardTests: XCTestCase {
         rejects("About 15 of the 105% students finished by 2026.", source: percent)
         rejects("The low was 4 degrees at night.", source: "the low was negative four degrees at night")
         rejects("The low was 4 and -5 degrees.", source: "the low was negative four and five degrees")
+        rejects("Growth was 15, then 1.5%.", source: "growth was fifteen percent then one point five")
         for mode in [CleanupMode.everyday, .technical, .writing] {
             let formatting = mode.formatsNumbers
             rejects("About fifteen of the students finished early.", source: "about fifteen percent of the students finished early",

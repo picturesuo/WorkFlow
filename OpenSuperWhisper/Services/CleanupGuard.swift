@@ -428,8 +428,12 @@ enum CleanupGuard {
     ) -> [(symbol: ValueSymbol, values: Set<String>, range: Range<String.Index>)] {
         var numbers = SpokenNumberParser.occurrences(in: text).map { (values: $0.values, range: $0.range) }
         for match in numericMatches(in: text) {
-            let parts = match.token.split(separator: "-").map(String.init)
-            numbers.append((values: Set([match.token, match.token.filter(\.isNumber)] + parts), range: match.range))
+            var values: Set<String> = [match.token]
+            if match.token.contains("-") {
+                values.insert(match.token.filter(\.isNumber))
+                values.formUnion(match.token.split(separator: "-").map(String.init))
+            }
+            numbers.append((values: values, range: match.range))
         }
         var result: [(symbol: ValueSymbol, values: Set<String>, range: Range<String.Index>)] = []
         func add(_ symbol: ValueSymbol, _ values: Set<String>, _ range: Range<String.Index>) {
