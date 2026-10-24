@@ -268,8 +268,8 @@ final class SettingsLayoutTests: XCTestCase {
     // MARK: History wording
 
     func testHistoryNamesTheOriginalTranscriptInsteadOfAFallback() {
-        func card(_ source: TranscriptCleanupOutcome.Source, hasAudio: Bool = true) -> RecordingCard {
-            RecordingCard(
+        func card(_ source: TranscriptCleanupOutcome.Source, hasAudio: Bool = true) -> HistoryRow {
+            HistoryRow(
                 recording: Recording(id: UUID(), timestamp: Date(), fileName: "fixture.wav", transcription: "Fixture words.",
                                      duration: 3, status: .completed, progress: 1, cleanupSource: source),
                 searchQuery: "", isPlaying: false, hasAudio: hasAudio,
