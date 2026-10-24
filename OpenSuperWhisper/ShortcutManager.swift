@@ -83,17 +83,13 @@ class ShortcutManager {
     }
 
     private func setupRecordingTrigger() {
-        let modifierKey = ModifierKey(rawValue: AppPreferences.shared.modifierOnlyHotkey) ?? .none
-        let secondaryModifierKey = ModifierKey(rawValue: AppPreferences.shared.secondaryModifierOnlyHotkey) ?? .none
-        let mouseButton = MouseButton(rawValue: AppPreferences.shared.mouseButtonHotkey) ?? .none
-
-        // The three trigger modes are mutually exclusive. Tear all of them down
-        // first, then enable exactly one. A configured mouse button takes priority
-        // over a modifier key, which takes priority over the regular shortcut.
+        // The trigger modes are mutually exclusive. Tear all of them down
+        // first, then enable exactly the one the preferences resolve to.
         ModifierKeyMonitor.shared.stop()
         MouseButtonMonitor.shared.stop()
 
-        if mouseButton != .none {
+        switch RecordingTriggerConfiguration() {
+        case .mouseButton(let mouseButton):
             useMouseButtonHotkey = true
             useModifierOnlyHotkey = false
             KeyboardShortcuts.disable(.toggleRecord)
@@ -108,34 +104,44 @@ class ShortcutManager {
 
             MouseButtonMonitor.shared.start(mouseButton: mouseButton)
             print("ShortcutManager: Using mouse-button hotkey: \(mouseButton.displayName)")
-        } else if modifierKey != .none {
-            useMouseButtonHotkey = false
-            useModifierOnlyHotkey = true
-            KeyboardShortcuts.disable(.toggleRecord)
-
-            ModifierKeyMonitor.shared.onKeyDown = { [weak self] in
-                self?.handleKeyDown()
-            }
-
-            ModifierKeyMonitor.shared.onKeyUp = { [weak self] in
-                self?.handleKeyUp()
-            }
-
-            ModifierKeyMonitor.shared.onChord = { [weak self] in
-                self?.handleChord()
-            }
-
-            lastPressDownTime = 0
-            pressConsumed = false
+        case .chord(let chord):
+            prepareModifierKeyMonitor()
+            ModifierKeyMonitor.shared.start(chord: chord)
+            print("ShortcutManager: Using chord hotkey: \(chord.displayName) (double-press: \(AppPreferences.shared.doublePressToTrigger))")
+        case .modifierKeys(let modifierKey, let secondaryModifierKey):
+            prepareModifierKeyMonitor()
             ModifierKeyMonitor.shared.start(modifierKeys: [modifierKey, secondaryModifierKey])
             let secondaryDescription = secondaryModifierKey == .none ? "" : " or \(secondaryModifierKey.displayName)"
             print("ShortcutManager: Using modifier-only hotkey: \(modifierKey.displayName)\(secondaryDescription) (double-press: \(AppPreferences.shared.doublePressToTrigger))")
-        } else {
+        case .keyCombination:
             useMouseButtonHotkey = false
             useModifierOnlyHotkey = false
             KeyboardShortcuts.enable(.toggleRecord)
             print("ShortcutManager: Using regular keyboard shortcut")
         }
+    }
+
+    /// Modifier keys and chords share the event tap and the same press
+    /// handling as every other trigger.
+    private func prepareModifierKeyMonitor() {
+        useMouseButtonHotkey = false
+        useModifierOnlyHotkey = true
+        KeyboardShortcuts.disable(.toggleRecord)
+
+        ModifierKeyMonitor.shared.onKeyDown = { [weak self] in
+            self?.handleKeyDown()
+        }
+
+        ModifierKeyMonitor.shared.onKeyUp = { [weak self] in
+            self?.handleKeyUp()
+        }
+
+        ModifierKeyMonitor.shared.onChord = { [weak self] in
+            self?.handleChord()
+        }
+
+        lastPressDownTime = 0
+        pressConsumed = false
     }
     
     private func handleKeyDown() {

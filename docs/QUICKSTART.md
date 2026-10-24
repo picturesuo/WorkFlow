@@ -33,7 +33,7 @@ When WorkFlow opens, allow:
 
 1. **Microphone** — records speech locally.
 2. **Accessibility** — pastes into the app that was focused when recording began.
-3. **Input Monitoring** — needed only when you choose `Fn`/globe or another single-modifier shortcut.
+3. **Input Monitoring** — needed only when you choose `Fn`/globe, another single-modifier shortcut, or `Control`+`Fn`.
 
 If a prompt is missed, open System Settings → Privacy & Security and enable the missing permission. WorkFlow detects a newly granted Input Monitoring permission and activates the selected shortcut automatically.
 
@@ -41,7 +41,7 @@ If a prompt is missed, open System Settings → Privacy & Security and enable th
 
 Settings (⌘,) has four panes; ⌘1 to ⌘4 switch between them, and Settings reopens on the pane you last used.
 
-- **Dictation**: the shortcut (and an optional second key), whether you hold or tap to record, the speech model, the language, and whether text is pasted and kept on the clipboard. Sounds, Escape, startup, History storage, and Whisper decoding wait under **More options**.
+- **Dictation**: the shortcut (and an optional second key, or **Control + Fn (hold both)**, where Fn or Control alone does nothing), whether you hold or tap to record, the speech model, the language, and whether text is pasted and kept on the clipboard. Sounds, Escape, startup, History storage, and Whisper decoding wait under **More options**.
 - **Cleanup**: AI cleanup on or off, the four writing modes with an example each, your custom filters, and meeting cleanup.
 - **Personalize**: learning from finished writing, personal vocabulary, per-app rules, and a JSON backup.
 - **Provider & Cost**: the cleanup provider and its key, the monthly estimated-cost stop, and this month's usage.
@@ -86,7 +86,8 @@ Usage bills to your Azure subscription; WorkFlow reports tokens but does not est
 ## If your shortcut does nothing
 
 - Confirm WorkFlow is running in the menu bar.
-- If you selected `Fn` or another modifier, enable WorkFlow under System Settings → Privacy & Security → Input Monitoring.
+- If you selected `Fn`, `Control`+`Fn`, or another modifier, enable WorkFlow under System Settings → Privacy & Security → Input Monitoring.
+- If the emoji picker, an input source switch, or macOS Dictation also opens with `Control`+`Fn`, set System Settings → Keyboard → Press 🌐 key to **Do Nothing**.
 - In WorkFlow → Settings → Dictation, confirm the shortcut and whether it records while you hold it (**Hold**) or between two presses (**Tap**).
 - WorkFlow detects a newly granted Input Monitoring permission and activates the shortcut automatically.
 

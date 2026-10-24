@@ -124,6 +124,11 @@ final class AppPreferences {
     @UserDefault(key: "mouseButtonHotkey", defaultValue: "none")
     var mouseButtonHotkey: String
 
+    /// Opt-in two-key chord ("none" or "controlFn"). Choosing it leaves the
+    /// modifier keys above untouched, so switching back restores them.
+    @UserDefault(key: "modifierChordHotkey", defaultValue: "none")
+    var modifierChordHotkey: String
+
 
     @UserDefault(key: "holdToRecord", defaultValue: true)
     var holdToRecord: Bool

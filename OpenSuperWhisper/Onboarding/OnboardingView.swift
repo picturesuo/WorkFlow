@@ -55,6 +55,10 @@ class OnboardingViewModel: ObservableObject {
     @Published var selectedShortcut: OnboardingShortcutOption {
         didSet {
             let modifierKey = selectedShortcut.modifierKey
+            // A Control+Fn chord would outrank the choice made here.
+            if AppPreferences.shared.modifierChordHotkey != ModifierChord.none.rawValue {
+                AppPreferences.shared.modifierChordHotkey = ModifierChord.none.rawValue
+            }
             AppPreferences.shared.modifierOnlyHotkey = modifierKey.rawValue
             if modifierKey != .none {
                 AppPreferences.shared.lastModifierOnlyHotkey = modifierKey.rawValue
