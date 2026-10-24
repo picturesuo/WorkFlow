@@ -402,6 +402,7 @@ struct ContentView: View {
     @State private var searchTask: Task<Void, Never>? = nil
     private var writingFilter = WritingFilterPreferences()
     @AppStorage("modifierOnlyHotkey") private var modifierOnlyHotkeyRaw = ModifierKey.fn.rawValue
+    @AppStorage("modifierChordHotkey") private var modifierChordHotkeyRaw = ModifierChord.none.rawValue
 
     /// Nil uses the shared services and live permission checks.
     @MainActor
@@ -414,17 +415,8 @@ struct ContentView: View {
 
     /// The dictation shortcut as saved in Settings, e.g. "⌃ / fn".
     static func shortcutDescription() -> String {
-        let mouseButton = MouseButton(rawValue: AppPreferences.shared.mouseButtonHotkey) ?? .none
-        if mouseButton != .none {
-            return mouseButton.shortSymbol
-        }
-        let modifierKey = ModifierKey(rawValue: AppPreferences.shared.modifierOnlyHotkey) ?? .none
-        if modifierKey != .none {
-            let secondary = ModifierKey(rawValue: AppPreferences.shared.secondaryModifierOnlyHotkey) ?? .none
-            if secondary != .none, secondary != modifierKey {
-                return "\(modifierKey.shortSymbol) / \(secondary.shortSymbol)"
-            }
-            return modifierKey.shortSymbol
+        if let symbol = RecordingTriggerConfiguration().symbol {
+            return symbol
         } else if let shortcut = KeyboardShortcuts.getShortcut(for: .toggleRecord) {
             return shortcut.description
         }
@@ -453,8 +445,12 @@ struct ContentView: View {
     }
 
     private var requiresInputMonitoring: Bool {
-        let modifier = ModifierKey(rawValue: modifierOnlyHotkeyRaw) ?? .none
-        return modifier != .none
+        RecordingTriggerConfiguration(
+            mouseButton: MouseButton(rawValue: AppPreferences.shared.mouseButtonHotkey) ?? .none,
+            chord: ModifierChord(rawValue: modifierChordHotkeyRaw) ?? .none,
+            modifierKey: ModifierKey(rawValue: modifierOnlyHotkeyRaw) ?? .none,
+            secondaryModifierKey: .none
+        ).requiresInputMonitoring
     }
 
     @ViewBuilder
