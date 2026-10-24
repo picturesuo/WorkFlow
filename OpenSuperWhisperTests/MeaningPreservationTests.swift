@@ -87,6 +87,19 @@ final class MeaningPreservationGuardTests: XCTestCase {
         rejects("Six people came.", source: "no six people came", mode: .technical)
     }
 
+    func testAddedNegationFallsBackInEveryMode() {
+        for mode in CleanupMode.allCases {
+            rejects("We couldn't ship the beta on Thursday.", source: "we could ship the beta on thursday", mode: mode)
+            rejects("Don't merge the branch.", source: "merge the branch", mode: mode)
+            rejects("The tests never pass.", source: "the tests pass", mode: mode)
+            rejects("x ≠ y", source: "x equals y", mode: mode)
+        }
+        // A faithful contraction, inequality, or answer says no more than the speaker did.
+        accepts("It is not ready.", source: "it isn't ready")
+        accepts("x ≠ y", source: "x is not equal to y", mode: .homework)
+        accepts("No, that's fine.", source: "nah that's fine")
+    }
+
     func testDroppedNumbersFallBackInBuiltInModesToo() {
         rejects("Call me later.", source: "call me at five", mode: .everyday)
         rejects("Retry the job.", source: "retry the job 3 times", mode: .technical)

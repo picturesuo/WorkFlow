@@ -181,10 +181,12 @@ enum CleanupGuard {
     ///   preferences. It accepts a digit form only when the source spells out
     ///   that exact value, clock time, or run of digit words.
     ///   In every mode each number, negation, path, flag, URL, and identifier
-    ///   the speaker said must survive unless they corrected it, a number word
-    ///   may not change value, a %, sign, operator, power, √, or multiplication
-    ///   sign appears only where the source says it, and EMPTY is accepted only
-    ///   for filler; anything else falls back to the local transcript.
+    ///   the speaker said must survive unless they corrected it, no negation
+    ///   may be added, a number word may not change value, a percent or sign
+    ///   the speaker attached to a number stays on that number, a %, sign,
+    ///   operator, power, √, or multiplication sign appears only where the
+    ///   source says it, and EMPTY is accepted only for filler; anything else
+    ///   falls back to the local transcript.
     static func postprocess(
         _ value: String,
         source: String,
@@ -290,6 +292,7 @@ enum CleanupGuard {
             }
         }
         guard keepsEverySourceNumber(cleaned, source: trimmedSource),
+              keepsEveryValueSymbol(cleaned, source: trimmedSource),
               keepsEveryNegation(cleaned, source: trimmedSource),
               keepsEveryIdentifier(cleaned, source: trimmedSource) else {
             throw CleanupGuardError.unsafeRewrite
@@ -396,6 +399,76 @@ enum CleanupGuard {
 
     private static let multiplicativeWords = [("twice", "2"), ("thrice", "3")]
 
+    private enum ValueSymbol {
+        case percent
+        case sign
+    }
+
+    /// "%", "percent", or "per cent" right after a number.
+    private static let percentAfterPattern = try! NSRegularExpression(
+        pattern: #"^\s*(?:[%％]|per\s?cent\b)"#,
+        options: [.caseInsensitive]
+    )
+
+    /// "negative", "minus", "−", or "±" right before a number, or a hyphen
+    /// that starts it ("-4") or stands between operands ("5 - 3"), never one
+    /// joining a range ("5-10").
+    private static let signBeforePattern = try! NSRegularExpression(
+        pattern: #"(?:\b(?:negative|minus)\s+|(?:^|[\s(\[])-\s*|[−±]\s*)$"#,
+        options: [.caseInsensitive]
+    )
+
+    /// Each number the text writes with a percent or a sign, with every digit
+    /// form of that number: "fifteen percent" and "15%" are 15 with a percent,
+    /// and "negative four", "minus 4", and "-4" are 4 with a sign. Parts of one
+    /// spoken number that end at the same percent, or start after the same
+    /// sign, are one entry.
+    private static func valueSymbols(
+        in text: String
+    ) -> [(symbol: ValueSymbol, values: Set<String>, range: Range<String.Index>)] {
+        var numbers = SpokenNumberParser.occurrences(in: text).map { (values: $0.values, range: $0.range) }
+        for match in numericMatches(in: text) {
+            let parts = match.token.split(separator: "-").map(String.init)
+            numbers.append((values: Set([match.token, match.token.filter(\.isNumber)] + parts), range: match.range))
+        }
+        var result: [(symbol: ValueSymbol, values: Set<String>, range: Range<String.Index>)] = []
+        func add(_ symbol: ValueSymbol, _ values: Set<String>, _ range: Range<String.Index>) {
+            let anchor = { (entry: Range<String.Index>) in symbol == .percent ? entry.upperBound : entry.lowerBound }
+            if let index = result.firstIndex(where: { $0.symbol == symbol && anchor($0.range) == anchor(range) }) {
+                result[index].values.formUnion(values)
+            } else {
+                result.append((symbol, values, range))
+            }
+        }
+        for number in numbers {
+            let after = String(text[number.range.upperBound...].prefix(12))
+            if let match = percentAfterPattern.firstMatch(in: after, range: NSRange(after.startIndex..., in: after)),
+               let matched = Range(match.range, in: after) {
+                let end = text.index(number.range.upperBound, offsetBy: after.distance(from: after.startIndex, to: matched.upperBound))
+                add(.percent, number.values, number.range.lowerBound..<end)
+            }
+            let before = String(text[..<number.range.lowerBound].suffix(12))
+            if signBeforePattern.firstMatch(in: before, range: NSRange(before.startIndex..., in: before)) != nil {
+                add(.sign, number.values, number.range)
+            }
+        }
+        return result
+    }
+
+    /// "fifteen percent" is not "15", and "negative four" is not "4": each
+    /// percent or sign the speaker attached to a number survives on that same
+    /// number, as the symbol or the word, unless the speaker corrected it.
+    private static func keepsEveryValueSymbol(_ cleaned: String, source: String) -> Bool {
+        var written = valueSymbols(in: cleaned)
+        for said in valueSymbols(in: source) where !isCorrected(said.range, in: source) {
+            guard let index = written.firstIndex(where: {
+                $0.symbol == said.symbol && !$0.values.isDisjoint(with: said.values)
+            }) else { return false }
+            written.remove(at: index)
+        }
+        return true
+    }
+
     /// Hesitation sounds that say nothing on their own.
     private static let fillerWords: Set<String> = [
         "um", "umm", "uh", "uhh", "uhm", "er", "erm", "ah", "ahh", "eh",
@@ -467,9 +540,24 @@ enum CleanupGuard {
 
     private static let answerWords: Set<String> = ["yeah", "yes", "yep", "oh", "ok", "okay"]
 
+    /// Every negation the speaker meant survives and none is added, so neither
+    /// a model slip nor a learned preference can invert what they said. "x is
+    /// not equal to y" may be written "x ≠ y", and a bare "no" that answers or
+    /// corrects ("No, that's fine.") adds nothing.
     private static func keepsEveryNegation(_ cleaned: String, source: String) -> Bool {
-        // "x is not equal to y" may be written "x ≠ y".
-        negations(in: cleaned) + cleaned.filter { $0 == "≠" }.count >= requiredNegations(in: source)
+        let inequalities = { (text: String) in text.filter { $0 == "≠" }.count }
+        return negations(in: cleaned) + inequalities(cleaned) >= requiredNegations(in: source)
+            && clauseNegations(in: cleaned) + inequalities(cleaned) <= clauseNegations(in: source) + inequalities(source)
+    }
+
+    private static func clauseNegations(in text: String) -> Int {
+        negations(in: text) { range, word in !(word == "no" && isBareNo(range, in: text)) }
+    }
+
+    /// How many negations the text says, with "≠" as one and a repeated word
+    /// counted once; "do not" and "don't" each say one.
+    static func negationCount(in text: String) -> Int {
+        negations(in: text) + text.filter { $0 == "≠" }.count
     }
 
     /// Prose that happens to contain a slash.
