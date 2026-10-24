@@ -232,7 +232,7 @@ final class DictationLearningFlowTests: XCTestCase {
         for scheme in [ColorScheme.light, .dark] {
             try render(AnyView(VStack(spacing: WFSpace.md) {
                 ForEach([next, first]) { recording in
-                    RecordingCard(recording: recording, searchQuery: "", isPlaying: false,
+                    HistoryRow(recording: recording, searchQuery: "", isPlaying: false,
                                   onPlay: {}, onCopy: {}, onDelete: {}, onRegenerate: {})
                 }
                 DictationDock(status: .ready, shortcut: "fn", writingSelection: .constant(.builtIn(.writing)),

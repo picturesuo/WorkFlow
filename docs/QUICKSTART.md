@@ -46,6 +46,12 @@ Settings (⌘,) has four panes; ⌘1 to ⌘4 switch between them, and Settings r
 - **Personalize**: learning from finished writing, personal vocabulary, per-app rules, and a JSON backup.
 - **Provider & Cost**: the cleanup provider and its key, the monthly estimated-cost stop, and this month's usage.
 
+## Main window at a glance
+
+- **Toolbar**: search History, start or stop a meeting recording, **More** (⋯) for **Delete All Recordings…**, and Settings.
+- **History**: dictations grouped by day, newest first. Each row has **Copy**; its ⋯ menu, or a right-click, also offers Play Recording, Regenerate Transcript, and Delete Recording. A failed transcription that kept its audio shows **Regenerate** in place of Copy, and a long transcript opens with **Show full text**.
+- **Dictation bar**: the writing mode and **Learn…**, what dictation is doing now with your shortcut, the microphone menu (⌄), and the record button.
+
 ## First dictation
 
 1. In onboarding, keep the permission-free `Option`+backtick shortcut or choose `Fn`/globe and enable Input Monitoring.

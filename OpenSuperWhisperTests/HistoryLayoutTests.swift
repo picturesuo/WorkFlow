@@ -3,7 +3,9 @@ import SwiftUI
 import XCTest
 @testable import OpenSuperWhisper
 
-/// Renders production views without opening, activating, or capturing a window.
+/// Renders the production History rows and dictation bar without opening,
+/// activating, or capturing a window. `MainWindowLayoutTests` renders them
+/// inside the whole window.
 /// Attachments use synthetic transcripts and are safe to share for visual review.
 @MainActor
 final class HistoryLayoutTests: XCTestCase {
@@ -60,23 +62,18 @@ private struct HistoryFixture: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            HistoryHeader(searchText: .constant(""), isSearching: false) {
-                ToolbarIconButton(systemImage: "person.2", help: "Start meeting", accessibilityLabel: "Start meeting") {}
-                ToolbarIconButton(systemImage: "mic", help: "Microphone", accessibilityLabel: "Choose microphone") {}
-                ToolbarIconButton(systemImage: "gearshape", help: "Settings", accessibilityLabel: "Open settings") {}
-            }
             ScrollView {
-                VStack(spacing: WFSpace.md) {
+                VStack(spacing: 0) {
                     ForEach(recordings) { recording in
-                        RecordingCard(recording: recording, searchQuery: "", isPlaying: false,
+                        HistoryRow(recording: recording, searchQuery: "", isPlaying: false,
                                       onPlay: {}, onCopy: {}, onDelete: {}, onRegenerate: {})
+                        HistoryRowSeparator()
                     }
                 }
-                .padding(.horizontal, WFSpace.xl)
-                .padding(.bottom, WFSpace.lg)
             }
+            .background(ThemePalette.contentBackground(scheme))
             DictationDock(status: .ready, shortcut: "fn", writingSelection: .constant(.builtIn(.technical)), onRecord: {})
         }
-        .background(ThemePalette.windowBackground(scheme))
+        .background(ThemePalette.chromeBackground(scheme))
     }
 }

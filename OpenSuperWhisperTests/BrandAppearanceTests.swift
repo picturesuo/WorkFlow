@@ -139,11 +139,23 @@ final class BrandLayoutTests: XCTestCase {
     func testMainWindowUsesTheMarkAndNoPurpleAtCompactAndWideSizes() throws {
         for width in [440.0, 640.0] {
             for scheme in [ColorScheme.light, .dark] {
-                let bitmap = try render(AnyView(MainWindowFixture(scheme: scheme, status: .ready)),
-                                        name: "brand-main-\(Int(width))", width: width, scheme: scheme)
+                let window = try MainWindowHost(recordings: MainWindowFixtures.history(), size: CGSize(width: width, height: 640),
+                                                scheme: scheme, appStorage: defaults)
+                let bitmap = try window.render()
+                attach(bitmap, name: "brand-main-\(Int(width))-\(scheme == .dark ? "dark" : "light")")
                 XCTAssertEqual(purplePixels(in: bitmap), 0, "main \(Int(width)) \(scheme)")
+                XCTAssertFalse(window.window.isVisible, "Visual verification must stay offscreen")
+                window.close()
             }
         }
+    }
+
+    private func attach(_ bitmap: NSBitmapImageRep, name: String) {
+        guard let data = bitmap.representation(using: .png, properties: [:]) else { return }
+        let attachment = XCTAttachment(data: data, uniformTypeIdentifier: "public.png")
+        attachment.name = name
+        attachment.lifetime = .keepAlways
+        add(attachment)
     }
 
     func testDictationDockStatesStayDistinctAndOnBrand() throws {
@@ -231,52 +243,6 @@ final class BrandLayoutTests: XCTestCase {
         add(attachment)
         XCTAssertFalse(window.isVisible, "Visual verification must stay offscreen")
         return bitmap
-    }
-}
-
-private struct MainWindowFixture: View {
-    let scheme: ColorScheme
-    let status: DictationDockStatus
-
-    private var recordings: [Recording] {
-        let now = Date(timeIntervalSince1970: 1_789_257_600)
-        return [
-            Recording(id: UUID(), timestamp: now, fileName: "fixture-one.wav",
-                      transcription: "Make the search faster, keep every detail, and give the words a little more room.",
-                      duration: 18, status: .completed, progress: 1,
-                      cleanupSource: .bedrock, cleanupInputTokens: 230, cleanupOutputTokens: 42,
-                      cleanupModelID: "us.amazon.nova-micro-v1:0", cleanupMode: .technical,
-                      rawTokenEstimate: 73, finalTokenEstimate: 42,
-                      tokenEstimatorID: LocalTokenEstimator.identifier),
-            Recording(id: UUID(), timestamp: now.addingTimeInterval(-1800), fileName: "fixture-two.wav",
-                      transcription: "We agreed to simplify the recording flow and review the first version on Friday. Keep the current shortcuts, make failures easy to recover from, and give every recording a stable home in the history.",
-                      duration: 9, status: .completed, progress: 1, cleanupSource: .rawFallback)
-        ]
-    }
-
-    var body: some View {
-        VStack(spacing: 0) {
-            HistoryHeader(searchText: .constant(""), isSearching: false) {
-                HStack(spacing: WFSpace.sm) {
-                    ToolbarIconButton(systemImage: "person.2.wave.2.fill", help: "Start meeting", accessibilityLabel: "Start meeting") {}
-                    ToolbarIconButton(systemImage: "mic.fill", help: "Microphone", accessibilityLabel: "Select microphone") {}
-                    ToolbarIconButton(systemImage: "trash", help: "Delete all recordings", accessibilityLabel: "Delete all recordings") {}
-                    ToolbarIconButton(systemImage: "gear", help: "Settings", accessibilityLabel: "Open settings") {}
-                }
-            }
-            VStack(spacing: WFSpace.md) {
-                ForEach(recordings) { recording in
-                    RecordingCard(recording: recording, searchQuery: "", isPlaying: false,
-                                  onPlay: {}, onCopy: {}, onDelete: {}, onRegenerate: {})
-                }
-            }
-            .padding(.horizontal, WFSpace.xl)
-            Spacer(minLength: WFSpace.md)
-            DictationDock(status: status, shortcut: "fn", writingSelection: .constant(.builtIn(.technical)),
-                          onLearn: {}, onRecord: {})
-        }
-        .frame(height: 640)
-        .background(ThemePalette.windowBackground(scheme))
     }
 }
 

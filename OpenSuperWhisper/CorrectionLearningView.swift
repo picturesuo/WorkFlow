@@ -70,7 +70,6 @@ struct CorrectionLearningCard: View {
                 .labelsHidden()
                 .fixedSize()
                 .disabled(session.isLearning)
-                .accessibilityLabel("Mode to learn for")
                 Spacer(minLength: 0)
             }
 

@@ -12,14 +12,12 @@ enum WFSpace {
 }
 
 enum WFRadius {
-    static let control: CGFloat = 10
     static let card: CGFloat = 14
 }
 
 // MARK: - Motion
 
 enum WFMotion {
-    static let quick = Animation.spring(response: 0.28, dampingFraction: 0.85)
     static let gentle = Animation.spring(response: 0.42, dampingFraction: 0.9)
 }
 
@@ -64,6 +62,17 @@ enum ThemePalette {
 
     static func hairline(_ scheme: ColorScheme) -> Color {
         scheme == .dark ? Color.white.opacity(0.10) : Color.black.opacity(0.08)
+    }
+
+    /// The main window's toolbar and dictation bar.
+    static func chromeBackground(_ scheme: ColorScheme) -> Color {
+        scheme == .dark ? cardBackground(.dark) : windowBackground(.light)
+    }
+
+    /// The History list: brighter than the chrome in light mode and deeper in
+    /// dark mode, the way macOS content areas sit against their toolbars.
+    static func contentBackground(_ scheme: ColorScheme) -> Color {
+        scheme == .dark ? windowBackground(.dark) : cardBackground(.light)
     }
 
     /// The mark's charcoal in light mode and its ivory in dark mode: the record
@@ -113,20 +122,54 @@ struct WorkFlowMark: View {
     }
 }
 
-// MARK: - Button style
+// MARK: - Main window chrome
 
-struct WFPressableStyle: ButtonStyle {
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+enum WFChrome {
+    /// The title bar band the main window's toolbar row shares with the
+    /// traffic lights (an empty compact toolbar centers them in it).
+    static let titleBarHeight: CGFloat = 40
+    /// Clears the traffic lights, which end 72 pt from the leading edge.
+    static let trafficLightInset: CGFloat = 84
+}
 
-    func makeBody(configuration: Configuration) -> some View {
-        configuration.label
-            .scaleEffect(configuration.isPressed && !reduceMotion ? 0.96 : 1.0)
-            .opacity(configuration.isPressed ? 0.9 : 1.0)
-            .animation(reduceMotion ? nil : WFMotion.quick, value: configuration.isPressed)
+/// A one-point separator between window regions. In a stack it also keeps
+/// the History scroll view from reaching under the toolbar band, where macOS
+/// 26 would otherwise extend it with a glass edge over the toolbar row.
+struct WFHairline: View {
+    @Environment(\.colorScheme) private var colorScheme
+
+    var body: some View {
+        Rectangle()
+            .fill(ThemePalette.hairline(colorScheme))
+            .frame(height: 1)
+            .accessibilityHidden(true)
     }
 }
 
-// MARK: - Toolbar icon button
+/// A toolbar glyph with the hover plate macOS toolbar items show.
+struct ToolbarGlyph: View {
+    let systemImage: String
+    var tint: Color = .secondary
+    var size: CGFloat = 28
+    var symbolSize: CGFloat = 15
+    @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.isEnabled) private var isEnabled
+    @State private var isHovered = false
+
+    var body: some View {
+        Image(systemName: systemImage)
+            .font(.system(size: symbolSize, weight: .regular))
+            .foregroundStyle(isHovered && isEnabled && tint == .secondary ? Color.primary : tint)
+            .frame(width: size, height: size)
+            .background(
+                RoundedRectangle(cornerRadius: 6, style: .continuous)
+                    .fill(isHovered && isEnabled ? ThemePalette.ink(colorScheme).opacity(0.08) : Color.clear)
+            )
+            .contentShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+            .opacity(isEnabled ? 1 : 0.4)
+            .onHover { isHovered = $0 }
+    }
+}
 
 struct ToolbarIconButton: View {
     let systemImage: String
@@ -134,9 +177,6 @@ struct ToolbarIconButton: View {
     let accessibilityLabel: String
     var tint: Color = .secondary
     let action: () -> Void
-
-    @Environment(\.colorScheme) private var colorScheme
-    @State private var isHovered = false
 
     init(
         systemImage: String,
@@ -154,22 +194,54 @@ struct ToolbarIconButton: View {
 
     var body: some View {
         Button(action: action) {
-            Image(systemName: systemImage)
-                .font(.system(size: 14, weight: .medium))
-                .foregroundStyle(isHovered ? Color.primary : tint)
-                .frame(width: 30, height: 30)
-                .background(
-                    RoundedRectangle(cornerRadius: WFRadius.control, style: .continuous)
-                        .fill(isHovered
-                              ? ThemePalette.ink(colorScheme).opacity(0.08)
-                              : Color.clear)
-                )
-                .contentShape(RoundedRectangle(cornerRadius: WFRadius.control, style: .continuous))
+            ToolbarGlyph(systemImage: systemImage, tint: tint)
         }
-        .buttonStyle(WFPressableStyle())
-        .onHover { isHovered = $0 }
+        .buttonStyle(.borderless)
         .help(help)
         .accessibilityLabel(accessibilityLabel)
+    }
+}
+
+/// The system search field, so search looks and behaves as it does in
+/// Mail or Notes: magnifier, clear button, Escape to clear, focus ring.
+struct SearchField: NSViewRepresentable {
+    @Binding var text: String
+    var prompt: String
+
+    func makeNSView(context: Context) -> NSSearchField {
+        let field = NSSearchField()
+        field.placeholderString = prompt
+        field.delegate = context.coordinator
+        field.target = context.coordinator
+        field.action = #selector(Coordinator.searchChanged(_:))
+        field.sendsSearchStringImmediately = true
+        field.setAccessibilityLabel(prompt)
+        field.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        field.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        return field
+    }
+
+    func updateNSView(_ field: NSSearchField, context: Context) {
+        context.coordinator.text = $text
+        if field.stringValue != text { field.stringValue = text }
+    }
+
+    func makeCoordinator() -> Coordinator { Coordinator(text: $text) }
+
+    final class Coordinator: NSObject, NSSearchFieldDelegate {
+        var text: Binding<String>
+
+        init(text: Binding<String>) { self.text = text }
+
+        func controlTextDidChange(_ notification: Notification) {
+            guard let field = notification.object as? NSSearchField else { return }
+            text.wrappedValue = field.stringValue
+        }
+
+        /// Also fires for the clear button and Escape.
+        @objc func searchChanged(_ sender: NSSearchField) {
+            if text.wrappedValue != sender.stringValue { text.wrappedValue = sender.stringValue }
+        }
     }
 }
 
@@ -208,8 +280,9 @@ extension View {
 
 // MARK: - Window chrome
 
-/// Makes the hidden-title-bar window draggable by its background so the custom
-/// header row can act as the title bar.
+/// Makes the hidden-title-bar window draggable by its background so the
+/// toolbar row can act as the title bar, and gives it an empty compact
+/// toolbar, which centers the traffic lights in a band that row shares.
 struct WindowChromeConfigurator: NSViewRepresentable {
     final class ChromeView: NSView {
         override func viewDidMoveToWindow() {
@@ -218,6 +291,11 @@ struct WindowChromeConfigurator: NSViewRepresentable {
             window.isMovableByWindowBackground = true
             window.titlebarAppearsTransparent = true
             window.titleVisibility = .hidden
+            window.titlebarSeparatorStyle = .none
+            if window.toolbar == nil {
+                window.toolbar = NSToolbar(identifier: "WorkFlowMainWindow")
+            }
+            window.toolbarStyle = .unifiedCompact
         }
     }
 

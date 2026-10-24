@@ -137,6 +137,32 @@ final class SettingsLayoutTests: XCTestCase {
                        "replacement from note book to notebook")
     }
 
+    /// A Picker's hidden title stays in its VoiceOver name, so an extra
+    /// `.accessibilityLabel` made VoiceOver read "Speech model, Speech model".
+    func testPickersSpeakTheirNameOnce() throws {
+        let expected: [SettingsPane: [String]] = [
+            .dictation: ["Shortcut that starts dictation", "Second key that also starts dictation",
+                         "How the shortcut records", "Speech model", "Dictation language"],
+            .cleanup: [],
+            .personalize: ["Mode to learn for", "Running app"],
+            .providerCost: ["Cleanup provider"],
+        ]
+        try AccessibilityTree.withSwiftUITree {
+            for pane in SettingsPane.allCases {
+                let size = CGSize(width: 720, height: 1400)
+                let host = try hostedView(SettingsView(selection: .constant(pane), credentials: stub(), size: size), size: size)
+                let names = AccessibilityTree.labels(in: host, roles: [.popUpButton, .radioGroup])
+                for name in try XCTUnwrap(expected[pane]) {
+                    XCTAssertTrue(names.contains(name), "\(pane) has a picker VoiceOver reads as “\(name)”; found \(names)")
+                }
+                for name in names {
+                    XCTAssertFalse(name.isEmpty, "\(pane) has a picker without a VoiceOver name")
+                    XCTAssertFalse(name.contains(", "), "\(pane) picker reads its name twice: “\(name)”")
+                }
+            }
+        }
+    }
+
     func testCommandNumberSwitchesPanes() throws {
         final class Selection: ObservableObject { @Published var pane = SettingsPane.dictation }
         struct Host: View {
@@ -306,8 +332,8 @@ final class SettingsLayoutTests: XCTestCase {
     // MARK: History wording
 
     func testHistoryNamesTheOriginalTranscriptInsteadOfAFallback() {
-        func card(_ source: TranscriptCleanupOutcome.Source, hasAudio: Bool = true) -> RecordingCard {
-            RecordingCard(
+        func card(_ source: TranscriptCleanupOutcome.Source, hasAudio: Bool = true) -> HistoryRow {
+            HistoryRow(
                 recording: Recording(id: UUID(), timestamp: Date(), fileName: "fixture.wav", transcription: "Fixture words.",
                                      duration: 3, status: .completed, progress: 1, cleanupSource: source),
                 searchQuery: "", isPlaying: false, hasAudio: hasAudio,

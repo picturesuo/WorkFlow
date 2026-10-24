@@ -44,6 +44,14 @@ class PermissionsManager: ObservableObject {
         setupWindowObservers()
     }
 
+    /// Fixed answers that never query TCC or poll, for offscreen rendering.
+    init(microphone: Bool, accessibility: Bool, inputMonitoring: Bool) {
+        isMicrophonePermissionGranted = microphone
+        isAccessibilityPermissionGranted = accessibility
+        isInputMonitoringPermissionGranted = inputMonitoring
+        hasCompletedInitialCheck = true
+    }
+
     deinit {
         stopPermissionChecking()
         NSWorkspace.shared.notificationCenter.removeObserver(self)
