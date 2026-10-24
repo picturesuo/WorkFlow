@@ -14,6 +14,7 @@ struct DictationSettingsView: View {
 
     private enum ShortcutChoice: Hashable {
         case modifier(ModifierKey)
+        case chord(ModifierChord)
         case keyCombination
         case mouseButton
     }
@@ -43,9 +44,17 @@ struct DictationSettingsView: View {
     // MARK: Shortcut
 
     private var shortcutChoice: ShortcutChoice {
-        if viewModel.mouseButtonHotkey != .none { return .mouseButton }
-        if viewModel.modifierOnlyHotkey != .none { return .modifier(viewModel.modifierOnlyHotkey) }
-        return .keyCombination
+        switch RecordingTriggerConfiguration(
+            mouseButton: viewModel.mouseButtonHotkey,
+            chord: viewModel.modifierChordHotkey,
+            modifierKey: viewModel.modifierOnlyHotkey,
+            secondaryModifierKey: viewModel.secondaryModifierOnlyHotkey
+        ) {
+        case .mouseButton: return .mouseButton
+        case .chord(let chord): return .chord(chord)
+        case .modifierKeys(let primary, _): return .modifier(primary)
+        case .keyCombination: return .keyCombination
+        }
     }
 
     private var shortcutBinding: Binding<ShortcutChoice> {
@@ -55,14 +64,21 @@ struct DictationSettingsView: View {
                 switch choice {
                 case .modifier(let key):
                     viewModel.mouseButtonHotkey = .none
+                    viewModel.modifierChordHotkey = .none
                     viewModel.modifierOnlyHotkey = key
                     if viewModel.secondaryModifierOnlyHotkey == key {
                         viewModel.secondaryModifierOnlyHotkey = .none
                     }
+                case .chord(let chord):
+                    // The modifier keys stay stored so choosing them again restores them.
+                    viewModel.mouseButtonHotkey = .none
+                    viewModel.modifierChordHotkey = chord
                 case .keyCombination:
                     viewModel.mouseButtonHotkey = .none
+                    viewModel.modifierChordHotkey = .none
                     viewModel.modifierOnlyHotkey = .none
                 case .mouseButton:
+                    viewModel.modifierChordHotkey = .none
                     viewModel.modifierOnlyHotkey = .none
                     if viewModel.mouseButtonHotkey == .none {
                         viewModel.mouseButtonHotkey = .middle
@@ -79,6 +95,11 @@ struct DictationSettingsView: View {
                     Section("Modifier key") {
                         ForEach(ModifierKey.allCases.filter { $0 != .none }) { key in
                             Text(key.displayName).tag(ShortcutChoice.modifier(key))
+                        }
+                    }
+                    Section("Two keys") {
+                        ForEach(ModifierChord.allCases.filter { $0 != .none }) { chord in
+                            Text(chord.displayName).tag(ShortcutChoice.chord(chord))
                         }
                     }
                     Section("Other") {
@@ -107,19 +128,16 @@ struct DictationSettingsView: View {
                     .labelsHidden()
                     .fixedSize()
                 }
-                if permissionsManager.hasCompletedInitialCheck && !permissionsManager.isInputMonitoringPermissionGranted {
-                    SettingsDivider()
-                    SettingsNotice(
-                        title: "Turn on Input Monitoring",
-                        detail: "macOS needs it to notice \(primary.displayName) while you hold it. WorkFlow reads only modifier keys and whether another key is pressed, never what you type."
-                    ) {
-                        Button("Grant…") {
-                            permissionsManager.requestInputMonitoringPermissionOrOpenSystemPreferences()
-                        }
-                        .controlSize(.small)
-                        .accessibilityLabel("Grant Input Monitoring")
-                    }
+                inputMonitoringNotice(holding: "\(primary.displayName) while you hold it")
+            case .chord:
+                SettingsDivider()
+                SettingsRow(
+                    title: "Control and Fn together",
+                    detail: Self.chordHelp
+                ) {
+                    EmptyView()
                 }
+                inputMonitoringNotice(holding: "Control and Fn while you hold them")
             case .keyCombination:
                 SettingsDivider()
                 SettingsRow(title: "Key combination", detail: "Works without extra permissions.") {
@@ -155,6 +173,25 @@ struct DictationSettingsView: View {
                         .accessibilityLabel("Grant Accessibility")
                     }
                 }
+            }
+        }
+    }
+
+    static let chordHelp = "Let go of either key to finish. Fn or Control alone does nothing. If the emoji picker, an input source switch, or macOS Dictation also opens, set System Settings › Keyboard › Press 🌐 key to Do Nothing. No Fn key? Use a key combination."
+
+    @ViewBuilder
+    private func inputMonitoringNotice(holding: String) -> some View {
+        if permissionsManager.hasCompletedInitialCheck && !permissionsManager.isInputMonitoringPermissionGranted {
+            SettingsDivider()
+            SettingsNotice(
+                title: "Turn on Input Monitoring",
+                detail: "macOS needs it to notice \(holding). Until then this shortcut is off. WorkFlow reads only modifier keys and whether another key is pressed, never what you type."
+            ) {
+                Button("Grant…") {
+                    permissionsManager.requestInputMonitoringPermissionOrOpenSystemPreferences()
+                }
+                .controlSize(.small)
+                .accessibilityLabel("Grant Input Monitoring")
             }
         }
     }

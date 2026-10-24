@@ -52,7 +52,7 @@ final class SettingsLayoutTests: XCTestCase {
         "autoDeleteRecordingsAfterDays": 14,
         "personalVocabularyData": try! JSONEncoder().encode([VocabularyEntry(spoken: "fable orchestrator", replacement: "Fable Orchestrator")]),
     ]
-    private static let cleared = ["bedrockLastErrorMessage", "bedrockLastErrorDate", "debugMode"]
+    private static let cleared = ["bedrockLastErrorMessage", "bedrockLastErrorDate", "debugMode", "modifierChordHotkey"]
 
     private var originals: [String: Any?] = [:]
     private var appStorage: UserDefaults!
@@ -218,6 +218,7 @@ final class SettingsLayoutTests: XCTestCase {
             XCTAssertEqual(standard.object(forKey: key) as? NSObject, value as? NSObject, "\(key) changed on appear")
         }
         XCTAssertNil(standard.object(forKey: "debugMode"), "The removed debug switch writes nothing")
+        XCTAssertNil(standard.object(forKey: "modifierChordHotkey"), "The shortcut picker writes nothing until chosen")
         XCTAssertEqual(CustomCleanupFilterStore.load(from: appStorage).count, 2, "Saved filters are untouched")
         XCTAssertEqual(CustomCleanupFilterStore.currentSelection(in: appStorage), .builtIn(.writing))
     }
@@ -257,6 +258,43 @@ final class SettingsLayoutTests: XCTestCase {
         XCTAssertTrue(model.bedrockMonthlyBudgetEnabled)
         XCTAssertEqual(model.bedrockMonthlyBudgetUSD, 0.25, accuracy: 0.0001)
         XCTAssertNil(standard.object(forKey: "bedrockMonthlyBudgetUSD"), "Reading the default stores nothing")
+    }
+
+    // MARK: Control+Fn
+
+    func testControlFnIsOptInAndRoundTripsThePreviousShortcut() {
+        let prefs = AppPreferences.shared
+        let model = SettingsViewModel(credentials: stub())
+        XCTAssertEqual(model.modifierChordHotkey, .none)
+        XCTAssertEqual(RecordingTriggerConfiguration(), .modifierKeys(primary: .rightOption, secondary: .leftControl), "Today's trigger until chosen")
+
+        model.modifierChordHotkey = .controlFn
+        XCTAssertEqual(prefs.modifierChordHotkey, "controlFn")
+        XCTAssertEqual(RecordingTriggerConfiguration(), .chord(.controlFn))
+        XCTAssertEqual(prefs.modifierOnlyHotkey, ModifierKey.rightOption.rawValue, "The modifier keys stay stored")
+        XCTAssertEqual(prefs.secondaryModifierOnlyHotkey, ModifierKey.leftControl.rawValue)
+
+        model.modifierChordHotkey = .none
+        XCTAssertEqual(RecordingTriggerConfiguration(), .modifierKeys(primary: .rightOption, secondary: .leftControl), "Switching back restores both keys")
+        XCTAssertEqual(SettingsViewModel(credentials: stub()).modifierChordHotkey, .none)
+    }
+
+    func testDictationPaneWithControlFnRendersWithoutWriting() throws {
+        UserDefaults.standard.set(ModifierChord.controlFn.rawValue, forKey: "modifierChordHotkey")
+        for size in [CGSize(width: 600, height: 560), CGSize(width: 760, height: 680)] {
+            for scheme in [ColorScheme.light, .dark] {
+                let bitmap = try render(
+                    SettingsView(selection: .constant(.dictation), credentials: stub(), size: size),
+                    size: size,
+                    scheme: scheme,
+                    name: "settings-dictation-controlfn-\(Int(size.width))"
+                )
+                XCTAssertEqual(purplePixels(in: bitmap), 0)
+            }
+        }
+        XCTAssertEqual(UserDefaults.standard.string(forKey: "modifierChordHotkey"), ModifierChord.controlFn.rawValue)
+        XCTAssertTrue(DictationSettingsView.chordHelp.contains("Press 🌐 key to Do Nothing"))
+        XCTAssertTrue(DictationSettingsView.chordHelp.contains("alone does nothing"))
     }
 
     // MARK: Speech model

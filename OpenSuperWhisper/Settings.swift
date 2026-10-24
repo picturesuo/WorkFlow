@@ -157,6 +157,13 @@ class SettingsViewModel: ObservableObject {
             NotificationCenter.default.post(name: .hotkeySettingsChanged, object: nil)
         }
     }
+
+    @Published var modifierChordHotkey: ModifierChord {
+        didSet {
+            AppPreferences.shared.modifierChordHotkey = modifierChordHotkey.rawValue
+            NotificationCenter.default.post(name: .hotkeySettingsChanged, object: nil)
+        }
+    }
     
     @Published var holdToRecord: Bool {
         didSet {
@@ -287,6 +294,7 @@ class SettingsViewModel: ObservableObject {
         self.modifierOnlyHotkey = ModifierKey(rawValue: prefs.modifierOnlyHotkey) ?? .none
         self.secondaryModifierOnlyHotkey = ModifierKey(rawValue: prefs.secondaryModifierOnlyHotkey) ?? .none
         self.mouseButtonHotkey = MouseButton(rawValue: prefs.mouseButtonHotkey) ?? .none
+        self.modifierChordHotkey = ModifierChord(rawValue: prefs.modifierChordHotkey) ?? .none
         self.holdToRecord = prefs.holdToRecord
         self.doublePressToTrigger = prefs.doublePressToTrigger
         self.escCancelWithoutConfirmation = prefs.escCancelWithoutConfirmation
