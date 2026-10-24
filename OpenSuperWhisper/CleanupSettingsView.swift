@@ -315,7 +315,6 @@ struct ProviderCostSettingsView: View {
                 .pickerStyle(.menu)
                 .labelsHidden()
                 .fixedSize()
-                .accessibilityLabel("Cleanup provider")
             }
             if !viewModel.bedrockCleanupEnabled {
                 SettingsDivider()
@@ -1044,7 +1043,6 @@ struct PersonalizationSettingsView: View {
                     .pickerStyle(.menu)
                     .labelsHidden()
                     .frame(maxWidth: 200)
-                    .accessibilityLabel("Running app")
                     Button("Add") { addSelectedApp() }
                         .disabled(selectedBundleID.isEmpty || rules.contains { $0.bundleID == selectedBundleID })
                         .accessibilityLabel("Add a rule for the chosen app")

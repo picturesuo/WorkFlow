@@ -318,6 +318,22 @@ final class MainWindowLayoutTests: XCTestCase {
         withExtendedLifetime(dock) {}
     }
 
+    /// The picker's hidden "Writing mode" title already names it for
+    /// VoiceOver; a second label made it read "Writing mode, Writing mode".
+    func testDockWritingModeSpeaksItsNameOnce() {
+        for filters in [[], [CustomCleanupFilterStore.examples[0]]] {
+            let names = AccessibilityTree.withSwiftUITree {
+                let dock = OffscreenHost(
+                    DictationDock(status: .ready, shortcut: "⌃ / fn", writingSelection: .constant(.builtIn(.homework)),
+                                  customFilters: filters, onRecord: {}),
+                    size: CGSize(width: 560, height: 120)
+                )
+                return AccessibilityTree.labels(in: dock.host, roles: [.popUpButton, .radioGroup])
+            }
+            XCTAssertEqual(names, ["Writing mode"], filters.isEmpty ? "Segmented modes" : "Menu with custom filters")
+        }
+    }
+
     func testShortcutHintFollowsTheSavedShortcut() {
         let standard = UserDefaults.standard
         XCTAssertEqual(ContentView.shortcutDescription(), "⌃ / fn")

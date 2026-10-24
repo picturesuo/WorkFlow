@@ -991,7 +991,6 @@ struct DictationDock: View {
         WritingFilterPicker(selection: $writingSelection, customFilters: customFilters)
             .labelsHidden()
             .help(writingHelp)
-            .accessibilityLabel("Writing mode")
             .accessibilityHint("Changes how AI cleanup rewrites future dictations")
     }
 
