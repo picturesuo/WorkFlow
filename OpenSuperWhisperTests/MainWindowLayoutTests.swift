@@ -345,7 +345,10 @@ final class MainWindowLayoutTests: XCTestCase {
     }
 
     func testDayGroupingKeepsOrderAndLabelsDays() {
-        let rows = MainWindowFixtures.history()
+        // The fixture spans 27 hours before `now`, so it is anchored at midday:
+        // run just after midnight, rows from Date() would fall two days back.
+        let midday = Calendar.current.date(byAdding: .hour, value: 12, to: Calendar.current.startOfDay(for: Date()))!
+        let rows = MainWindowFixtures.history(now: midday)
         let days = HistoryDay.group(rows)
         XCTAssertEqual(days.map(\.title), ["Today", "Yesterday"])
         XCTAssertEqual(days.flatMap(\.recordings).map(\.id), rows.map(\.id), "Grouping never reorders or drops a row")
