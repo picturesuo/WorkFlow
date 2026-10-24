@@ -73,6 +73,37 @@ final class NumericPreservationGuardTests: XCTestCase {
         accepts("The third try took 2.5 hours.", source: "the third try took two point five hours")
     }
 
+    func testDroppedOrMovedPercentsAndSignsFallBackInEveryMode() {
+        let percent = "about fifteen percent of the one hundred five students finished by twenty twenty six"
+        rejects("About 15 of the 105 students finished by 2026.", source: percent)
+        rejects("About 15 of the 105% students finished by 2026.", source: percent)
+        rejects("The low was 4 degrees at night.", source: "the low was negative four degrees at night")
+        rejects("The low was 4 and -5 degrees.", source: "the low was negative four and five degrees")
+        rejects("Growth was 15, then 1.5%.", source: "growth was fifteen percent then one point five")
+        for mode in [CleanupMode.everyday, .technical, .writing] {
+            let formatting = mode.formatsNumbers
+            rejects("About fifteen of the students finished early.", source: "about fifteen percent of the students finished early",
+                    mode: mode, formatting: formatting)
+            rejects("The low was four degrees at night.", source: "the low was negative four degrees at night",
+                    mode: mode, formatting: formatting)
+            rejects("Set the offset to three pixels.", source: "set the offset to minus three pixels",
+                    mode: mode, formatting: formatting)
+        }
+    }
+
+    func testKeptPercentsAndSignsAreAccepted() {
+        accepts("About 15% of the 105 students finished by 2026.",
+                source: "about fifteen percent of the one hundred five students finished by twenty twenty six")
+        accepts("Attendance hit 105%.", source: "attendance hit one hundred five percent")
+        accepts("About 15 percent of the students finished early.", source: "about fifteen percent of the students finished early")
+        accepts("About fifteen percent of the students finished early.", source: "about fifteen percent of the students finished early",
+                mode: .everyday, formatting: false)
+        accepts("The low was −4 degrees at night.", source: "the low was negative four degrees at night")
+        accepts("The low was minus four degrees.", source: "the low was minus four degrees", mode: .technical, formatting: false)
+        accepts("Aim for ±5%.", source: "aim for plus or minus five percent")
+        accepts("It was -5 degrees.", source: "it was negative four, sorry, negative five degrees")
+    }
+
     func testLiteralIdentifiersAndSourceDigitsSurvive() {
         accepts("Read ES30 and CE11 by 5:30.", source: "read ES30 and CE11 by five thirty")
         rejects("Read ES and CE11 by 5:30.", source: "read ES30 and CE11 by five thirty")

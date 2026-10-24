@@ -392,16 +392,73 @@ enum CorrectionText {
     }
 
     /// A change of spelling, spacing, hyphenation, or capitalization, not of
-    /// wording: "key board" → "keyboard", "long term" → "long-term".
+    /// wording: "key board" → "keyboard", "long term" → "long-term". It never
+    /// changes a number, a negation, or a contraction, and never trades a word
+    /// for one that means something else: another weekday or month, a
+    /// look-alike ("accept" → "except"), or its counterpart by a polarity
+    /// prefix or suffix ("possible" → "impossible", "include" → "exclude",
+    /// "careful" → "careless").
     static func isSpellingChange(from: String, to: String) -> Bool {
         let source = letters(from)
         let target = letters(to)
         guard !source.isEmpty, !target.isEmpty,
-              source.filter(\.isNumber) == target.filter(\.isNumber) else { return false }
+              source.filter(\.isNumber) == target.filter(\.isNumber),
+              CleanupGuard.negationCount(in: from) == CleanupGuard.negationCount(in: to),
+              apostrophes(in: from) == apostrophes(in: to) else { return false }
         if source == target { return from != to }
-        guard min(source.count, target.count) >= 4 else { return false }
+        guard min(source.count, target.count) >= 4,
+              numberValues(from) == numberValues(to),
+              !tradesMeaning(words(from), words(to)) else { return false }
         let distance = editDistance(Array(source), Array(target))
         return Double(distance) / Double(max(source.count, target.count)) <= 0.34
+    }
+
+    private static func apostrophes(in text: String) -> Int {
+        text.filter { $0 == "'" || $0 == "’" }.count
+    }
+
+    private static let calendarWords: Set<String> = [
+        "monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday",
+        "january", "february", "march", "april", "may", "june", "july", "august",
+        "september", "october", "november", "december"
+    ]
+
+    /// Words close enough in letters to pass for a respelling of each other.
+    private static let lookAlikes: Set<Set<String>> = [
+        ["accept", "except"], ["affect", "effect"], ["then", "than"], ["loose", "lose"], ["quiet", "quite"],
+        ["were", "where"], ["advice", "advise"], ["hire", "fire"], ["later", "latter"], ["weather", "whether"],
+        ["desert", "dessert"], ["principal", "principle"], ["complement", "compliment"],
+        ["stationary", "stationery"], ["breath", "breathe"], ["elicit", "illicit"], ["eminent", "imminent"],
+        ["discreet", "discrete"], ["council", "counsel"], ["personal", "personnel"], ["precede", "proceed"],
+        ["formally", "formerly"], ["allusion", "illusion"], ["adverse", "averse"], ["cite", "site"]
+    ]
+
+    /// Prefixes and suffixes that turn a word into its opposite or its
+    /// counterpart; the empty string stands for the bare word.
+    private static let polarityPrefixes: Set<String> = [
+        "", "un", "in", "im", "il", "ir", "dis", "non", "a", "anti", "de", "ex", "as", "des",
+        "max", "min", "up", "down", "out", "over", "under", "pre", "post"
+    ]
+    private static let polaritySuffixes: Set<String> = ["", "ful", "less"]
+
+    private static func tradesMeaning(_ from: [String], _ to: [String]) -> Bool {
+        guard from.count == to.count else { return false }
+        return zip(from, to).contains { a, b in
+            a != b && ((calendarWords.contains(a) && calendarWords.contains(b))
+                || lookAlikes.contains([a, b])
+                || isPolarityCounterpart(a, b))
+        }
+    }
+
+    private static func isPolarityCounterpart(_ a: String, _ b: String) -> Bool {
+        let stem = zip(a.reversed(), b.reversed()).prefix { $0 == $1 }.count
+        if stem >= 4, polarityPrefixes.contains(String(a.dropLast(stem))),
+           polarityPrefixes.contains(String(b.dropLast(stem))) {
+            return true
+        }
+        let root = zip(a, b).prefix { $0 == $1 }.count
+        return root >= 3 && polaritySuffixes.contains(String(a.dropFirst(root)))
+            && polaritySuffixes.contains(String(b.dropFirst(root)))
     }
 
     static func editDistance(_ first: [Character], _ second: [Character]) -> Int {
@@ -720,10 +777,12 @@ enum CorrectionAligner {
                 return (start..<end).contains(where: lineEnds.contains)
                     || (lineEnds.contains(start - 1) && lineEnds.contains(end))
             } ?? false
+            // A changed value or a flipped negation is content, not style.
             guard leftSlice.filter(\.isWord).count <= maximumEditWords,
                   rightSlice.filter(\.isWord).count <= maximumEditWords,
                   !isQuoted,
                   !crossesLine,
+                  CleanupGuard.negationCount(in: emitted) == CleanupGuard.negationCount(in: final),
                   CorrectionText.numberValues(emitted) == CorrectionText.numberValues(final)
                     || isNumberFormatting(emitted, final) else {
                 excluded += 1
