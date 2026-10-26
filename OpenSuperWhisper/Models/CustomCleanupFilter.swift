@@ -8,6 +8,29 @@ struct CustomCleanupFilter: Identifiable, Codable, Equatable {
     var name: String
     var baseMode: CleanupMode
     var instructions: String
+    /// Writes spoken quantities as digits on this Mac after cleanup, the way
+    /// Homework does, because cleanup models do not reliably follow a digits
+    /// instruction. It is an explicit choice, never read from the wording.
+    var writesDigits = false
+}
+
+extension CustomCleanupFilter {
+    static let writesDigitsHelp = "Done on this Mac after cleanup, as in Homework: “fifteen percent” → “15%”, “one hundred five” → “105”."
+
+    /// The base mode, the digits choice, and the instructions, for menus and pickers.
+    var summary: String {
+        "Based on \(baseMode.displayName)\(writesDigits ? ", quantities as digits" : ""): \(instructions)"
+    }
+
+    /// Filters saved before `writesDigits` existed decode with it off.
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(UUID.self, forKey: .id)
+        name = try container.decode(String.self, forKey: .name)
+        baseMode = try container.decode(CleanupMode.self, forKey: .baseMode)
+        instructions = try container.decode(String.self, forKey: .instructions)
+        writesDigits = try container.decodeIfPresent(Bool.self, forKey: .writesDigits) ?? false
+    }
 }
 
 /// The writing filter resolved for one dictation. It is captured once, stored
@@ -20,6 +43,8 @@ struct CleanupFilterSnapshot: Equatable, Sendable {
     /// The saved filter's identity, when one was selected, so evidence can
     /// follow a filter across renames.
     let customID: UUID?
+    /// Whether the saved filter writes spoken quantities as digits.
+    let customWritesDigits: Bool
     /// Enabled learned preferences for a built-in mode. A custom filter keeps
     /// exactly its saved instructions, so it never carries learned ones.
     let learned: [LearnedPreference]
@@ -29,6 +54,7 @@ struct CleanupFilterSnapshot: Equatable, Sendable {
         customName: String? = nil,
         customInstructions: String? = nil,
         customID: UUID? = nil,
+        customWritesDigits: Bool = false,
         learned: [LearnedPreference] = []
     ) {
         self.mode = mode
@@ -38,11 +64,13 @@ struct CleanupFilterSnapshot: Equatable, Sendable {
             self.customName = nil
             self.customInstructions = nil
             self.customID = nil
+            self.customWritesDigits = false
             self.learned = learned.filter { $0.mode == mode && $0.isEnabled }
         } else {
             self.customName = name
             self.customInstructions = instructions
             self.customID = customID
+            self.customWritesDigits = customWritesDigits
             self.learned = []
         }
     }
@@ -52,7 +80,8 @@ struct CleanupFilterSnapshot: Equatable, Sendable {
             mode: filter.baseMode,
             customName: filter.name,
             customInstructions: filter.instructions,
-            customID: filter.id
+            customID: filter.id,
+            customWritesDigits: filter.writesDigits
         )
     }
 
@@ -61,6 +90,12 @@ struct CleanupFilterSnapshot: Equatable, Sendable {
     }
 
     var isCustom: Bool { customName != nil }
+
+    /// Whether a successful cleanup finishes spoken quantities as digits on
+    /// this Mac: built-in Homework always does, a saved filter when it says so.
+    var writesDigits: Bool {
+        isCustom ? customWritesDigits : mode == .homework
+    }
 
     /// Whether cleanup may choose a number style, which also turns on the
     /// guard's requirement that every spoken number survives.
@@ -118,7 +153,7 @@ enum CustomCleanupFilterValidationError: LocalizedError, Equatable {
         case .reservedName:
             "Everyday, Technical, Homework, and Writing are built-in modes. Choose a different name."
         case .emptyInstructions:
-            "Describe what this filter should change, for example “write numbers as digits”."
+            "Describe what this filter should change, for example “use more hyphens”."
         case .instructionsTooLong:
             "Keep the instructions to \(CustomCleanupFilterStore.maximumInstructionLength) characters or fewer."
         case .tooManyFilters:
@@ -137,7 +172,8 @@ enum CustomCleanupFilterStore {
         CustomCleanupFilter(
             name: "Everyday with digits",
             baseMode: .everyday,
-            instructions: "Write every number as digits, for example “twenty five” becomes “25”."
+            instructions: "Write every number as digits, for example “twenty five” becomes “25”.",
+            writesDigits: true
         ),
         CustomCleanupFilter(
             name: "Everyday with words",
@@ -201,7 +237,9 @@ enum CustomCleanupFilterStore {
         guard !isNew || existing.count < maximumFilters else {
             throw CustomCleanupFilterValidationError.tooManyFilters
         }
-        return CustomCleanupFilter(id: filter.id, name: name, baseMode: filter.baseMode, instructions: instructions)
+        return CustomCleanupFilter(
+            id: filter.id, name: name, baseMode: filter.baseMode, instructions: instructions, writesDigits: filter.writesDigits
+        )
     }
 
     /// Inserts or replaces a validated filter and persists the list.

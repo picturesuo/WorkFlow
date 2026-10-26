@@ -6,6 +6,7 @@ struct FilterAssistantProposal: Equatable {
     var name: String
     var baseMode: CleanupMode
     var instructions: String
+    var writesDigits = false
 }
 
 /// One validated assistant turn: a short message and, unless the assistant
@@ -65,12 +66,13 @@ enum FilterAssistantPrompt {
     You help a person design one reusable writing filter for WorkFlow, a dictation app. WorkFlow lightly rewrites each future dictation with a built-in base mode and the filter's style instructions. You never rewrite, finish, solve, grade, or answer anything yourself.
 
     Reply with exactly one JSON object and nothing else, no code fences:
-    {"message": "<one or two friendly sentences>", "filter": {"name": "<at most \(CustomCleanupFilterStore.maximumNameLength) characters>", "base_mode": "everyday" | "technical" | "homework" | "writing", "instructions": "<at most \(CustomCleanupFilterStore.maximumInstructionLength) characters>"}}
+    {"message": "<one or two friendly sentences>", "filter": {"name": "<at most \(CustomCleanupFilterStore.maximumNameLength) characters>", "base_mode": "everyday" | "technical" | "homework" | "writing", "instructions": "<at most \(CustomCleanupFilterStore.maximumInstructionLength) characters>", "digits": true | false}}
     Only when essential meaning is unclear, set "filter" to null and make "message" one short question for the person.
 
     The filter:
     - "instructions" are reusable, plain-language style preferences for wording, punctuation, capitalization, hyphenation, and number or math notation. Write them as rules for future dictations, with a short example of each rule.
     - Never ask the rewriter to solve, calculate, simplify, answer, grade, summarize, or add content, and never let it change a value, name, identifier, or equation.
+    - "digits" is true when the person wants spoken quantities written as digits, as in math notation; WorkFlow then writes them as digits on the Mac after cleanup. Otherwise it is false.
     - Keep a name and base mode that fit the person's class or assignment when one is given. Never use the names Everyday, Technical, Homework, or Writing.
     - When refining, return the complete updated filter, keeping earlier rules unless the person changes them.
 
@@ -95,20 +97,22 @@ enum FilterAssistantPrompt {
         var sections: [String] = []
         if let existingFilter, currentDraft == nil {
             sections.append("""
-            IMPROVE THIS SAVED FILTER (name, base mode, instructions):
+            IMPROVE THIS SAVED FILTER (name, base mode, digits, instructions):
             <<<
             \(delimited(existingFilter.name))
             \(existingFilter.baseMode.rawValue)
+            \(existingFilter.writesDigits)
             \(delimited(existingFilter.instructions))
             >>>
             """)
         }
         if let currentDraft {
             sections.append("""
-            CURRENT DRAFT, as the person last edited it (name, base mode, instructions):
+            CURRENT DRAFT, as the person last edited it (name, base mode, digits, instructions):
             <<<
             \(delimited(currentDraft.name))
             \(currentDraft.baseMode.rawValue)
+            \(currentDraft.writesDigits)
             \(delimited(currentDraft.instructions))
             >>>
             """)
@@ -151,13 +155,17 @@ enum FilterAssistantPrompt {
         guard let filterValue = object["filter"], !(filterValue is NSNull) else {
             return FilterAssistantReply(message: message, proposal: nil)
         }
+        // "digits" may be left out, which means false.
         guard let filter = filterValue as? [String: Any],
-              Set(filter.keys) == ["name", "base_mode", "instructions"],
+              Set(filter.keys).subtracting(["digits"]) == ["name", "base_mode", "instructions"],
               let rawName = filter["name"] as? String,
               let rawMode = filter["base_mode"] as? String,
-              let rawInstructions = filter["instructions"] as? String else {
+              let rawInstructions = filter["instructions"] as? String,
+              filter["digits"].map({ ($0 as? NSNumber).map { CFGetTypeID($0) == CFBooleanGetTypeID() } ?? false }) ?? true
+        else {
             throw FilterAssistantError.malformedResponse
         }
+        let writesDigits = (filter["digits"] as? Bool) ?? false
         let name = rawName.trimmingCharacters(in: .whitespacesAndNewlines)
         let instructions = rawInstructions.trimmingCharacters(in: .whitespacesAndNewlines)
         guard let mode = CleanupMode(rawValue: rawMode.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()) else {
@@ -177,7 +185,7 @@ enum FilterAssistantPrompt {
         }
         return FilterAssistantReply(
             message: message,
-            proposal: FilterAssistantProposal(name: name, baseMode: mode, instructions: instructions)
+            proposal: FilterAssistantProposal(name: name, baseMode: mode, instructions: instructions, writesDigits: writesDigits)
         )
     }
 }

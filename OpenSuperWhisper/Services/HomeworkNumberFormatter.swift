@@ -2,9 +2,10 @@ import Foundation
 
 /// Homework writes spoken quantities as digits: "fifteen percent" → "15%",
 /// "twenty twenty six" → "2026", and "one hundred five" → "105". Cleanup
-/// models do not reliably follow that rule, so a successful Homework cleanup
-/// is finished on this Mac, and the cleanup guard checks the result against
-/// the original transcript.
+/// models do not reliably follow that rule, so a successful Homework cleanup,
+/// or one by a saved filter that writes quantities as digits, is finished on
+/// this Mac, and the cleanup guard checks the result against the original
+/// transcript.
 ///
 /// Only plain quantities change: any spoken number with "percent", a spoken
 /// year (two two-digit groups, 1900-2099), multi-word numbers and decimals,

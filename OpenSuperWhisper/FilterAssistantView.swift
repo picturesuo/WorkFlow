@@ -258,6 +258,9 @@ struct FilterAssistantSheet: View {
                 }
             }
             .pickerStyle(.segmented)
+            Toggle("Write quantities as digits", isOn: binding.writesDigits)
+                .toggleStyle(.checkbox)
+                .help(CustomCleanupFilter.writesDigitsHelp)
             boundedEditor(
                 text: binding.instructions,
                 placeholder: "Style instructions",

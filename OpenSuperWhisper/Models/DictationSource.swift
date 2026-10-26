@@ -44,6 +44,7 @@ struct DictationSource: Codable, FetchableRecord, PersistableRecord, Equatable {
     var filterID: UUID?
     var filterName: String?
     var filterInstructions: String?
+    var filterWritesDigits: Bool
     var learnedPreferences: [LearnedPreference]
     var cleanupSource: TranscriptCleanupOutcome.Source?
 
@@ -71,6 +72,7 @@ struct DictationSource: Codable, FetchableRecord, PersistableRecord, Equatable {
         self.filterID = filter.customID
         self.filterName = filter.customName
         self.filterInstructions = filter.customInstructions
+        self.filterWritesDigits = filter.customWritesDigits
         self.learnedPreferences = filter.learned
         self.cleanupSource = cleanupSource
     }
@@ -109,6 +111,7 @@ struct DictationSource: Codable, FetchableRecord, PersistableRecord, Equatable {
             customName: filterName,
             customInstructions: filterInstructions,
             customID: filterID,
+            customWritesDigits: filterWritesDigits,
             learned: learnedPreferences
         )
     }

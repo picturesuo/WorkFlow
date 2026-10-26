@@ -337,6 +337,7 @@ class ContentViewModel: ObservableObject {
                     cleanupMode: cleanup.cleanupMode,
                     cleanupFilterName: cleanup.customFilterName,
                     cleanupFilterInstructions: cleanup.customFilterInstructions,
+                    cleanupFilterWritesDigits: cleanup.customFilterWritesDigits,
                     rawTokenEstimate: cleanup.rawTokenEstimate,
                     finalTokenEstimate: cleanup.finalTokenEstimate,
                     tokenEstimatorID: cleanup.tokenEstimatorID

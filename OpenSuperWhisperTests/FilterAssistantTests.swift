@@ -11,11 +11,12 @@ private func replyJSON(
     message: String = "Here is a filter for your class.",
     name: String = "Math 21a notation",
     mode: String = "homework",
-    instructions: String = mathInstructions
+    instructions: String = mathInstructions,
+    digits: Bool = true
 ) -> String {
     let object: [String: Any] = [
         "message": message,
-        "filter": ["name": name, "base_mode": mode, "instructions": instructions]
+        "filter": ["name": name, "base_mode": mode, "instructions": instructions, "digits": digits]
     ]
     let data = try! JSONSerialization.data(withJSONObject: object, options: [.sortedKeys])
     return String(decoding: data, as: UTF8.self)
@@ -26,7 +27,10 @@ private func replyJSON(
 final class FilterAssistantPromptTests: XCTestCase {
     func testParsesStrictProposalAndQuestion() throws {
         let reply = try FilterAssistantPrompt.parse(replyJSON())
-        XCTAssertEqual(reply.proposal, FilterAssistantProposal(name: "Math 21a notation", baseMode: .homework, instructions: mathInstructions))
+        XCTAssertEqual(
+            reply.proposal,
+            FilterAssistantProposal(name: "Math 21a notation", baseMode: .homework, instructions: mathInstructions, writesDigits: true)
+        )
 
         let question = try FilterAssistantPrompt.parse(#"{"message":"Should × or x mark multiplication?","filter":null}"#)
         XCTAssertNil(question.proposal)
@@ -614,6 +618,7 @@ final class FilterAssistantMathCleanupTests: XCTestCase {
         XCTAssertNotNil(assistant.save())
         let filter = CustomCleanupFilterStore.currentSnapshot(in: defaults)
         XCTAssertEqual(filter.customName, "Math 21a notation")
+        XCTAssertTrue(filter.writesDigits, "The assistant's digits choice is saved with the filter")
 
         let accepted: [(String, String)] = [
             ("The square root of sixteen times five.", "The √16 x 5."),

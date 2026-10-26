@@ -70,6 +70,9 @@ final class CustomCleanupFilterLayoutTests: XCTestCase {
         attachment.name = "\(name)-\(scheme == .dark ? "dark" : "light")"
         attachment.lifetime = .keepAlways
         add(attachment)
+        if let directory = ProcessInfo.processInfo.environment["WORKFLOW_RENDER_DIR"] {
+            try data.write(to: URL(fileURLWithPath: directory).appendingPathComponent("\(attachment.name ?? name).png"))
+        }
         XCTAssertFalse(window.isVisible, "Visual verification must stay offscreen")
     }
 }

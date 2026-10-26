@@ -36,7 +36,7 @@ struct WritingFilterPreferences: DynamicProperty {
             return mode.description
         case .custom(let id):
             guard let filter = filters.first(where: { $0.id == id }) else { return "" }
-            return "Based on \(filter.baseMode.displayName): \(filter.instructions)"
+            return filter.summary
         }
     }
 }
@@ -118,7 +118,10 @@ struct CustomCleanupFiltersCard: View {
                     ForEach(CustomCleanupFilterStore.examples, id: \.name) { example in
                         Button(example.name) {
                             startDraft(
-                                CustomCleanupFilter(name: example.name, baseMode: example.baseMode, instructions: example.instructions),
+                                CustomCleanupFilter(
+                                    name: example.name, baseMode: example.baseMode,
+                                    instructions: example.instructions, writesDigits: example.writesDigits
+                                ),
                                 isNew: true
                             )
                         }
@@ -184,7 +187,7 @@ struct CustomCleanupFiltersCard: View {
                 HStack(spacing: 6) {
                     Text(filter.name)
                         .font(.subheadline.weight(.semibold))
-                    Text("Based on \(filter.baseMode.displayName)")
+                    Text(filter.writesDigits ? "Based on \(filter.baseMode.displayName) · digits" : "Based on \(filter.baseMode.displayName)")
                         .font(.caption)
                         .foregroundColor(.secondary)
                 }
@@ -256,6 +259,14 @@ struct CustomCleanupFiltersCard: View {
                 }
             }
             .pickerStyle(.segmented)
+            VStack(alignment: .leading, spacing: 2) {
+                Toggle("Write quantities as digits", isOn: binding.writesDigits)
+                    .toggleStyle(.checkbox)
+                Text(CustomCleanupFilter.writesDigitsHelp)
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
             ZStack(alignment: .topLeading) {
                 TextEditor(text: binding.instructions)
                     .font(.callout)
@@ -267,7 +278,7 @@ struct CustomCleanupFiltersCard: View {
                     .overlay(RoundedRectangle(cornerRadius: 6).stroke(Color.secondary.opacity(0.25)))
                     .accessibilityLabel("What this filter should change")
                 if binding.wrappedValue.instructions.isEmpty {
-                    Text("What to change, e.g. “Write all numbers as digits and use more hyphens.”")
+                    Text("What to change, e.g. “Use more hyphens and capitalize product names.”")
                         .font(.callout)
                         .foregroundColor(.secondary)
                         .padding(.horizontal, 9)

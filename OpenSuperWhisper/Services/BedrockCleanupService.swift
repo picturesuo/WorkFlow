@@ -87,7 +87,7 @@ final class BedrockCleanupService {
         let (response, stopReason) = try await send(
             ProviderChatRequest(
                 systemPrompt: systemPrompt,
-                messages: [ProviderChatMessage(role: .user, content: "RAW_TRANSCRIPTION:\n\(raw)")],
+                messages: [ProviderChatMessage(role: .user, content: CleanupPromptBuilder.userMessage(transcript: raw))],
                 maxOutputTokens: CleanupTokenBudget.outputTokenLimit(for: raw, mode: cleanupMode)
             ),
             apiKey: apiKey,

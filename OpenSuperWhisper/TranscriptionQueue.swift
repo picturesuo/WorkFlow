@@ -160,7 +160,8 @@ class TranscriptionQueue: ObservableObject {
                 targetBundleID: targetBundleID,
                 cleanupMode: filter?.mode,
                 cleanupFilterName: filter?.customName,
-                cleanupFilterInstructions: filter?.customInstructions
+                cleanupFilterInstructions: filter?.customInstructions,
+                cleanupFilterWritesDigits: filter?.customWritesDigits ?? false
             )
 
             if mode == .dictation {
@@ -391,6 +392,7 @@ class TranscriptionQueue: ObservableObject {
                                 customName: recording.cleanupFilterName,
                                 customInstructions: recording.cleanupFilterInstructions,
                                 customID: captured?.customID,
+                                customWritesDigits: recording.cleanupFilterWritesDigits,
                                 learned: captured?.mode == $0 ? captured?.learned ?? [] : []
                             )
                         }

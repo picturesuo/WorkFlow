@@ -335,7 +335,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
                 addWritingItem(
                     filter.name,
                     selection: .custom(filter.id),
-                    toolTip: "Based on \(filter.baseMode.displayName): \(filter.instructions)"
+                    toolTip: filter.summary
                 )
             }
         }
