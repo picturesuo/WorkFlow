@@ -18,6 +18,9 @@ struct SpokenNumberOccurrence: Equatable {
     let range: Range<String.Index>
     let words: [String]
     let values: Set<String>
+    /// The number these words say on their own, such as "26" for "twenty six"
+    /// in "twenty twenty six", "4721" for a digit run, or "2.5".
+    let value: String
 }
 
 /// Finds the numbers that English number words in a transcript spell out.
@@ -71,6 +74,11 @@ enum SpokenNumberParser {
     /// The digit a single number word stands for ("three" → "3", "oh" → "0").
     static func digit(forWord word: String) -> String? {
         units[word.lowercased()].map(String.init)
+    }
+
+    /// Whether a single word is an ordinal number word ("third", "twentieth").
+    static func isOrdinalWord(_ word: String) -> Bool {
+        ordinals[word.lowercased()] != nil
     }
 
     /// Whether a single word is a cardinal number word ("seven", "twenty", "hundred").
@@ -303,15 +311,16 @@ enum SpokenNumberParser {
             }
         }
 
-        func occurrence(_ start: Int, _ end: Int, _ values: Set<String>) -> SpokenNumberOccurrence {
+        func occurrence(_ start: Int, _ end: Int, _ values: Set<String>, value: String) -> SpokenNumberOccurrence {
             SpokenNumberOccurrence(
                 range: wordRanges[start].lowerBound..<wordRanges[end - 1].upperBound,
                 words: Array(words[start..<end]),
-                values: values
+                values: values,
+                value: value
             )
         }
         var occurrences = segments.indices.filter { !runMembers.contains($0) }.map {
-            occurrence(segments[$0].firstWord, segments[$0].end, forms[$0])
+            occurrence(segments[$0].firstWord, segments[$0].end, forms[$0], value: String(segments[$0].value))
         }
         for run in runs {
             // A run also counts as written in a combined form, such as "five
@@ -322,10 +331,10 @@ enum SpokenNumberParser {
             }
             let first = segments[run.members[0]]
             let last = segments[run.members[run.members.count - 1]]
-            occurrences.append(occurrence(first.firstWord, last.end, values))
+            occurrences.append(occurrence(first.firstWord, last.end, values, value: run.value))
         }
         for decimal in decimals {
-            occurrences.append(occurrence(decimal.start, decimal.end, [decimal.value]))
+            occurrences.append(occurrence(decimal.start, decimal.end, [decimal.value], value: decimal.value))
         }
         occurrences.sort { $0.range.lowerBound < $1.range.lowerBound }
         return (numbers, occurrences)

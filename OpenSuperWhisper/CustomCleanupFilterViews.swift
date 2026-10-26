@@ -49,12 +49,12 @@ struct WritingFilterPicker: View {
 
     var body: some View {
         if customFilters.isEmpty {
-            Picker("Writing mode", selection: $selection) {
+            Picker("Dictation mode", selection: $selection) {
                 builtInOptions
             }
             .pickerStyle(.segmented)
         } else {
-            Picker("Writing mode", selection: $selection) {
+            Picker("Dictation mode", selection: $selection) {
                 Section("Built-in") { builtInOptions }
                 Section("Custom filters") {
                     ForEach(customFilters) { filter in

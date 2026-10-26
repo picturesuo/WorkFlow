@@ -14,6 +14,8 @@ struct CorrectionLearningCard: View {
     @Environment(\.colorScheme) private var colorScheme
     private let defaults: UserDefaults
 
+    static let dictationModeNote = "This picks the mode to teach. It doesn’t change the dictation mode new dictations use."
+
     @MainActor
     init(session: CorrectionLearningSession? = nil, defaults: UserDefaults = .standard) {
         _session = StateObject(wrappedValue: session ?? CorrectionLearningSession(
@@ -70,8 +72,13 @@ struct CorrectionLearningCard: View {
                 .labelsHidden()
                 .fixedSize()
                 .disabled(session.isLearning)
+                .accessibilityHint(Self.dictationModeNote)
                 Spacer(minLength: 0)
             }
+            Text(Self.dictationModeNote)
+                .font(.caption)
+                .foregroundColor(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
 
             DocumentDropEditor(
                 text: $session.document,

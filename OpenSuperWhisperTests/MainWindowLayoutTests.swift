@@ -78,10 +78,11 @@ final class MainWindowLayoutTests: XCTestCase {
         _ recordings: [Recording] = MainWindowFixtures.history(),
         size: CGSize = MainWindowLayoutTests.screenshot,
         scheme: ColorScheme = .light,
+        appStorage: UserDefaults? = nil,
         permissions: PermissionsManager? = nil,
         viewModel: ((TranscriptionService, TranscriptionQueue, RecordingStore) -> ContentViewModel)? = nil
     ) throws -> MainWindowHost {
-        try MainWindowHost(recordings: recordings, size: size, scheme: scheme, appStorage: appStorage,
+        try MainWindowHost(recordings: recordings, size: size, scheme: scheme, appStorage: appStorage ?? self.appStorage,
                            pasteboard: pasteboard.name, permissions: permissions, viewModel: viewModel)
     }
 
@@ -318,9 +319,71 @@ final class MainWindowLayoutTests: XCTestCase {
         withExtendedLifetime(dock) {}
     }
 
-    /// The picker's hidden "Writing mode" title already names it for
-    /// VoiceOver; a second label made it read "Writing mode, Writing mode".
-    func testDockWritingModeSpeaksItsNameOnce() {
+    /// Every switch in the dictation bar reaches the next dictation and
+    /// survives a reload. The model keeps spoken numbers as words, as Nova
+    /// Micro did in the user's Homework dictations, so Homework's digits come
+    /// from WorkFlow itself.
+    func testEveryModeSwitchReachesTheNextDictationAndSurvivesReload() async throws {
+        let store = try RecordingStore(database: DatabaseQueue(), recordingsDirectory: Recording.recordingsDirectory,
+                                       cancelQueuedRecording: { _ in }, stopPlayback: { _ in })
+        let engine = MainWindowFixtures.SpokenWords()
+        let model = MainWindowFixtures.WordKeepingCleanup()
+        let gate = LatestDictationGate()
+        let indicator = IndicatorViewModel(
+            latestDictationGate: gate,
+            transcriptionService: TranscriptionService(engine: engine),
+            recordingStore: store,
+            cleanupPipeline: TranscriptCleanupPipeline(
+                isEnabled: { true }, providerResolver: { model }, vocabularyProvider: { [] },
+                appRuleProvider: { _ in nil }, bedrockBudgetProvider: { nil }, failureRecorder: { _ in }
+            ),
+            delivery: { _ in .pasteSent }
+        )
+        defer { indicator.cleanup() }
+        let spoken = "fifteen percent of the one hundred five students finished by twenty twenty six"
+        let words = "Fifteen percent of the one hundred five students finished by twenty twenty six."
+
+        let window = try host([], appStorage: .standard)
+        let picker = try XCTUnwrap(window.segmentedControls.first)
+        let order: [CleanupMode] = [.homework, .technical, .everyday, .writing]
+        XCTAssertEqual((0..<picker.segmentCount).map { picker.label(forSegment: $0) }, order.map(\.displayName))
+        for mode in [CleanupMode.writing, .homework, .technical, .everyday, .homework] {
+            picker.selectedSegment = try XCTUnwrap(order.firstIndex(of: mode))
+            XCTAssertTrue(picker.sendAction(picker.action, to: picker.target))
+            window.settle()
+            XCTAssertEqual(CustomCleanupFilterStore.currentSnapshot().mode, mode)
+
+            let audio = FileManager.default.temporaryDirectory.appendingPathComponent("MainWindowLayoutTests-\(UUID().uuidString).wav")
+            try Data("synthetic audio".utf8).write(to: audio)
+            engine.spoken[audio] = spoken
+            let saved = try await store.fetchRecordings(limit: 50, offset: 0).count
+            await indicator.finishDictation(audioAt: audio, generation: gate.begin(), recordingStartedAt: Date())
+            var rows: [Recording] = []
+            for _ in 0..<200 {
+                rows = try await store.fetchRecordings(limit: 50, offset: 0)
+                if rows.count > saved { break }
+                try await Task.sleep(nanoseconds: 10_000_000)
+            }
+            let row = try XCTUnwrap(rows.first { !fixtureAudio.contains($0.url) }, "History saved the \(mode) dictation")
+            fixtureAudio.append(row.url)
+            XCTAssertEqual(row.cleanupMode, mode)
+            let evidence = try await store.dictationSource(for: row.id)
+            XCTAssertEqual(evidence?.selectedMode, mode)
+            XCTAssertTrue(try XCTUnwrap(model.prompts.last).contains("\n\(mode.displayName) mode"), "\(mode) prompt")
+            XCTAssertEqual(row.transcription, mode == .homework ? "15% of the 105 students finished by 2026." : words, "\(mode)")
+        }
+        window.close()
+
+        let reopened = try host([], appStorage: .standard)
+        defer { reopened.close() }
+        XCTAssertEqual(try XCTUnwrap(reopened.segmentedControls.first).selectedSegment, 0, "Homework after reload")
+        XCTAssertEqual(CustomCleanupFilterStore.currentSnapshot().mode, .homework)
+    }
+
+    /// The picker's hidden "Dictation mode" title already names it for
+    /// VoiceOver; a second label made it read the name twice. The group is
+    /// not called "Writing mode", which read as the Writing option.
+    func testDockDictationModeSpeaksItsNameOnce() {
         for filters in [[], [CustomCleanupFilterStore.examples[0]]] {
             let names = AccessibilityTree.withSwiftUITree {
                 let dock = OffscreenHost(
@@ -330,7 +393,7 @@ final class MainWindowLayoutTests: XCTestCase {
                 )
                 return AccessibilityTree.labels(in: dock.host, roles: [.popUpButton, .radioGroup])
             }
-            XCTAssertEqual(names, ["Writing mode"], filters.isEmpty ? "Segmented modes" : "Menu with custom filters")
+            XCTAssertEqual(names, ["Dictation mode"], filters.isEmpty ? "Segmented modes" : "Menu with custom filters")
         }
     }
 
@@ -627,6 +690,35 @@ final class MainWindowHost: HostedControls {
 /// Synthetic dictations only; none come from a real History.
 enum MainWindowFixtures {
     static let microphone = MicrophoneService.AudioDevice(id: "fixture-microphone", name: "Fixture Microphone", manufacturer: nil, isBuiltIn: true)
+
+    /// Returns the words "spoken" into each synthetic audio file.
+    final class SpokenWords: TranscriptionEngine {
+        let isModelLoaded = true
+        let engineName = "Spoken words fixture"
+        var spoken: [URL: String] = [:]
+
+        func initialize() async throws {}
+        func getSupportedLanguages() -> [String] { ["en"] }
+        func cancelTranscription() {}
+        func transcribeAudio(url: URL, settings: OpenSuperWhisper.Settings) async throws -> String { spoken[url] ?? "" }
+    }
+
+    /// A cleanup model that keeps spoken numbers as words whatever its prompt
+    /// says; it only capitalizes and ends the sentence. The real guard checks it.
+    final class WordKeepingCleanup: TranscriptCleanupProviding {
+        let providerID: CleanupProviderID = .ollama
+        private(set) var prompts: [String] = []
+
+        func clean(transcript: String, systemPrompt: String, filter: CleanupFilterSnapshot) async throws -> CleanupProviderResult {
+            prompts.append(systemPrompt)
+            var text = transcript.prefix(1).uppercased() + transcript.dropFirst()
+            if let last = text.last, !".!?".contains(last) { text += "." }
+            return CleanupProviderResult(
+                text: try CleanupGuard.postprocess(text, source: transcript, mode: filter.mode, allowsNumberFormatting: filter.allowsNumberFormatting),
+                inputTokens: nil, outputTokens: nil, modelID: "word-keeping"
+            )
+        }
+    }
 
     static func history(now: Date = Date()) -> [Recording] {
         func ago(_ seconds: TimeInterval) -> Date { now.addingTimeInterval(-seconds) }

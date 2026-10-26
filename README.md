@@ -20,7 +20,7 @@ Real numbers from the maintainer's Mac for September 2026:
 
 That's an estimate from the token counts WorkFlow recorded, not an AWS bill. It uses AWS's US on-demand price for Nova Micro: $0.035 per million input tokens and $0.14 per million output tokens ([AWS pricing](https://aws.amazon.com/bedrock/pricing/), checked October 24, 2026). Transcription had no API fees. Create with AI and Learn came out in October, so the September number is dictation cleanup only.
 
-Your number depends on how much you talk, the language, the writing mode, and the provider. **Settings → Provider & Cost** shows this month's estimate as you go.
+Your number depends on how much you talk, the language, the dictation mode, and the provider. **Settings → Provider & Cost** shows this month's estimate as you go.
 
 ## Monthly running cost
 
@@ -42,9 +42,11 @@ A couple of ideas:
 
 > Join closely related sentences with semicolons.
 
-Each filter builds on a built-in mode: **Everyday** (light cleanup in your voice), **Technical** (compact instructions for coding agents), **Homework** (complete explanations, numbers as digits), or **Writing** (your own voice for essays, long sentences and semicolons kept). Saved filters show up next to those modes in the main window and the menu-bar **Writing Mode** menu. Three starters ship with the app: Everyday with digits, Everyday with words, and More hyphens.
+Each filter builds on a built-in mode: **Everyday** (light cleanup in your voice), **Technical** (compact instructions for coding agents), **Homework** (complete explanations, numbers as digits), or **Writing** (your own voice for essays, long sentences and semicolons kept). Saved filters show up next to those modes under **Dictation mode** in the main window and the menu-bar **Dictation Mode** menu. Three starters ship with the app: Everyday with digits, Everyday with words, and More hyphens.
 
 Filters are instructions for the model, not guarantees. WorkFlow checks the numbers in the output against what you said, and if they don't match or cleanup fails, you get your original transcript. Filters need AI cleanup turned on.
+
+Built-in Homework doesn't rely on the model for digits: after a successful cleanup, WorkFlow writes plain spoken quantities as digits itself, so "fifteen percent", "twenty twenty six", and "one hundred five" become 15%, 2026, and 105. The same number check runs on the result. Zero to nine on their own, ordinals, times, codes and phone numbers, numbers in quotes, names, and titles, and other back-to-back numbers keep their words. If cleanup fails, you still get your original transcript.
 
 With **Create with AI**, nothing leaves your Mac until you press **Send**. You can paste an essay or problem set you already finished as an example; only the name, base mode, and instructions are saved, never the example.
 

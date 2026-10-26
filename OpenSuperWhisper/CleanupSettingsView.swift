@@ -67,7 +67,7 @@ struct CleanupSettingsView: View {
                     .toggleStyle(.switch)
                     .labelsHidden()
                     .accessibilityLabel("AI cleanup")
-                    .accessibilityHint("Rewrites new dictations in the selected writing mode")
+                    .accessibilityHint("Rewrites new dictations in the selected dictation mode")
             }
             SettingsDivider()
             if viewModel.bedrockCleanupEnabled, !hasKeyForSelectedProvider {
@@ -100,7 +100,7 @@ struct CleanupSettingsView: View {
 
     private var modes: some View {
         VStack(alignment: .leading, spacing: 7) {
-            Text("Writing mode")
+            Text("Dictation mode")
                 .font(.system(size: 12, weight: .semibold))
                 .foregroundStyle(.secondary)
                 .padding(.leading, 2)
@@ -171,7 +171,7 @@ struct WritingModeCard: View {
         }
         .buttonStyle(.plain)
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel("\(mode.displayName) writing mode")
+        .accessibilityLabel("\(mode.displayName) dictation mode")
         .accessibilityValue(isSelected ? "Selected" : "Not selected")
         .accessibilityHint(mode.description)
         .accessibilityAddTraits(isSelected ? [.isButton, .isSelected] : .isButton)
