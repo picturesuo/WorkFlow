@@ -36,6 +36,7 @@ struct Recording: Identifiable, Codable, FetchableRecord, PersistableRecord, Equ
     /// recordings keep the instructions so later edits cannot change them.
     var cleanupFilterName: String? = nil
     var cleanupFilterInstructions: String? = nil
+    var cleanupFilterWritesDigits: Bool = false
     var rawTokenEstimate: Int? = nil
     var finalTokenEstimate: Int? = nil
     var tokenEstimatorID: String? = nil
@@ -47,7 +48,7 @@ struct Recording: Identifiable, Codable, FetchableRecord, PersistableRecord, Equ
         case cleanupSource, cleanupInputTokens, cleanupOutputTokens, cleanupModelID
         case title, mode, cleanupRequested, targetBundleID
         case cleanupMode, rawTokenEstimate, finalTokenEstimate, tokenEstimatorID
-        case cleanupFilterName, cleanupFilterInstructions
+        case cleanupFilterName, cleanupFilterInstructions, cleanupFilterWritesDigits
     }
 
     static func == (lhs: Recording, rhs: Recording) -> Bool {
@@ -66,6 +67,7 @@ struct Recording: Identifiable, Codable, FetchableRecord, PersistableRecord, Equ
                lhs.cleanupMode == rhs.cleanupMode &&
                lhs.cleanupFilterName == rhs.cleanupFilterName &&
                lhs.cleanupFilterInstructions == rhs.cleanupFilterInstructions &&
+               lhs.cleanupFilterWritesDigits == rhs.cleanupFilterWritesDigits &&
                lhs.rawTokenEstimate == rhs.rawTokenEstimate &&
                lhs.finalTokenEstimate == rhs.finalTokenEstimate &&
                lhs.tokenEstimatorID == rhs.tokenEstimatorID &&
@@ -130,6 +132,7 @@ struct Recording: Identifiable, Codable, FetchableRecord, PersistableRecord, Equ
         static let cleanupMode = Column(CodingKeys.cleanupMode)
         static let cleanupFilterName = Column(CodingKeys.cleanupFilterName)
         static let cleanupFilterInstructions = Column(CodingKeys.cleanupFilterInstructions)
+        static let cleanupFilterWritesDigits = Column(CodingKeys.cleanupFilterWritesDigits)
         static let rawTokenEstimate = Column(CodingKeys.rawTokenEstimate)
         static let finalTokenEstimate = Column(CodingKeys.finalTokenEstimate)
         static let tokenEstimatorID = Column(CodingKeys.tokenEstimatorID)
@@ -369,6 +372,21 @@ class RecordingStore: ObservableObject {
             }
         }
 
+        // A saved filter may write quantities as digits; rows from before
+        // that choice existed did not.
+        migrator.registerMigration("v10_add_filter_writes_digits") { db in
+            if !(try db.columns(in: Recording.databaseTableName).map(\.name).contains("cleanupFilterWritesDigits")) {
+                try db.alter(table: Recording.databaseTableName) { t in
+                    t.add(column: "cleanupFilterWritesDigits", .boolean).notNull().defaults(to: false)
+                }
+            }
+            if !(try db.columns(in: DictationSource.databaseTableName).map(\.name).contains("filterWritesDigits")) {
+                try db.alter(table: DictationSource.databaseTableName) { t in
+                    t.add(column: "filterWritesDigits", .boolean).notNull().defaults(to: false)
+                }
+            }
+        }
+
         try migrator.migrate(dbQueue)
     }
     
@@ -569,7 +587,8 @@ class RecordingStore: ObservableObject {
             targetBundleID: targetBundleID,
             cleanupMode: filter?.mode,
             cleanupFilterName: filter?.customName,
-            cleanupFilterInstructions: filter?.customInstructions
+            cleanupFilterInstructions: filter?.customInstructions,
+            cleanupFilterWritesDigits: filter?.customWritesDigits ?? false
         )
         let audioURL = keepAudio(tempURL, recording.url)
         if audioURL != recording.url {
@@ -717,6 +736,7 @@ class RecordingStore: ObservableObject {
                 updated.cleanupMode = cleanup.cleanupMode
                 updated.cleanupFilterName = cleanup.customFilterName
                 updated.cleanupFilterInstructions = cleanup.customFilterInstructions
+                updated.cleanupFilterWritesDigits = cleanup.customFilterWritesDigits
                 updated.rawTokenEstimate = cleanup.rawTokenEstimate
                 updated.finalTokenEstimate = cleanup.finalTokenEstimate
                 updated.tokenEstimatorID = cleanup.tokenEstimatorID
@@ -779,6 +799,7 @@ class RecordingStore: ObservableObject {
                         Recording.Columns.cleanupMode.set(to: cleanup.cleanupMode?.rawValue),
                         Recording.Columns.cleanupFilterName.set(to: cleanup.customFilterName),
                         Recording.Columns.cleanupFilterInstructions.set(to: cleanup.customFilterInstructions),
+                        Recording.Columns.cleanupFilterWritesDigits.set(to: cleanup.customFilterWritesDigits),
                         Recording.Columns.rawTokenEstimate.set(to: cleanup.rawTokenEstimate),
                         Recording.Columns.finalTokenEstimate.set(to: cleanup.finalTokenEstimate),
                         Recording.Columns.tokenEstimatorID.set(to: cleanup.tokenEstimatorID)

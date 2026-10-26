@@ -62,7 +62,9 @@ Settings (⌘,) has four panes; ⌘1 to ⌘4 switch between them, and Settings r
 
 Use Homework for developed prose, Technical for compact commands sent to computers or coding agents, and Everyday for natural messages. After using more than one mode, open **Settings → Provider & Cost → Usage this month** to compare their estimated source-to-final token ratios. History also labels each successfully cleaned dictation with its mode and estimated efficiency.
 
-To make a mode more specific, open **Settings → Cleanup → Custom filters**, choose **New filter**, pick a base mode, and describe the change in plain language, for example "Write all numbers as digits." The filter then appears next to the built-in modes.
+To make a mode more specific, open **Settings → Cleanup → Custom filters**, choose **New filter**, pick a base mode, and describe the change in plain language, for example "Use more hyphens." Turn on **Write quantities as digits** if you want numbers as digits. The filter appears next to the built-in modes right away, and the next dictation uses it once you pick it.
+
+Cleanup never answers what you dictate: a question or request comes back rewritten as that question or request, or as your original transcript.
 
 WorkFlow launches at login and stays available in the menu bar by default. Dictation works entirely locally before any API is configured.
 

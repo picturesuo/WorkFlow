@@ -224,7 +224,8 @@ final class FilterAssistantSession: ObservableObject {
             id: id,
             name: proposal.name,
             baseMode: proposal.baseMode,
-            instructions: proposal.instructions
+            instructions: proposal.instructions,
+            writesDigits: proposal.writesDigits
         )
         do {
             try CustomCleanupFilterStore.upsert(filter, in: defaults)

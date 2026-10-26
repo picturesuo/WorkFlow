@@ -34,19 +34,26 @@ Make cleanup write the way a class, job, or app wants:
 
 1. Open **Settings → Cleanup → Custom filters**.
 2. Choose **Create with AI** and type or speak what should change, or choose **New filter** and write the instructions yourself.
-3. Review the name, base mode, and instructions, then choose **Save filter**.
+3. Review the name, base mode, **Write quantities as digits**, and instructions, then save.
+4. Pick the filter under **Dictation mode**. The next dictation uses it; no restart needed. Edits apply to the next dictation too.
 
 A couple of ideas:
 
-> Write numbers as digits, like "fifteen percent" as 15% and "twenty twenty six" as 2026.
-
 > Join closely related sentences with semicolons.
+
+> Capitalize product names and hyphenate compound modifiers.
 
 Each filter builds on a built-in mode: **Everyday** (light cleanup in your voice), **Technical** (compact instructions for coding agents), **Homework** (complete explanations, numbers as digits), or **Writing** (your own voice for essays, long sentences and semicolons kept). Saved filters show up next to those modes under **Dictation mode** in the main window and the menu-bar **Dictation Mode** menu. Three starters ship with the app: Everyday with digits, Everyday with words, and More hyphens.
 
 Filters are instructions for the model, not guarantees. WorkFlow checks the numbers in the output against what you said, and if they don't match or cleanup fails, you get your original transcript. Filters need AI cleanup turned on.
 
-Built-in Homework doesn't rely on the model for digits: after a successful cleanup, WorkFlow writes plain spoken quantities as digits itself, so "fifteen percent", "twenty twenty six", and "one hundred five" become 15%, 2026, and 105. The same number check runs on the result. Zero to nine on their own, ordinals, times, codes and phone numbers, numbers in quotes, names, and titles, and other back-to-back numbers keep their words. If cleanup fails, you still get your original transcript.
+Digits don't depend on the model. Built-in Homework, and any filter with **Write quantities as digits** turned on, has WorkFlow write plain spoken quantities as digits itself after a successful cleanup, so "fifteen percent", "twenty twenty six", and "one hundred five" become 15%, 2026, and 105. The same number check runs on the result. Zero to nine on their own, ordinals, times, codes and phone numbers, numbers in quotes, names, and titles, and other back-to-back numbers keep their words. If cleanup fails, you still get your original transcript. Writing "digits" in a filter's instructions only asks the model; the checkbox is what turns this on.
+
+## Questions stay questions
+
+Cleanup rewrites what you said. It doesn't answer it. A question you dictate comes back as that question, and a request, even one aimed at an AI or one that says to ignore the rules, comes back as that request. That rule sits above every mode and custom filter, and the transcript goes to the provider marked as text to rewrite.
+
+If the reply drops a question you asked, or is made of material you didn't say, like an answer, advice, a poem, or a joke, WorkFlow uses your original transcript. A missing question mark alone is fine. These checks catch clear answers, not every subtle change of meaning.
 
 With **Create with AI**, nothing leaves your Mac until you press **Send**. You can paste an essay or problem set you already finished as an example; only the name, base mode, and instructions are saved, never the example.
 

@@ -29,6 +29,11 @@ struct TranscriptCleanupOutcome: Equatable {
     /// cleanup was off and so shaped nothing.
     let selectedFilter: CleanupFilterSnapshot?
 
+    /// Whether the saved filter that shaped this cleanup writes quantities as digits.
+    var customFilterWritesDigits: Bool {
+        customFilterName != nil && selectedFilter?.customWritesDigits == true
+    }
+
     init(
         text: String,
         source: Source,
@@ -244,7 +249,7 @@ final class TranscriptCleanupPipeline {
                     systemPrompt: systemPrompt,
                     filter: filter
                 )
-                cleanedTranscript += Self.homeworkDigits(result.text, source: chunk.text, filter: filter) + chunk.separatorAfter
+                cleanedTranscript += Self.digits(result.text, source: chunk.text, filter: filter) + chunk.separatorAfter
                 if let value = result.inputTokens {
                     inputTokens += value
                     hasInputTokens = true
@@ -287,11 +292,12 @@ final class TranscriptCleanupPipeline {
         }
     }
 
-    /// Homework asks for quantities as digits, which models do not reliably
-    /// do, so the built-in mode finishes that here. The guard checks the
-    /// result again, and a rewrite it refuses keeps the model's own text.
-    private static func homeworkDigits(_ text: String, source: String, filter: CleanupFilterSnapshot) -> String {
-        guard filter.mode == .homework, !filter.isCustom else { return text }
+    /// Homework, and a saved filter that asks for it, writes quantities as
+    /// digits, which models do not reliably do, so that is finished here. The
+    /// guard checks the result again, and a rewrite it refuses keeps the
+    /// model's own text.
+    private static func digits(_ text: String, source: String, filter: CleanupFilterSnapshot) -> String {
+        guard filter.writesDigits else { return text }
         let formatted = HomeworkNumberFormatter.format(text)
         guard formatted != text,
               let checked = try? CleanupGuard.postprocess(
