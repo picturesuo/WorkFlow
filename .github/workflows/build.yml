@@ -53,4 +53,9 @@ jobs:
             -only-testing:OpenSuperWhisperTests/FilterAssistantSessionTests \
             -only-testing:OpenSuperWhisperTests/FilterAssistantMathCleanupTests \
             -only-testing:OpenSuperWhisperTests/FilterAssistantVoiceInputTests \
-            -only-testing:OpenSuperWhisperTests/FilterAssistantLayoutTests
+            -only-testing:OpenSuperWhisperTests/FilterAssistantLayoutTests \
+            -only-testing:OpenSuperWhisperTests/HomeworkNumberFormattingTests \
+            -only-testing:OpenSuperWhisperTests/CustomFilterImmediacyTests \
+            -only-testing:OpenSuperWhisperTests/CustomFilterDigitsChoiceTests \
+            -only-testing:OpenSuperWhisperTests/RewriteOnlyContractTests \
+            -only-testing:OpenSuperWhisperTests/RewriteOnlyGuardTests
