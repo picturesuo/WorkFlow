@@ -1,8 +1,15 @@
 name: Build Check
 
 on:
+  # master only: branch pushes plus their PRs ran every change twice on macOS (10x billed minutes).
   push:
+    branches: [master]
   pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   build:
