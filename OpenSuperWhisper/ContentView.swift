@@ -969,7 +969,7 @@ struct DictationDock: View {
     private func modeControls(showsLabel: Bool) -> some View {
         HStack(spacing: WFSpace.md) {
             if showsLabel {
-                Text("Writing mode")
+                Text("Dictation mode")
                     .font(.callout)
                     .foregroundStyle(.secondary)
                     .fixedSize()
@@ -998,7 +998,7 @@ struct DictationDock: View {
                 .font(.callout.weight(.medium))
                 .foregroundStyle(ThemePalette.linkText(colorScheme))
                 .fixedSize()
-                .help("Teach a writing mode your style from a document you finished")
+                .help("Teach a dictation mode your style from a document you finished")
                 .accessibilityLabel("Learn from finished writing")
                 .accessibilityHint("Opens Personalize settings")
         }

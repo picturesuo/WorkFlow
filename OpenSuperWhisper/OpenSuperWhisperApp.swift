@@ -310,7 +310,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
         meetingItem.isEnabled = !meeting.isSaving
         menu.addItem(meetingItem)
 
-        let cleanupModeItem = NSMenuItem(title: "Writing Mode", action: nil, keyEquivalent: "")
+        let cleanupModeItem = NSMenuItem(title: "Dictation Mode", action: nil, keyEquivalent: "")
         let cleanupModeMenu = NSMenu()
         let customFilters = CustomCleanupFilterStore.load()
         let currentSelection = CustomCleanupFilterStore.currentSelection(filters: customFilters)
@@ -346,7 +346,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
             keyEquivalent: ""
         )
         learnItem.target = self
-        learnItem.toolTip = "Teach a writing mode your style from a document you finished"
+        learnItem.toolTip = "Teach a dictation mode your style from a document you finished"
         cleanupModeMenu.addItem(learnItem)
         cleanupModeItem.submenu = cleanupModeMenu
         menu.addItem(cleanupModeItem)

@@ -24,4 +24,17 @@ enum AccessibilityTree {
         }
         return labels
     }
+
+    /// The hints VoiceOver reads for elements with these roles, in tree order.
+    static func hints(in element: Any, roles: Set<NSAccessibility.Role>, depth: Int = 0) -> [String] {
+        guard depth < 60, let node = element as? NSAccessibilityProtocol else { return [] }
+        var hints: [String] = []
+        if let role = node.accessibilityRole(), roles.contains(role) {
+            hints.append(node.accessibilityHelp() ?? "")
+        }
+        for child in node.accessibilityChildren() ?? [] {
+            hints += Self.hints(in: child, roles: roles, depth: depth + 1)
+        }
+        return hints
+    }
 }

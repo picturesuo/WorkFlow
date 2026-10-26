@@ -128,3 +128,124 @@ final class NumericPreservationGuardTests: XCTestCase {
         accepts("Run it twice.", source: "run it two times, twice", mode: .technical, formatting: false)
     }
 }
+
+/// A model that ignores Homework's digit rule, as Nova Micro did on the
+/// user's own Homework dictations: it only capitalizes and ends the sentence.
+/// The real guard validates its reply, as the shipped providers do.
+private final class WordKeepingCleanup: TranscriptCleanupProviding {
+    let providerID: CleanupProviderID = .ollama
+    var reply: ((String) -> String)?
+
+    func clean(transcript: String, systemPrompt: String, filter: CleanupFilterSnapshot) async throws -> CleanupProviderResult {
+        var text = reply?(transcript) ?? transcript.prefix(1).uppercased() + transcript.dropFirst()
+        if let last = text.last, !".!?".contains(last) { text += "." }
+        return CleanupProviderResult(
+            text: try CleanupGuard.postprocess(text, source: transcript, mode: filter.mode, allowsNumberFormatting: filter.allowsNumberFormatting),
+            inputTokens: nil, outputTokens: nil, modelID: "word-keeping"
+        )
+    }
+}
+
+/// Homework writes spoken quantities as digits even when the model keeps the
+/// words; the guard still checks the result, and no other mode, filter, or
+/// fallback changes number form.
+final class HomeworkNumberFormattingTests: XCTestCase {
+    private let spoken = "the price went up fifteen percent in twenty twenty six and one hundred five students passed"
+
+    private func finalize(
+        _ spoken: String,
+        filter: CleanupFilterSnapshot,
+        provider: (any TranscriptCleanupProviding)? = nil
+    ) async -> TranscriptCleanupOutcome {
+        let model = provider ?? WordKeepingCleanup()
+        let pipeline = TranscriptCleanupPipeline(
+            isEnabled: { true }, providerResolver: { model }, vocabularyProvider: { [] },
+            appRuleProvider: { _ in nil }, bedrockBudgetProvider: { nil }, filterProvider: { filter },
+            failureRecorder: { _ in }
+        )
+        return await pipeline.finalize(spoken)
+    }
+
+    func testHomeworkWritesQuantitiesAsDigitsWhenTheModelKeepsWords() async {
+        let result = await finalize(spoken, filter: .builtIn(.homework))
+        XCTAssertEqual(result.source, .ollama)
+        XCTAssertEqual(result.cleanupMode, .homework)
+        XCTAssertEqual(result.text, "The price went up 15% in 2026 and 105 students passed.")
+    }
+
+    func testOtherModesCustomFiltersAndFallbacksKeepTheSpokenForm() async {
+        let words = "The price went up fifteen percent in twenty twenty six and one hundred five students passed."
+        for mode in [CleanupMode.writing, .technical, .everyday] {
+            let result = await finalize(spoken, filter: .builtIn(mode))
+            XCTAssertEqual(result.text, words, "\(mode) keeps the number form")
+        }
+        let wordsFilter = CleanupFilterSnapshot(mode: .homework, customName: "Words", customInstructions: "Spell numbers as words.")
+        let custom = await finalize(spoken, filter: wordsFilter)
+        XCTAssertEqual(custom.text, words, "A custom filter's own number style governs")
+
+        let pipeline = TranscriptCleanupPipeline(
+            isEnabled: { true }, providerResolver: { throw CleanupProviderError.missingCredential("Bedrock") },
+            vocabularyProvider: { [] }, appRuleProvider: { _ in nil }, bedrockBudgetProvider: { nil },
+            filterProvider: { .builtIn(.homework) }, failureRecorder: { _ in }
+        )
+        let fallback = await pipeline.finalize(spoken)
+        XCTAssertEqual(fallback.source, .rawFallback)
+        XCTAssertEqual(fallback.text, spoken, "A fallback keeps the original transcript")
+    }
+
+    func testFormatterWritesSpokenQuantitiesAsDigits() {
+        let written: [(String, String)] = [
+            ("Fifteen percent, twenty twenty-six, one hundred five.", "15%, 2026, 105."),
+            ("The price went up ten percent in twenty twenty six.", "The price went up 10% in 2026."),
+            ("There were fifteen students.", "There were 15 students."),
+            ("A hundred and five students came.", "105 students came."),
+            ("We waited two point five hours.", "We waited 2.5 hours."),
+            ("About twenty five thousand people.", "About 25,000 people."),
+            ("Only one percent agreed.", "Only 1% agreed."),
+            ("Growth was 15 percent.", "Growth was 15%."),
+            ("It was negative twelve degrees.", "It was negative 12 degrees."),
+        ]
+        for (text, expected) in written {
+            XCTAssertEqual(HomeworkNumberFormatter.format(text), expected)
+        }
+    }
+
+    func testFormatterKeepsWordsThatAreNotPlainQuantities() {
+        let kept = [
+            "It's the one I want.",
+            "We have two cats and zero dogs.",
+            "Meet at eleven o'clock.",
+            "The third try worked.",
+            "Meet at five thirty.",
+            "Call four seven two one.",
+            "Three quarters of the class agreed.",
+            "She read “Twenty Thousand Leagues” twice.",
+            "We watched Ocean's Eleven again.",
+            "The Ten Commandments came up.",
+            "A three-bedroom house.",
+            "Three million people.",
+        ]
+        for text in kept {
+            XCTAssertEqual(HomeworkNumberFormatter.format(text), text)
+        }
+    }
+
+    func testSignsAndPercentsStayWithTheirNumbersAndDigitsAreNeverJoined() async {
+        let signed = await finalize("the low was negative twelve degrees and growth was fifteen percent", filter: .builtIn(.homework))
+        XCTAssertEqual(signed.text, "The low was negative 12 degrees and growth was 15%.")
+        // A year beside another number becomes digits; the other number stays
+        // words, so "2026 105" never reads as one joined value.
+        let backToBack = await finalize("in twenty twenty six one hundred five students passed", filter: .builtIn(.homework))
+        XCTAssertEqual(backToBack.text, "In 2026 one hundred five students passed.")
+    }
+
+    func testDigitsTheGuardRefusesKeepTheModelText() async {
+        // Two separate twenties, not the year 2020: the model drops the comma,
+        // and the digit form it would suggest is not what the speaker said.
+        let model = WordKeepingCleanup()
+        model.reply = { _ in "The scores were twenty twenty and thirty" }
+        let result = await finalize("the scores were twenty, twenty and thirty", filter: .builtIn(.homework), provider: model)
+        XCTAssertEqual(result.source, .ollama)
+        XCTAssertEqual(result.text, "The scores were twenty twenty and thirty.")
+    }
+}

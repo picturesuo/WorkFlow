@@ -1216,6 +1216,41 @@ final class CorrectionLearningLayoutTests: XCTestCase {
         }
     }
 
+    /// "Learn for" picks the mode a document teaches, never the mode new
+    /// dictations use, says so to VoiceOver, and Learn leaves it alone too.
+    func testLearnForPickerSaysAndKeepsTheDictationModeUnchanged() async throws {
+        let (defaults, suite) = try makeDefaults()
+        defer { defaults.removePersistentDomain(forName: suite) }
+        CustomCleanupFilterStore.select(.builtIn(.writing), in: defaults)
+        let standardMode = UserDefaults.standard.object(forKey: CustomCleanupFilterStore.modeKey) as? String
+        let session = CorrectionLearningSession(
+            mode: .writing,
+            destination: CleanupProviderDestination(providerID: .ollama, model: "llama3.2", isOnThisMac: true),
+            chatResolver: { ScriptedLearningChat() },
+            budgetProvider: { nil },
+            candidateProvider: { [] },
+            defaults: defaults
+        )
+        let (hints, selected) = AccessibilityTree.withSwiftUITree {
+            let card = OffscreenHost(CorrectionLearningCard(session: session, defaults: defaults), size: CGSize(width: 560, height: 640))
+            // The picker's own binding, set while the card is on screen so any
+            // reaction in the view runs too.
+            session.mode = .homework
+            RunLoop.main.run(until: Date().addingTimeInterval(0.1))
+            return (AccessibilityTree.hints(in: card.host, roles: [.radioGroup]),
+                    card.segmentedControls.first.map { $0.label(forSegment: $0.selectedSegment) })
+        }
+        XCTAssertEqual(hints, [CorrectionLearningCard.dictationModeNote], "VoiceOver hears that this is not the dictation mode")
+        XCTAssertEqual(selected, "Homework", "Learn now teaches Homework")
+
+        session.document = "A finished Homework document that matches no dictation."
+        session.learn()
+        for _ in 0..<200 where session.isLearning { try await Task.sleep(nanoseconds: 5_000_000) }
+        XCTAssertFalse(session.isLearning)
+        XCTAssertEqual(CustomCleanupFilterStore.currentSnapshot(in: defaults).mode, .writing, "New dictations still use Writing")
+        XCTAssertEqual(UserDefaults.standard.object(forKey: CustomCleanupFilterStore.modeKey) as? String, standardMode)
+    }
+
     private func render(_ view: AnyView, name: String, scheme: ColorScheme) throws {
         let content = view
             .padding()

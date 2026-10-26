@@ -244,7 +244,7 @@ final class TranscriptCleanupPipeline {
                     systemPrompt: systemPrompt,
                     filter: filter
                 )
-                cleanedTranscript += result.text + chunk.separatorAfter
+                cleanedTranscript += Self.homeworkDigits(result.text, source: chunk.text, filter: filter) + chunk.separatorAfter
                 if let value = result.inputTokens {
                     inputTokens += value
                     hasInputTokens = true
@@ -285,6 +285,19 @@ final class TranscriptCleanupPipeline {
                 cleanupInput: localTranscript
             )
         }
+    }
+
+    /// Homework asks for quantities as digits, which models do not reliably
+    /// do, so the built-in mode finishes that here. The guard checks the
+    /// result again, and a rewrite it refuses keeps the model's own text.
+    private static func homeworkDigits(_ text: String, source: String, filter: CleanupFilterSnapshot) -> String {
+        guard filter.mode == .homework, !filter.isCustom else { return text }
+        let formatted = HomeworkNumberFormatter.format(text)
+        guard formatted != text,
+              let checked = try? CleanupGuard.postprocess(
+                  formatted, source: source, mode: filter.mode, allowsNumberFormatting: filter.allowsNumberFormatting
+              ) else { return text }
+        return checked
     }
 
     private func recordFailure(_ message: String) {

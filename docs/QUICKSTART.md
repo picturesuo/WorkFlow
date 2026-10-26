@@ -42,7 +42,7 @@ If a prompt is missed, open System Settings → Privacy & Security and enable th
 Settings (⌘,) has four panes; ⌘1 to ⌘4 switch between them, and Settings reopens on the pane you last used.
 
 - **Dictation**: the shortcut (and an optional second key, or **Control + Fn (hold both)**, where Fn or Control alone does nothing), whether you hold or tap to record, the speech model, the language, and whether text is pasted and kept on the clipboard. Sounds, Escape, startup, History storage, and Whisper decoding wait under **More options**.
-- **Cleanup**: AI cleanup on or off, the four writing modes with an example each, your custom filters, and meeting cleanup.
+- **Cleanup**: AI cleanup on or off, the four dictation modes with an example each, your custom filters, and meeting cleanup.
 - **Personalize**: learning from finished writing, personal vocabulary, per-app rules, and a JSON backup.
 - **Provider & Cost**: the cleanup provider and its key, the monthly estimated-cost stop, and this month's usage.
 
@@ -50,7 +50,7 @@ Settings (⌘,) has four panes; ⌘1 to ⌘4 switch between them, and Settings r
 
 - **Toolbar**: search History, start or stop a meeting recording, **More** (⋯) for **Delete All Recordings…**, and Settings.
 - **History**: dictations grouped by day, newest first. Each row has **Copy**; its ⋯ menu, or a right-click, also offers Play Recording, Regenerate Transcript, and Delete Recording. A failed transcription that kept its audio shows **Regenerate** in place of Copy, and a long transcript opens with **Show full text**.
-- **Dictation bar**: the writing mode and **Learn…**, what dictation is doing now with your shortcut, the microphone menu (⌄), and the record button.
+- **Dictation bar**: the dictation mode and **Learn…**, what dictation is doing now with your shortcut, the microphone menu (⌄), and the record button.
 
 ## First dictation
 
