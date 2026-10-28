@@ -59,6 +59,45 @@ final class DictationFailureRecoveryTests: XCTestCase {
         fixture.viewModel.cleanup()
     }
 
+    /// Voice processing stopped mid-dictation: the indicator stops showing
+    /// recording at once, ends the session through its own stop, still
+    /// delivers the audio recorded until then, and says so only briefly.
+    func testCaptureThatStoppedOnItsOwnEndsTheDictationAndSaysSoBriefly() async throws {
+        let audio = try makeAudio()
+        let fixture = try Fixture(engine: ScriptedEngine(.success("Before the AirPods connected.")))
+        let viewModel = fixture.viewModel
+        let session = UUID()
+        viewModel.recorderSessionID = session
+        viewModel.state = .recording
+
+        AudioRecorder.shared.captureStopped.send(UUID())
+        try await Task.sleep(nanoseconds: 50_000_000)
+        XCTAssertEqual(viewModel.state, .recording, "Another session's stopped capture is not this one")
+        XCTAssertEqual(viewModel.recorderSessionID, session)
+
+        AudioRecorder.shared.captureStopped.send(session)
+        for _ in 0..<100 where viewModel.state != .recordingCutShort {
+            try await Task.sleep(nanoseconds: 10_000_000)
+        }
+        XCTAssertEqual(viewModel.state, .recordingCutShort, "Never shows recording while nothing is captured")
+        XCTAssertNil(viewModel.recorderSessionID, "The session was ended through the indicator's own stop")
+        XCTAssertEqual(fixture.finish.count, 0, "The notice shows before the indicator hides")
+
+        AudioRecorder.shared.captureStopped.send(session)
+        await viewModel.finishDictation(audioAt: audio, generation: fixture.gate.begin(), recordingStartedAt: nil)
+        XCTAssertEqual(fixture.delivery.texts, ["Before the AirPods connected."], "The audio so far is still delivered, once")
+        XCTAssertEqual(viewModel.state, .recordingCutShort)
+        let rows = try await fixture.rows(count: 1)
+        let row = try XCTUnwrap(rows.first)
+        defer { try? FileManager.default.removeItem(at: row.url) }
+
+        for _ in 0..<300 where fixture.finish.count == 0 {
+            try await Task.sleep(nanoseconds: 10_000_000)
+        }
+        XCTAssertGreaterThanOrEqual(fixture.finish.count, 1, "The notice dismisses itself")
+        viewModel.cleanup()
+    }
+
     func testCancelledTranscriptionIsStillDiscarded() async throws {
         let audio = try makeAudio()
         let fixture = try Fixture(engine: ScriptedEngine(.failure(CancellationError())))

@@ -50,6 +50,7 @@ jobs:
             -only-testing:OpenSuperWhisperTests/EmptyDictationDiscardTests \
             -only-testing:OpenSuperWhisperTests/EscapeCancelConfirmationTests \
             -only-testing:OpenSuperWhisperTests/AudioSessionOwnershipTests \
+            -only-testing:OpenSuperWhisperTests/BackgroundAudioReductionTests \
             -only-testing:OpenSuperWhisperTests/CustomCleanupFilterStoreTests \
             -only-testing:OpenSuperWhisperTests/CustomCleanupPromptTests \
             -only-testing:OpenSuperWhisperTests/CustomFilterNumberGuardTests \

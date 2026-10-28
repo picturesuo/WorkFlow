@@ -22,6 +22,7 @@ final class SettingsLayoutTests: XCTestCase {
         "autoPasteTranscription": true,
         "addSpaceAfterSentence": false,
         "playSoundOnRecordStart": true,
+        "reduceBackgroundAudio": true,
         "ignoreEscWhileRecording": true,
         "escCancelWithoutConfirmation": true,
         "launchAtLogin": false,

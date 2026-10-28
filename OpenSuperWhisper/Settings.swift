@@ -128,6 +128,12 @@ class SettingsViewModel: ObservableObject {
         }
     }
     
+    @Published var reduceBackgroundAudio: Bool {
+        didSet {
+            AppPreferences.shared.reduceBackgroundAudio = reduceBackgroundAudio
+        }
+    }
+
     @Published var useAsianAutocorrect: Bool {
         didSet {
             AppPreferences.shared.useAsianAutocorrect = useAsianAutocorrect
@@ -290,6 +296,7 @@ class SettingsViewModel: ObservableObject {
         self.useBeamSearch = prefs.useBeamSearch
         self.beamSize = prefs.beamSize
         self.playSoundOnRecordStart = prefs.playSoundOnRecordStart
+        self.reduceBackgroundAudio = prefs.reduceBackgroundAudio
         self.useAsianAutocorrect = prefs.useAsianAutocorrect
         self.modifierOnlyHotkey = ModifierKey(rawValue: prefs.modifierOnlyHotkey) ?? .none
         self.secondaryModifierOnlyHotkey = ModifierKey(rawValue: prefs.secondaryModifierOnlyHotkey) ?? .none

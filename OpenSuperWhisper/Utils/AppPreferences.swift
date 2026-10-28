@@ -98,6 +98,11 @@ final class AppPreferences {
     @UserDefault(key: "playSoundOnRecordStart", defaultValue: false)
     var playSoundOnRecordStart: Bool
     
+    /// Opt-in Apple voice processing for dictation; off records the
+    /// microphone as is.
+    @UserDefault(key: "reduceBackgroundAudio", defaultValue: false)
+    var reduceBackgroundAudio: Bool
+
     @UserDefault(key: "hasCompletedOnboarding", defaultValue: false)
     var hasCompletedOnboarding: Bool
     
