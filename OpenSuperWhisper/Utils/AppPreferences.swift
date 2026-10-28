@@ -102,7 +102,7 @@ final class AppPreferences {
     /// microphone as is.
     @UserDefault(key: "reduceBackgroundAudio", defaultValue: false)
     var reduceBackgroundAudio: Bool
-    
+
     @UserDefault(key: "hasCompletedOnboarding", defaultValue: false)
     var hasCompletedOnboarding: Bool
     

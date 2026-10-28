@@ -73,6 +73,7 @@ It reduces background audio; it doesn't promise to remove it:
 - Music, ads, or voices from another device or people in the room aren't echo, so they aren't cancelled. macOS's Voice Isolation mic mode, in Control Center while WorkFlow records, applies too and may help.
 - With headphones the music never reaches the mic, so there's nothing to remove.
 - If voice processing can't start, that dictation records the microphone as is and Settings says so.
+- If voice processing stops mid-dictation, for example when an audio device changes and it can't restart, the dictation ends there, keeps what you said so far, and the indicator shows **Recording cut short**.
 - WorkFlow never deletes words from your transcript to drop lyrics or ads.
 
 ## Privacy

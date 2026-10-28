@@ -133,7 +133,7 @@ class SettingsViewModel: ObservableObject {
             AppPreferences.shared.reduceBackgroundAudio = reduceBackgroundAudio
         }
     }
-    
+
     @Published var useAsianAutocorrect: Bool {
         didSet {
             AppPreferences.shared.useAsianAutocorrect = useAsianAutocorrect
