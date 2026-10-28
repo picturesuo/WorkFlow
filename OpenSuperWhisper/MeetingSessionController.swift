@@ -50,7 +50,7 @@ final class MeetingSessionController: ObservableObject {
             return false
         }
         let sessionID = UUID()
-        let accepted = AudioRecorder.shared.startRecording(sessionID: sessionID) { [weak self] startError in
+        let accepted = AudioRecorder.shared.startRecording(sessionID: sessionID, purpose: .meeting) { [weak self] startError in
             guard let startError else { return }
             Task { @MainActor in
                 guard self?.activeSessionID == sessionID else { return }

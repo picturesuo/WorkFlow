@@ -63,6 +63,18 @@ This is separate from filters. Paste or drop a document you finished from your d
 
 WorkFlow matches the document to your History and keeps only small style edits it can confirm, such as a spelling, a dropped filler, semicolon joins, or digits. Edits that change values, negations, or meaning are left out. Each learned preference is checked against your edits, applied to that mode automatically, and can be switched off or deleted. Custom filters are never changed.
 
+## Music while you dictate
+
+To keep music or a video playing while you dictate, turn on **Settings → Dictation → Reduce background audio**. Dictation then records through macOS voice processing, the echo cancellation and noise suppression calls use. Apple describes it as taking audio the Mac plays out of what the microphone hears, so it may reduce music from this Mac's speakers and steady noise. Your music keeps playing; macOS may lower it slightly while you dictate. It's off by default, and meetings always record the microphone as is, so people on a call stay in the transcript.
+
+It reduces background audio; it doesn't promise to remove it:
+
+- How much music or ad audio from other apps it removes depends on your Mac, speakers, and apps, and hasn't been measured on real hardware yet.
+- Music, ads, or voices from another device or people in the room aren't echo, so they aren't cancelled. macOS's Voice Isolation mic mode, in Control Center while WorkFlow records, applies too and may help.
+- With headphones the music never reaches the mic, so there's nothing to remove.
+- If voice processing can't start, that dictation records the microphone as is and Settings says so.
+- WorkFlow never deletes words from your transcript to drop lyrics or ads.
+
 ## Privacy
 
 Audio never leaves your Mac. With cleanup on, only transcript text goes to the one provider you pick: Amazon Bedrock, Azure OpenAI, local Ollama, or any OpenAI-compatible API. **Send** in Create with AI shares your request and any pasted example. **Learn** shares only the short matched edits with a few words around each; the document itself is read on your Mac and not stored. New dictations keep their original transcript on your Mac until you delete them. Keys live in macOS Keychain, and credentials and transcripts are never logged.

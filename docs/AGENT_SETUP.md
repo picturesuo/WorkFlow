@@ -80,12 +80,13 @@ This runbook lets a local coding agent install and verify WorkFlow without recei
      -only-testing:OpenSuperWhisperTests/DocumentTextExtractorTests \
      -only-testing:OpenSuperWhisperTests/DocumentTypeLookupTests \
      -only-testing:OpenSuperWhisperTests/CoreAudioDeviceLookupTests \
+     -only-testing:OpenSuperWhisperTests/BackgroundAudioReductionTests \
      -only-testing:OpenSuperWhisperTests/WhisperConversionFingerprintTests \
      -only-testing:OpenSuperWhisperTests/WhisperProgressCallbackTests \
      -only-testing:OpenSuperWhisperTests/DictationLearningFlowTests
    ```
 
-   `RecognizerToCleanupTraceTests` skips itself unless the Parakeet v3 model is already cached. `DictationLearningFlowTests`, `CustomFilterImmediacyTests`, and `RewriteOnlyContractTests` use scripted stand-ins for the recognizer and providers, so they prove the plumbing and the guard, not real provider quality.
+   `RecognizerToCleanupTraceTests` skips itself unless the Parakeet v3 model is already cached. `BackgroundAudioReductionTests` drives the capture with a scripted engine and the repository's tiny Whisper model, so it proves the setting, format conversion, and device-change handling, not how much music macOS voice processing removes. `DictationLearningFlowTests`, `CustomFilterImmediacyTests`, and `RewriteOnlyContractTests` use scripted stand-ins for the recognizer and providers, so they prove the plumbing and the guard, not real provider quality.
 
 4. Install the app. The WorkFlow ivory ribbon icon is already included in the repository:
 

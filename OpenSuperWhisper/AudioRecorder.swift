@@ -60,7 +60,8 @@ class AudioRecorder: NSObject, ObservableObject {
     private let workQueue = DispatchQueue(label: "com.opensuperwhisper.audiorecorder")
     private let sessionGate = AudioRecordingSessionGate()
     
-    private var audioRecorder: AVAudioRecorder?
+    /// The open recording: AVAudioRecorder, or the voice-processed engine.
+    private var capture: RecordingCapture?
     private var audioPlayer: AVAudioPlayer?
     private var notificationSound: NSSound?
     private let temporaryDirectory: URL
@@ -194,7 +195,7 @@ class AudioRecorder: NSObject, ObservableObject {
     }
     
     @discardableResult
-    func startRecording(sessionID: UUID, completion: ((String?) -> Void)? = nil) -> Bool {
+    func startRecording(sessionID: UUID, purpose: RecordingPurpose = .dictation, completion: ((String?) -> Void)? = nil) -> Bool {
         guard sessionGate.reserve(sessionID) else { return false }
 
         // Everything below costs CoreAudio HAL round-trips (device queries,
@@ -202,6 +203,7 @@ class AudioRecorder: NSObject, ObservableObject {
         // block the main thread right when the indicator appear animation
         // starts, so the whole start sequence runs on the work queue.
         let playSound = AppPreferences.shared.playSoundOnRecordStart
+        let configuration = MicrophoneCaptureConfiguration.forNextRecording(purpose)
         workQueue.async {
             guard let activeMic = MicrophoneService.shared.getActiveMicrophone() else {
                 print("Cannot start recording - no audio input available")
@@ -218,7 +220,7 @@ class AudioRecorder: NSObject, ObservableObject {
             
             let requiresConnection = MicrophoneService.shared.isActiveMicrophoneRequiresConnection()
             self.updateRecordingState(isRecording: false, isConnecting: requiresConnection)
-            let failure = self.performStart(activeMic: activeMic, monitorConnection: requiresConnection, sessionID: sessionID)
+            let failure = self.performStart(activeMic: activeMic, configuration: configuration, monitorConnection: requiresConnection, sessionID: sessionID)
             DispatchQueue.main.async {
                 completion?(failure)
             }
@@ -226,7 +228,7 @@ class AudioRecorder: NSObject, ObservableObject {
         return true
     }
     
-    private func performStart(activeMic: MicrophoneService.AudioDevice?, monitorConnection: Bool, sessionID: UUID) -> String? {
+    private func performStart(activeMic: MicrophoneService.AudioDevice?, configuration: MicrophoneCaptureConfiguration, monitorConnection: Bool, sessionID: UUID) -> String? {
         let fileURL = temporaryDirectory.appendingPathComponent(Self.recordingFileName())
         currentRecordingURL = fileURL
         
@@ -240,6 +242,13 @@ class AudioRecorder: NSObject, ObservableObject {
             print("Recording with \(channelCount) input channel(s).")
         }
         #endif
+
+        // If voice processing can't start, this recording uses the
+        // microphone as is and Settings says so.
+        if configuration == .voiceProcessing, startVoiceProcessedCapture(at: fileURL, monitorConnection: monitorConnection) {
+            print("Recording started with voice processing")
+            return nil
+        }
         
         // 16-bit integer PCM: half the disk/IO of Float32 with no quality loss
         // for speech recognition (whisper consumes 16 kHz mono anyway).
@@ -252,12 +261,11 @@ class AudioRecorder: NSObject, ObservableObject {
         ]
         
         do {
-            audioRecorder = try AVAudioRecorder(url: fileURL, settings: settings)
-            audioRecorder?.delegate = self
-            audioRecorder?.isMeteringEnabled = monitorConnection
-            guard audioRecorder?.record() == true else {
+            let audioRecorder = try AVAudioRecorder(url: fileURL, settings: settings)
+            audioRecorder.delegate = self
+            audioRecorder.isMeteringEnabled = monitorConnection
+            guard audioRecorder.record() == true else {
                 print("Failed to start recording: AVAudioRecorder declined the request")
-                audioRecorder = nil
                 currentRecordingURL = nil
                 try? FileManager.default.removeItem(at: fileURL)
                 restoreSystemDefaultInputIfNeeded()
@@ -265,6 +273,7 @@ class AudioRecorder: NSObject, ObservableObject {
                 updateRecordingState(isRecording: false, isConnecting: false)
                 return "The microphone declined the recording request."
             }
+            capture = audioRecorder
             if monitorConnection {
                 startConnectionMonitoring()
             } else {
@@ -282,6 +291,38 @@ class AudioRecorder: NSObject, ObservableObject {
         }
     }
     
+    /// Starts the voice-processed engine; false leaves nothing running.
+    private func startVoiceProcessedCapture(at fileURL: URL, monitorConnection: Bool) -> Bool {
+        do {
+            let voiceCapture = try VoiceProcessedCapture(url: fileURL, queue: workQueue) {
+                AVAudioEngineVoiceCapture()
+            }
+            voiceCapture.onStopped = { reason in
+                Self.publishBackgroundAudioReduction(.stopped(reason))
+            }
+            try voiceCapture.start()
+            capture = voiceCapture
+            Self.publishBackgroundAudioReduction(.active)
+            if monitorConnection {
+                startConnectionMonitoring()
+            } else {
+                updateRecordingState(isRecording: true, isConnecting: false)
+            }
+            return true
+        } catch {
+            print("Voice processing could not start; recording the microphone as is.")
+            try? FileManager.default.removeItem(at: fileURL)
+            Self.publishBackgroundAudioReduction(.unavailable(VoiceProcessedCapture.reason(for: error)))
+            return false
+        }
+    }
+
+    private static func publishBackgroundAudioReduction(_ status: BackgroundAudioReductionStatus) {
+        DispatchQueue.main.async {
+            BackgroundAudioReductionMonitor.shared.status = status
+        }
+    }
+
     func ownsRecordingSession(_ sessionID: UUID) -> Bool {
         sessionGate.isCurrent(sessionID)
     }
@@ -293,7 +334,7 @@ class AudioRecorder: NSObject, ObservableObject {
                     continuation.resume(returning: nil)
                     return
                 }
-                guard let recorder = self.audioRecorder, let url = self.currentRecordingURL else {
+                guard let capture = self.capture, let url = self.currentRecordingURL else {
                     continuation.resume(returning: self.performStop(discard: false))
                     return
                 }
@@ -301,17 +342,16 @@ class AudioRecorder: NSObject, ObservableObject {
                 // Detach the session immediately (UI state, connection monitoring),
                 // then keep capturing a short tail before actually stopping, so the
                 // end of the last word released together with the hotkey survives.
-                self.audioRecorder = nil
+                self.capture = nil
                 self.currentRecordingURL = nil
                 self.stopConnectionMonitoring()
                 self.updateRecordingState(isRecording: false, isConnecting: false)
                 
                 self.workQueue.asyncAfter(deadline: .now() + Self.stopTailDuration) {
-                    let recordedDuration = recorder.currentTime
-                    recorder.stop()
+                    let recordedDuration = capture.finish()
                     // A new recording may have started during the tail window;
                     // it will restore the system input itself when it stops.
-                    if self.audioRecorder == nil {
+                    if self.capture == nil {
                         self.restoreSystemDefaultInputIfNeeded()
                     }
                     
@@ -334,9 +374,8 @@ class AudioRecorder: NSObject, ObservableObject {
     }
     
     private func performStop(discard: Bool) -> URL? {
-        let recordedDuration = audioRecorder?.currentTime ?? 0
-        audioRecorder?.stop()
-        audioRecorder = nil
+        let recordedDuration = capture?.finish() ?? 0
+        capture = nil
         stopConnectionMonitoring()
         restoreSystemDefaultInputIfNeeded()
         updateRecordingState(isRecording: false, isConnecting: false)
@@ -442,10 +481,16 @@ class AudioRecorder: NSObject, ObservableObject {
         var growthCount = 0
         
         timer.setEventHandler { [weak self] in
-            guard let self = self, let _ = self.audioRecorder, let url = self.currentRecordingURL else { return }
+            guard let self = self, let capture = self.capture, let url = self.currentRecordingURL else { return }
             
-            let currentFileSize = (try? FileManager.default.attributesOfItem(atPath: url.path)[.size] as? Int64) ?? 0
-            let totalGrowth = currentFileSize - initialFileSize
+            let totalGrowth: Int64
+            if let voiceCapture = capture as? VoiceProcessedCapture {
+                // 16-bit mono at 16 kHz, the same bytes the file grows by.
+                totalGrowth = Int64(voiceCapture.recordedDuration * SpeechFileWriter.sampleRate) * 2
+            } else {
+                let currentFileSize = (try? FileManager.default.attributesOfItem(atPath: url.path)[.size] as? Int64) ?? 0
+                totalGrowth = currentFileSize - initialFileSize
+            }
             
             if totalGrowth > 8000 {
                 growthCount += 1
@@ -470,12 +515,28 @@ extension AudioRecorder: AVAudioRecorderDelegate {
     func audioRecorderDidFinishRecording(_ recorder: AVAudioRecorder, successfully flag: Bool) {
         guard !flag else { return }
         workQueue.async {
-            guard recorder === self.audioRecorder else { return }
+            guard recorder === self.capture else { return }
             _ = self.sessionGate.take(ifMatching: nil)
             _ = self.performStop(discard: true)
         }
     }
 }
+
+/// One open recording from either capture path.
+protocol RecordingCapture: AnyObject {
+    /// Stops capturing and returns how long the recording is.
+    func finish() -> TimeInterval
+}
+
+extension AVAudioRecorder: RecordingCapture {
+    func finish() -> TimeInterval {
+        let recordedDuration = currentTime
+        stop()
+        return recordedDuration
+    }
+}
+
+extension VoiceProcessedCapture: RecordingCapture {}
 
 extension AudioRecorder: AVAudioPlayerDelegate {
     func audioPlayerDidFinishPlaying(_ player: AVAudioPlayer, successfully flag: Bool) {

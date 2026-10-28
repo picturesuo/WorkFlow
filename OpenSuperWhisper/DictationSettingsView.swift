@@ -215,8 +215,17 @@ struct DictationSettingsView: View {
                 .fixedSize()
                 .accessibilityValue(viewModel.holdToRecord ? "Hold to talk" : "Tap to start and stop")
             }
+            SettingsDivider()
+            SettingsToggleRow(
+                title: "Reduce background audio",
+                detail: Self.backgroundAudioHelp,
+                isOn: $viewModel.reduceBackgroundAudio
+            )
+            BackgroundAudioReductionNotice(isOn: viewModel.reduceBackgroundAudio)
         }
     }
+
+    static let backgroundAudioHelp = "Uses macOS voice processing, which may reduce music and other sound from this Mac’s speakers, plus steady noise. Sound from other devices and nearby voices can still come through."
 
     // MARK: Speech
 
@@ -556,6 +565,22 @@ struct DictationSettingsView: View {
                     .font(.caption.monospacedDigit())
                     .foregroundStyle(.secondary)
                     .frame(width: 24, alignment: .trailing)
+            }
+        }
+    }
+}
+
+/// Says when the latest dictation couldn't use voice processing, so the
+/// switch never implies processing that did not run.
+struct BackgroundAudioReductionNotice: View {
+    let isOn: Bool
+    @ObservedObject private var monitor = BackgroundAudioReductionMonitor.shared
+
+    var body: some View {
+        if isOn, let notice = monitor.status.notice {
+            SettingsDivider()
+            SettingsNotice(title: notice.title, detail: notice.detail) {
+                EmptyView()
             }
         }
     }
