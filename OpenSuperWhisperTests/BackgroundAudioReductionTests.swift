@@ -211,14 +211,21 @@ final class BackgroundAudioReductionTests: XCTestCase {
         capture.onStopped = { stopped.append($0) }
         try queue.sync { try capture.start() }
         try first.deliver(seconds: 1)
+        let lateChange = try XCTUnwrap(first.onConfigurationChange)
 
         first.changeHardware()
         queue.sync {}
         XCTAssertEqual(stopped, ["The audio device changed during the last recording and voice processing couldn’t restart."])
         XCTAssertEqual(second.events.suffix(2), ["removeTap", "stop"])
 
+        lateChange()
+        queue.sync {}
+        XCTAssertEqual(stopped.count, 1, "A late device notice neither restarts nor reports again")
+
         let duration = queue.sync { capture.finish() }
         XCTAssertEqual(duration, 1, accuracy: 0.02)
+        XCTAssertEqual(Double(try AVAudioFile(forReading: url).length) / 16_000, 1, accuracy: 0.02)
+        XCTAssertEqual(queue.sync { capture.finish() }, duration, accuracy: 0.001, "Finishing twice keeps the same recording")
         XCTAssertEqual(Double(try AVAudioFile(forReading: url).length) / 16_000, 1, accuracy: 0.02)
     }
 
@@ -230,13 +237,24 @@ final class BackgroundAudioReductionTests: XCTestCase {
         var stopped: [String] = []
         capture.onStopped = { stopped.append($0) }
         try queue.sync { try capture.start() }
+        try engines[0].deliver(seconds: 1)
+        var lateChanges: [() -> Void] = []
         for engine in engines {
+            lateChanges.append(try XCTUnwrap(engine.onConfigurationChange))
             engine.changeHardware()
             queue.sync {}
         }
         XCTAssertEqual(stopped, ["The audio devices kept changing during the last recording."])
         XCTAssertTrue(engines.allSatisfy { $0.events.contains("start") })
-        _ = queue.sync { capture.finish() }
+        XCTAssertTrue(engines.allSatisfy { !$0.isRunning }, "Nothing keeps capturing once the budget is spent")
+
+        lateChanges.forEach { $0() }
+        queue.sync {}
+        XCTAssertEqual(stopped.count, 1, "Late device notices neither restart nor report again")
+
+        let duration = queue.sync { capture.finish() }
+        XCTAssertEqual(duration, 1, accuracy: 0.02, "The audio before the devices kept changing is kept")
+        XCTAssertEqual(queue.sync { capture.finish() }, duration, accuracy: 0.001)
     }
 
     // MARK: Helpers

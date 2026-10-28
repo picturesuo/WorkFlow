@@ -10,6 +10,7 @@ enum RecordingState {
     case busy
     case noMicrophone
     case recordingFailed
+    case recordingCutShort
     case transcriptionFailed
     case pasteFailed
     case clipboardFailed
@@ -49,6 +50,8 @@ class IndicatorViewModel: ObservableObject {
     private var dictationGeneration: UInt64?
     /// Esc after the recording stopped: finish into History, paste nothing.
     private var isDeliveryCancelled = false
+    /// The capture stopped on its own; the audio until then is still delivered.
+    private var isCaptureCutShort = false
     var recorderSessionID: UUID?
     private let pasteTarget: PasteTarget?
     private let delivery: ((String) -> DictationDisposition)?
@@ -89,6 +92,15 @@ class IndicatorViewModel: ObservableObject {
                     self.state = .recording
                     self.startBlinking()
                 }
+            }
+            .store(in: &cancellables)
+
+        recorder.captureStopped
+            .receive(on: RunLoop.main)
+            .sink { [weak self] sessionID in
+                guard let self, self.recorderSessionID == sessionID else { return }
+                self.isCaptureCutShort = true
+                self.startDecoding()
             }
             .store(in: &cancellables)
     }
@@ -153,6 +165,7 @@ class IndicatorViewModel: ObservableObject {
         // Starting a newer recording immediately retires every older async
         // transcription/cleanup result, even before this recording is stopped.
         recorderSessionID = sessionID
+        isCaptureCutShort = false
         dictationGeneration = latestDictationGate.begin()
         state = .recording
         startBlinking()
@@ -236,10 +249,7 @@ class IndicatorViewModel: ObservableObject {
                 await self.finishDictation(audioAt: tempURL, generation: generation, recordingStartedAt: recordingStartedAt)
             } else {
                 print("!!! Not found record url !!!")
-                
-                await MainActor.run {
-                    self.delegate?.didFinishDecoding(self)
-                }
+                self.finishDecoding()
             }
         }
     }
@@ -268,7 +278,7 @@ class IndicatorViewModel: ObservableObject {
                 guard !text.isEmpty else {
                     try? FileManager.default.removeItem(at: tempURL)
                     print("Cleanup produced an empty dictation; discarded")
-                    self.delegate?.didFinishDecoding(self)
+                    self.finishDecoding()
                     return
                 }
 
@@ -370,8 +380,16 @@ class IndicatorViewModel: ObservableObject {
             }
         }
         
-        await MainActor.run {
-            self.delegate?.didFinishDecoding(self)
+        finishDecoding()
+    }
+
+    /// Hides the indicator, first saying so briefly if the capture stopped
+    /// on its own and this dictation still owns the indicator.
+    private func finishDecoding() {
+        if isCaptureCutShort, !isDeliveryCancelled {
+            showAutoDismissingMessage(.recordingCutShort)
+        } else {
+            delegate?.didFinishDecoding(self)
         }
     }
 
@@ -611,6 +629,20 @@ struct IndicatorWindow: View {
                         .frame(width: 24)
 
                     Text("Recording failed")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundColor(.orange)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.85)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+
+            case .recordingCutShort:
+                HStack(spacing: 8) {
+                    Image(systemName: "exclamationmark.triangle")
+                        .foregroundColor(.orange)
+                        .frame(width: 24)
+
+                    Text("Recording cut short")
                         .font(.system(size: 13, weight: .semibold))
                         .foregroundColor(.orange)
                         .lineLimit(1)

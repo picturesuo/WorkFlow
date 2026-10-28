@@ -260,6 +260,7 @@ final class FilterAssistantVoiceInput: ObservableObject {
         var transcribe: (URL) async throws -> String
         var modelLoading: AnyPublisher<Bool, Never>
         var removeFile: (URL) -> Void
+        var captureStopped: AnyPublisher<UUID, Never>
 
         @MainActor static var live: Dependencies {
             Dependencies(
@@ -268,7 +269,8 @@ final class FilterAssistantVoiceInput: ObservableObject {
                 cancel: { id in AudioRecorder.shared.cancelRecording(sessionID: id) },
                 transcribe: { url in try await TranscriptionService.shared.transcribeAudio(url: url, settings: Settings()) },
                 modelLoading: TranscriptionService.shared.$isLoading.eraseToAnyPublisher(),
-                removeFile: { url in try? FileManager.default.removeItem(at: url) }
+                removeFile: { url in try? FileManager.default.removeItem(at: url) },
+                captureStopped: AudioRecorder.shared.captureStopped.eraseToAnyPublisher()
             )
         }
     }
@@ -282,6 +284,7 @@ final class FilterAssistantVoiceInput: ObservableObject {
     private var sessionID: UUID?
     private var transcriptionTask: Task<Void, Never>?
     private var loadingSubscription: AnyCancellable?
+    private var captureStoppedSubscription: AnyCancellable?
 
     init(dependencies: Dependencies? = nil) {
         let dependencies = dependencies ?? .live
@@ -289,6 +292,12 @@ final class FilterAssistantVoiceInput: ObservableObject {
         loadingSubscription = dependencies.modelLoading
             .receive(on: DispatchQueue.main)
             .sink { [weak self] value in self?.isModelLoading = value }
+        captureStoppedSubscription = dependencies.captureStopped
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] id in
+                guard let self, self.sessionID == id else { return }
+                self.stop()
+            }
     }
 
     func start() {

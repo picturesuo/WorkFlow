@@ -153,6 +153,14 @@ class ContentViewModel: ObservableObject {
                 )
             }
             .store(in: &cancellables)
+
+        recorder.captureStopped
+            .receive(on: RunLoop.main)
+            .sink { [weak self] sessionID in
+                guard let self, self.recorderSessionID == sessionID else { return }
+                self.startDecoding()
+            }
+            .store(in: &cancellables)
     }
 
     func updateRecorderState(isRecording: Bool, isConnecting: Bool) {

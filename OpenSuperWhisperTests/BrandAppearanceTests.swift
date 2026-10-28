@@ -204,7 +204,7 @@ final class BrandLayoutTests: XCTestCase {
         defer { viewModel.cleanup() }
         let states: [RecordingState] = [
             .connecting, .recording, .decoding, .busy, .noMicrophone,
-            .recordingFailed, .transcriptionFailed, .pasteFailed, .clipboardFailed
+            .recordingFailed, .recordingCutShort, .transcriptionFailed, .pasteFailed, .clipboardFailed
         ]
         for scheme in [ColorScheme.light, .dark] {
             for state in states {

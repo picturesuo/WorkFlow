@@ -691,6 +691,7 @@ final class FilterAssistantVoiceInputTests: XCTestCase {
     private var cancelled: [UUID] = []
     private var removed: [URL] = []
     private var loading = CurrentValueSubject<Bool, Never>(false)
+    private let captureStopped = PassthroughSubject<UUID, Never>()
     // These tests prove nothing reaches the general pasteboard, which other
     // test processes paste to; hold it so their writes cannot move the count.
     private let pasteboardLock = GeneralPasteboardLock()
@@ -732,7 +733,8 @@ final class FilterAssistantVoiceInputTests: XCTestCase {
             removeFile: { [weak self] url in
                 self?.removed.append(url)
                 try? FileManager.default.removeItem(at: url)
-            }
+            },
+            captureStopped: captureStopped.eraseToAnyPublisher()
         ))
     }
 
@@ -772,6 +774,29 @@ final class FilterAssistantVoiceInputTests: XCTestCase {
         XCTAssertEqual(CustomCleanupFilterStore.currentSelection(), selection)
         XCTAssertNil(voice.errorMessage)
         XCTAssertTrue(assistant.entries.isEmpty)
+    }
+
+    func testCaptureThatStoppedOnItsOwnEndsTheRequestWithTheAudioSoFar() async throws {
+        let engine = StubTranscriptionEngine(text: "Use digits.")
+        let voice = makeVoice(service: TranscriptionService(engine: engine))
+        var transcripts: [String] = []
+        voice.onTranscript = { transcripts.append($0) }
+
+        voice.start()
+        captureStopped.send(UUID())
+        for _ in 0..<20 { try? await Task.sleep(nanoseconds: 5_000_000) }
+        XCTAssertEqual(voice.state, .recording, "Another session's stopped capture is not this one")
+        XCTAssertTrue(stopped.isEmpty)
+
+        captureStopped.send(try XCTUnwrap(started.first))
+        await settle(voice)
+        XCTAssertEqual(voice.state, .idle)
+        XCTAssertEqual(stopped, started, "Ended through its own stop, once")
+        XCTAssertEqual(transcripts, ["Use digits."])
+
+        captureStopped.send(try XCTUnwrap(started.first))
+        for _ in 0..<20 { try? await Task.sleep(nanoseconds: 5_000_000) }
+        XCTAssertEqual(stopped, started, "A late signal stops nothing")
     }
 
     @MainActor
@@ -859,7 +884,8 @@ final class FilterAssistantLayoutTests: XCTestCase {
             cancel: { _ in },
             transcribe: { _ in "" },
             modelLoading: Just(false).eraseToAnyPublisher(),
-            removeFile: { _ in }
+            removeFile: { _ in },
+            captureStopped: Empty().eraseToAnyPublisher()
         ))
 
         let empty = FilterAssistantSession(

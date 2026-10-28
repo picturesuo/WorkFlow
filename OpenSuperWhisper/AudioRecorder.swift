@@ -1,4 +1,5 @@
 import AVFoundation
+import Combine
 import Foundation
 import SwiftUI
 import AppKit
@@ -40,6 +41,10 @@ class AudioRecorder: NSObject, ObservableObject {
     @Published var currentlyPlayingURL: URL?
     @Published var canRecord = false
     @Published var isConnecting = false
+    /// Sends, on the main queue, the session whose capture stopped on its own
+    /// before its owner stopped it. The owner ends it through its usual stop,
+    /// which keeps the audio recorded until then.
+    let captureStopped = PassthroughSubject<UUID, Never>()
     
     /// Short commands such as “yes”, “stop”, or a single name are valid
     /// dictations. Blank-audio suppression remains the authority for silence.
@@ -245,7 +250,7 @@ class AudioRecorder: NSObject, ObservableObject {
 
         // If voice processing can't start, this recording uses the
         // microphone as is and Settings says so.
-        if configuration == .voiceProcessing, startVoiceProcessedCapture(at: fileURL, monitorConnection: monitorConnection) {
+        if configuration == .voiceProcessing, startVoiceProcessedCapture(at: fileURL, monitorConnection: monitorConnection, sessionID: sessionID) {
             print("Recording started with voice processing")
             return nil
         }
@@ -292,13 +297,20 @@ class AudioRecorder: NSObject, ObservableObject {
     }
     
     /// Starts the voice-processed engine; false leaves nothing running.
-    private func startVoiceProcessedCapture(at fileURL: URL, monitorConnection: Bool) -> Bool {
+    private func startVoiceProcessedCapture(at fileURL: URL, monitorConnection: Bool, sessionID: UUID) -> Bool {
         do {
             let voiceCapture = try VoiceProcessedCapture(url: fileURL, queue: workQueue) {
                 AVAudioEngineVoiceCapture()
             }
-            voiceCapture.onStopped = { reason in
+            voiceCapture.onStopped = { [weak self, weak voiceCapture] reason in
                 Self.publishBackgroundAudioReduction(.stopped(reason))
+                guard let self, let voiceCapture, voiceCapture === self.capture,
+                      self.sessionGate.isCurrent(sessionID) else { return }
+                self.stopConnectionMonitoring()
+                self.updateRecordingState(isRecording: false, isConnecting: false)
+                DispatchQueue.main.async {
+                    self.captureStopped.send(sessionID)
+                }
             }
             try voiceCapture.start()
             capture = voiceCapture
