@@ -352,12 +352,22 @@ final class AnthropicTransportTests: XCTestCase {
         // fail the request deterministically, so it must be omitted.
         for model in ["claude-opus-5-5", "claude-sonnet-5-5", "claude-fable-5-1", "some-future-model"] {
             ProviderFixtureProtocol.reset()
-            ProviderFixtureProtocol.handler = { _, _ in .http(status: 200, body: ProviderFixtureReplies.anthropicText("Send the report.")) }
-            _ = try await service(model: model).clean(transcript: "Um, send the report.", systemPrompt: CleanupPromptBuilder.baseSystemPrompt)
+            ProviderFixtureProtocol.handler = { _, _ in
+                .http(status: 200, body: ProviderFixtureReplies.anthropic([
+                    ["type": "thinking", "thinking": "SECRET chain of thought", "signature": "sig"],
+                    ["type": "redacted_thinking", "data": "SECRET opaque"],
+                    ["type": "text", "text": "Send the report."]
+                ]))
+            }
+            let result = try await service(model: model).clean(transcript: "Um, send the report.", systemPrompt: CleanupPromptBuilder.baseSystemPrompt)
             let sent = try XCTUnwrap(ProviderFixtureProtocol.requests.first)
             let json = ProviderFixtureProtocol.json(sent.body)
-            XCTAssertNil(json["thinking"], "\(model) rejects thinking.type=disabled, so the key must be absent")
-            XCTAssertFalse(json.keys.contains("thinking"), "\(model) must not carry a thinking field")
+            XCTAssertEqual(Set(json.keys), ["model", "max_tokens", "system", "messages"], "\(model) must send no thinking and no sampling parameters")
+            for absent in ["thinking", "temperature", "top_p", "top_k"] {
+                XCTAssertNil(json[absent], "\(model) rejects or does not take \(absent), so the key must be absent")
+            }
+            XCTAssertEqual(result.text, "Send the report.", "Only the text block is the answer for \(model)")
+            XCTAssertFalse(result.text.contains("SECRET"), "Thinking and redacted_thinking blocks must not leak into the reply for \(model)")
         }
 
         ProviderFixtureProtocol.reset()
