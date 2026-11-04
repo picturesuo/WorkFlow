@@ -504,7 +504,14 @@ struct ProviderCostSettingsView: View {
         Group {
             textRow("Base URL", prompt: "https://api.example.com/v1", text: $compatibleBaseURL, width: 240)
             SettingsDivider()
-            textRow("Model", prompt: "Provider model ID", text: $compatibleModelID, width: 240)
+            textRow(
+                "Model",
+                detail: "Required: the model ID your service lists. For OpenAI itself, choose OpenAI above for a checked setup.",
+                prompt: "Provider model ID",
+                text: $compatibleModelID,
+                width: 240,
+                accessibilityLabel: "OpenAI-compatible model"
+            )
             SettingsDivider()
             keyRow(
                 title: "API key",
@@ -535,7 +542,7 @@ struct ProviderCostSettingsView: View {
             SettingsDivider()
             textRow("Endpoint", prompt: "https://YOUR-RESOURCE.openai.azure.com", text: $azureEndpoint, width: 240, accessibilityLabel: "Azure OpenAI endpoint")
             SettingsDivider()
-            textRow("Deployment", prompt: "e.g. gpt-4.1-nano", text: $azureDeployment, width: 240, accessibilityLabel: "Azure OpenAI deployment name")
+            textRow("Deployment", prompt: "Your deployment name", text: $azureDeployment, width: 240, accessibilityLabel: "Azure OpenAI deployment name")
             SettingsDivider()
             keyRow(
                 title: "API key",

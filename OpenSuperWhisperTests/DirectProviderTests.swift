@@ -530,7 +530,8 @@ final class ProviderErrorTextTests: XCTestCase {
 final class DirectProviderFactoryTests: XCTestCase {
     private var saved: [String: Any?] = [:]
     private let preferenceKeys = ["cleanupProviderID", "openAIModelID", "openAIReasoningEffort", "openAITimeoutSeconds",
-                                  "anthropicModelID", "anthropicTimeoutSeconds"]
+                                  "anthropicModelID", "anthropicTimeoutSeconds", "openAICompatibleModelID", "openAICompatibleBaseURL",
+                                  "openAICompatibleTimeoutSeconds"]
     private var session: URLSession!
     private var requestedAccounts: [CleanupCredentialAccount] = []
     private var defaults: UserDefaults!
@@ -692,6 +693,76 @@ final class DirectProviderFactoryTests: XCTestCase {
         XCTAssertEqual(AppPreferences.shared.openAIModelID, "gpt-6-luna")
         XCTAssertEqual(AppPreferences.shared.openAIReasoningEffort, "none")
         XCTAssertEqual(AppPreferences.shared.anthropicModelID, "claude-haiku-5-5")
+    }
+
+    // MARK: OpenAI-compatible has no implicit model
+
+    private func compatibleEnvironment() -> CleanupProviderFactory.Environment {
+        environment(keys: [.openAICompatible: "compatible-synthetic"])
+    }
+
+    func testNewCompatibleConfigurationHasNoModelAndSendsNothing() async throws {
+        UserDefaults.standard.removeObject(forKey: "openAICompatibleModelID")
+        AppPreferences.shared.cleanupProviderID = CleanupProviderID.openAICompatible.rawValue
+        AppPreferences.shared.openAICompatibleBaseURL = "https://compatible.example/v1"
+        XCTAssertEqual(AppPreferences.shared.openAICompatibleModelID, "", "The retired gpt-4.1-nano is no longer implied")
+        XCTAssertEqual(CleanupProviderFactory.selectedDestination().summary, "OpenAI-compatible")
+        ProviderFixtureProtocol.handler = { _, _ in .http(status: 200, body: ProviderFixtureReplies.openAI("Send the report.")) }
+
+        for model in ["", "   "] {
+            AppPreferences.shared.openAICompatibleModelID = model
+            let chat = try CleanupProviderFactory.makeSelectedChat(environment: compatibleEnvironment())
+            await assertThrows(OpenAIChatCleanupError.invalidConfiguration("Enter a model name first.")) {
+                _ = try await chat.complete(ProviderChatRequest(systemPrompt: "s", messages: [], maxOutputTokens: 10))
+            }
+            let (pipeline, _) = pipeline(compatibleEnvironment())
+            let outcome = await pipeline.finalize("send the report")
+            XCTAssertEqual(outcome.source, .rawFallback)
+            XCTAssertEqual(outcome.text, "send the report")
+        }
+        XCTAssertTrue(ProviderFixtureProtocol.requests.isEmpty, "A blank model sends nothing")
+    }
+
+    func testInvalidCompatibleServerSendsNothing() async {
+        AppPreferences.shared.cleanupProviderID = CleanupProviderID.openAICompatible.rawValue
+        AppPreferences.shared.openAICompatibleModelID = "custom-model"
+        ProviderFixtureProtocol.handler = { _, _ in .http(status: 200, body: ProviderFixtureReplies.openAI("Send the report.")) }
+        for url in ["", "not a url", "http://compatible.example/v1", "https://user:pass@compatible.example/v1", "https://compatible.example/v1?key=1"] {
+            AppPreferences.shared.openAICompatibleBaseURL = url
+            let (pipeline, _) = pipeline(compatibleEnvironment())
+            let outcome = await pipeline.finalize("send the report")
+            XCTAssertEqual(outcome.source, .rawFallback, url)
+        }
+        XCTAssertTrue(ProviderFixtureProtocol.requests.isEmpty)
+    }
+
+    func testSavedCompatibleModelsRoundTripWithTheGenericProtocol() async throws {
+        AppPreferences.shared.cleanupProviderID = CleanupProviderID.openAICompatible.rawValue
+        AppPreferences.shared.openAICompatibleTimeoutSeconds = 2
+        ProviderFixtureProtocol.handler = { _, _ in .http(status: 200, body: ProviderFixtureReplies.openAI("Send the report.")) }
+        // Saved settings, including the old default someone typed in, stay exactly as saved.
+        let saved = [("https://openrouter.example/api/v1", "meta-llama/llama-3.3-8b-instruct"),
+                     ("http://localhost:1234/v1", "local-model"),
+                     ("https://api.openai.com/v1", "gpt-4.1-nano")]
+        for (index, (baseURL, model)) in saved.enumerated() {
+            UserDefaults.standard.set(baseURL, forKey: "openAICompatibleBaseURL")
+            UserDefaults.standard.set(model, forKey: "openAICompatibleModelID")
+            XCTAssertEqual(AppPreferences.shared.openAICompatibleModelID, model)
+            XCTAssertEqual(AppPreferences.shared.openAICompatibleBaseURL, baseURL)
+
+            let (pipeline, _) = pipeline(compatibleEnvironment())
+            let outcome = await pipeline.finalize("um send the report")
+            XCTAssertEqual(outcome.source, .openAICompatible, model)
+            XCTAssertEqual(outcome.modelID, model)
+
+            let sent = ProviderFixtureProtocol.requests[index]
+            XCTAssertEqual(sent.request.url?.absoluteString, baseURL + "/chat/completions")
+            let json = ProviderFixtureProtocol.json(sent.body)
+            XCTAssertEqual(json["model"] as? String, model)
+            XCTAssertEqual(Set(json.keys), ["model", "messages", "temperature", "max_tokens"],
+                           "A generic server never gets OpenAI-only reasoning parameters")
+            XCTAssertEqual(UserDefaults.standard.string(forKey: "openAICompatibleModelID"), model, "Reading never rewrites a saved model")
+        }
     }
 
     func testFilterAssistantDraftsThroughTheSelectedProvider() async throws {

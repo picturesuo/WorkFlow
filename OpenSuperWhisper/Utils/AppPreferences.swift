@@ -192,7 +192,10 @@ final class AppPreferences {
     @UserDefault(key: "openAICompatibleBaseURL", defaultValue: "https://api.openai.com/v1")
     var openAICompatibleBaseURL: String
 
-    @UserDefault(key: "openAICompatibleModelID", defaultValue: "gpt-4.1-nano")
+    // No implicit model: the old default, gpt-4.1-nano, was shut down by
+    // OpenAI. A model the user saved is kept as is; a new configuration
+    // names its own model, and direct OpenAI has a verified default.
+    @UserDefault(key: "openAICompatibleModelID", defaultValue: "")
     var openAICompatibleModelID: String
 
     @UserDefault(key: "openAICompatibleTimeoutSeconds", defaultValue: 10.0)
