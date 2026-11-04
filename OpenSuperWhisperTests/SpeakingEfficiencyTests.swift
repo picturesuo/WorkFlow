@@ -958,7 +958,12 @@ final class SpeakingEfficiencyStoreTests: XCTestCase {
         await viewModel.finishDictation(audioAt: try liveSpeech(), generation: gate.begin(), recordingStartedAt: Date(), stoppedAt: .now)
 
         let row = try await newestRow(store)
-        let source = try await settledSource(store, row.id, timeout: 60)
+        // The app measures in a low-priority (utility) background task, here
+        // running the unoptimized Debug build of whisper.cpp. It settles in
+        // about 1-3 s on an idle Mac but once passed 60 s while two other
+        // heavy builds shared the CPU, so the wait allows 180 s. A finite
+        // bound, not a speed claim; the assertions below are unchanged.
+        let source = try await settledSource(store, row.id, timeout: 180)
         XCTAssertEqual(source.speechActivity, .measured)
         XCTAssertEqual(try XCTUnwrap(source.activeSpeechSeconds), 7.44, accuracy: 0.3)
         XCTAssertEqual(source.speechDetector, "silero-v5.1.2/whisper.cpp-default")
