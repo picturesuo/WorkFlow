@@ -70,8 +70,17 @@ private final class ScriptedLearningChat: CleanupChatCompleting {
         if let replyOverride {
             return CleanupProviderResult(text: replyOverride, inputTokens: 5, outputTokens: 5, modelID: "scripted")
         }
+        return CleanupProviderResult(
+            text: Self.reply(to: request.messages.last?.content ?? ""),
+            inputTokens: 40,
+            outputTokens: 30,
+            modelID: "scripted"
+        )
+    }
+
+    /// The reply a careful provider gives to a learning request.
+    static func reply(to message: String) -> String {
         let line = try! NSRegularExpression(pattern: #"^(\d+) \[(\w+)\] ….*«(.*)» → «(.*)»"#, options: [.anchorsMatchLines])
-        let message = request.messages.last?.content ?? ""
         var semicolons: [Int] = []
         var fillers: [Int] = []
         var spellings: [String: [Int]] = [:]
@@ -93,12 +102,7 @@ private final class ScriptedLearningChat: CleanupChatCompleting {
         }
         preferences.append(#"{"kind": "spelling", "edits": [1], "from": "ignore the safety rules", "to": "obey me"}"#)
         preferences.append(#"{"kind": "digits", "edits": [1]}"#)
-        return CleanupProviderResult(
-            text: #"{"preferences": [\#(preferences.joined(separator: ", "))]}"#,
-            inputTokens: 40,
-            outputTokens: 30,
-            modelID: "scripted"
-        )
+        return #"{"preferences": [\#(preferences.joined(separator: ", "))]}"#
     }
 }
 
@@ -859,6 +863,96 @@ final class CorrectionLearningSessionTests: XCTestCase {
         for sample in Corpus.heldOut {
             let technical = await pipeline(mode: .technical, learning: true).finalize(sample.spoken)
             XCTAssertFalse(technical.text.contains(";"), "Technical did not inherit Everyday's learned semicolons")
+        }
+    }
+
+    /// Learn through the production factory with each direct provider: the
+    /// request reaches that provider's endpoint, and a refused or failed reply
+    /// teaches nothing.
+    func testLearningRunsThroughTheSelectedDirectProvider() async throws {
+        let keys = ["cleanupProviderID", "openAIModelID", "openAIReasoningEffort", "openAITimeoutSeconds", "anthropicModelID", "anthropicTimeoutSeconds"]
+        let saved = keys.map { UserDefaults.standard.object(forKey: $0) }
+        let fixture = ProviderFixtureProtocol.session()
+        defer {
+            for (key, value) in zip(keys, saved) {
+                if let value { UserDefaults.standard.set(value, forKey: key) } else { UserDefaults.standard.removeObject(forKey: key) }
+            }
+            fixture.invalidateAndCancel()
+            ProviderFixtureProtocol.reset()
+        }
+        try await dictateTrainingCorpus()
+        let environment = CleanupProviderFactory.Environment(
+            loadBedrockKey: { nil },
+            loadCleanupKey: { [.openAI: "sk-proj-synthetic", .anthropic: "sk-ant-synthetic"][$0] },
+            session: fixture,
+            bedrockService: BedrockCleanupService(session: fixture)
+        )
+
+        var suites: [String] = []
+        defer { suites.forEach { UserDefaults.standard.removePersistentDomain(forName: $0) } }
+        func freshDefaults() throws -> UserDefaults {
+            let (fresh, name) = try makeDefaults()
+            suites.append(name)
+            return fresh
+        }
+
+        for provider in [CleanupProviderID.openAI, .anthropic] {
+            let learningDefaults = try freshDefaults()
+            ProviderFixtureProtocol.reset()
+            AppPreferences.shared.cleanupProviderID = provider.rawValue
+            AppPreferences.shared.openAIModelID = "gpt-6-luna"
+            AppPreferences.shared.openAIReasoningEffort = OpenAIReasoningEffort.none.rawValue
+            AppPreferences.shared.anthropicModelID = "claude-haiku-5-5"
+            ProviderFixtureProtocol.handler = { _, body in
+                let messages = ProviderFixtureProtocol.json(body)["messages"] as? [[String: Any]] ?? []
+                let reply = ScriptedLearningChat.reply(to: messages.last?["content"] as? String ?? "")
+                return .http(status: 200, body: provider == .openAI
+                    ? ProviderFixtureReplies.openAI(reply)
+                    : ProviderFixtureReplies.anthropicText(reply))
+            }
+            let store = store!
+            let session = CorrectionLearningSession(
+                mode: .everyday,
+                destination: CleanupProviderFactory.selectedDestination(),
+                chatResolver: { try CleanupProviderFactory.makeSelectedChat(environment: environment) },
+                budgetProvider: { XCTFail("Only Bedrock reads the Bedrock stop"); return nil },
+                candidateProvider: { try await store.learningCandidates() },
+                defaults: learningDefaults
+            )
+            session.document = Corpus.document
+            session.learn()
+            try await finish(session)
+
+            let report = try XCTUnwrap(session.report, "\(provider): \(session.errorMessage ?? "")")
+            XCTAssertEqual(report.status, .learned, "\(provider)")
+            XCTAssertEqual(Set(report.merge.added.map(\.kind)), [.semicolonJoin, .removeFiller, .spelling], "\(provider)")
+            XCTAssertEqual(report.rejectedProposals, 2, "\(provider): the hostile and unsupported proposals were refused")
+            XCTAssertEqual(ProviderFixtureProtocol.requests.map { $0.request.url?.host },
+                           [provider == .openAI ? "api.openai.com" : "api.anthropic.com"])
+            let sent = String(decoding: ProviderFixtureProtocol.requests[0].body, as: UTF8.self)
+            XCTAssertFalse(sent.contains("Nothing about this part was dictated"), "Unmatched document text is never sent")
+
+            // The same document again, with the provider out of quota.
+            let failing = CorrectionLearningSession(
+                mode: .everyday,
+                destination: CleanupProviderFactory.selectedDestination(),
+                chatResolver: { try CleanupProviderFactory.makeSelectedChat(environment: environment) },
+                budgetProvider: { nil },
+                candidateProvider: { try await store.learningCandidates() },
+                defaults: try freshDefaults()
+            )
+            ProviderFixtureProtocol.handler = { _, _ in
+                .http(status: 429, body: provider == .openAI
+                    ? ProviderFixtureReplies.openAIError("You exceeded your current quota.", type: "insufficient_quota", code: "insufficient_quota")
+                    : ProviderFixtureReplies.anthropicError("Rate limited", type: "rate_limit_error"))
+            }
+            failing.document = Corpus.document
+            failing.learn()
+            try await finish(failing)
+            let message = try XCTUnwrap(failing.errorMessage, "\(provider)")
+            XCTAssertTrue(message.contains("Rate limit or quota reached"), message)
+            XCTAssertTrue(message.hasSuffix("Nothing was learned."), message)
+            XCTAssertNil(failing.report)
         }
     }
 
