@@ -637,14 +637,7 @@ struct ProviderCostSettingsView: View {
                 testAccessibility: isTesting ? "Testing OpenAI connection" : "Save API key and test OpenAI",
                 test: { Task { await testProvider() } },
                 canRemoveKey: viewModel.hasStoredKey(for: .openAI)
-            ) {
-                Button("Recommended Defaults") {
-                    openAIModelID = OpenAIChatCleanupService.recommendedOpenAIModelID
-                    openAIReasoningEffort = .none
-                    openAITimeout = 10
-                }
-                .help("\(OpenAIChatCleanupService.recommendedOpenAIModelID) with no reasoning and a 10-second timeout")
-            }
+            ) { EmptyView() }
         }
     }
 
@@ -661,7 +654,7 @@ struct ProviderCostSettingsView: View {
             SettingsDivider()
             textRow(
                 "Model",
-                detail: "Any Messages API model ID. Extended thinking is turned off for cleanup.",
+                detail: "Any Messages API model ID. Claude Haiku 5.5 turns extended thinking off; other models keep their default and it counts toward the token limit.",
                 prompt: AnthropicCleanupService.recommendedModelID,
                 text: $anthropicModelID,
                 width: 240,
@@ -676,13 +669,7 @@ struct ProviderCostSettingsView: View {
                 testAccessibility: isTesting ? "Testing Anthropic connection" : "Save API key and test Anthropic",
                 test: { Task { await testProvider() } },
                 canRemoveKey: viewModel.hasStoredKey(for: .anthropic)
-            ) {
-                Button("Recommended Defaults") {
-                    anthropicModelID = AnthropicCleanupService.recommendedModelID
-                    anthropicTimeout = 10
-                }
-                .help("\(AnthropicCleanupService.recommendedModelID) with a 10-second timeout")
-            }
+            ) { EmptyView() }
         }
     }
 

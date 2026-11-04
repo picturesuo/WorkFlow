@@ -345,6 +345,28 @@ final class AnthropicTransportTests: XCTestCase {
         XCTAssertEqual(messages[0]["content"] as? String, CleanupPromptBuilder.userMessage(transcript: transcript))
     }
 
+    func testThinkingDisabledOnlyForHaikuAndOmittedForOtherModels() async throws {
+        // Anthropic's thinking troubleshooting documents that Opus 5.5,
+        // Fable 5.1, and Sonnet 5.5 reject `thinking.type=disabled` with HTTP
+        // 400; only Haiku 5.5 can turn it off. Sending it to the others would
+        // fail the request deterministically, so it must be omitted.
+        for model in ["claude-opus-5-5", "claude-sonnet-5-5", "claude-fable-5-1", "some-future-model"] {
+            ProviderFixtureProtocol.reset()
+            ProviderFixtureProtocol.handler = { _, _ in .http(status: 200, body: ProviderFixtureReplies.anthropicText("Send the report.")) }
+            _ = try await service(model: model).clean(transcript: "Um, send the report.", systemPrompt: CleanupPromptBuilder.baseSystemPrompt)
+            let sent = try XCTUnwrap(ProviderFixtureProtocol.requests.first)
+            let json = ProviderFixtureProtocol.json(sent.body)
+            XCTAssertNil(json["thinking"], "\(model) rejects thinking.type=disabled, so the key must be absent")
+            XCTAssertFalse(json.keys.contains("thinking"), "\(model) must not carry a thinking field")
+        }
+
+        ProviderFixtureProtocol.reset()
+        ProviderFixtureProtocol.handler = { _, _ in .http(status: 200, body: ProviderFixtureReplies.anthropicText("Send the report.")) }
+        _ = try await service(model: "claude-haiku-5-5").clean(transcript: "Um, send the report.", systemPrompt: CleanupPromptBuilder.baseSystemPrompt)
+        let haiku = ProviderFixtureProtocol.json(try XCTUnwrap(ProviderFixtureProtocol.requests.first).body)
+        XCTAssertEqual((haiku["thinking"] as? [String: Any])?["type"] as? String, "disabled", "Haiku 5.5 documents thinking can be turned off")
+    }
+
     func testMultiTurnChatKeepsRolesAndJoinsTextBlocksOnly() async throws {
         ProviderFixtureProtocol.handler = { _, _ in
             .http(status: 200, body: ProviderFixtureReplies.anthropic([

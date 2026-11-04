@@ -33,6 +33,14 @@ final class AnthropicCleanupService: TranscriptCleanupProviding, CleanupChatComp
     /// Stop reasons that mean the reply is the whole answer.
     static let completeStopReasons: Set<String> = ["end_turn", "stop_sequence"]
 
+    /// Claude Haiku 5.5 documents that extended thinking can be turned off; the
+    /// other Claude 5 models reject `thinking.type=disabled` with HTTP 400, so
+    /// the parameter is omitted for any other model and the provider's default
+    /// thinking applies.
+    static func disablesThinking(for model: String) -> Bool {
+        model == recommendedModelID
+    }
+
     func clean(
         transcript: String,
         systemPrompt: String,
@@ -103,9 +111,7 @@ final class AnthropicCleanupService: TranscriptCleanupProviding, CleanupChatComp
                 maxTokens: chat.maxOutputTokens,
                 system: chat.systemPrompt,
                 messages: chat.messages.map { .init(role: $0.role.rawValue, content: $0.content) },
-                // Adaptive thinking is on by default for Claude 5 models and
-                // counts toward `max_tokens`; a rewrite doesn't need it.
-                thinking: .init(type: "disabled")
+                thinking: Self.disablesThinking(for: model) ? .init(type: "disabled") : nil
             )
         )
 
@@ -167,7 +173,7 @@ private struct MessagesRequest: Encodable {
     let maxTokens: Int
     let system: String
     let messages: [Message]
-    let thinking: Thinking
+    let thinking: Thinking?
 
     enum CodingKeys: String, CodingKey {
         case model, system, messages, thinking
