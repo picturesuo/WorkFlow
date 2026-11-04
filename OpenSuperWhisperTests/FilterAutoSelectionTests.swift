@@ -35,19 +35,13 @@ private enum Fixtures {
     static let all = [calculus, spanish, codeReview, chemistry, plain]
 
     static func config(
-        fallback: CapturedFilter = .builtIn(.everyday, learned: []),
-        apps: [FilterAutoConfig.AppFilter] = []
+        fallback: CapturedFilter = .builtIn(.everyday, learned: [])
     ) -> FilterAutoConfig {
         FilterAutoConfig(
             candidates: all.filter { $0.triggers.count >= FilterTriggers.minimumDistinctHits },
-            appFilters: apps,
             fallback: fallback
         )
     }
-
-    static let slack = FilterAutoConfig.AppFilter(
-        bundleID: "com.example.chat", appName: "Chat", filter: .custom(spanish)
-    )
 
     /// Each contains at most one phrase of any single filter: an ambiguous
     /// word, a repeat of one phrase, one phrase each from two filters, or a
@@ -97,8 +91,8 @@ private enum Fixtures {
 
 /// The pure selector and trigger rules.
 final class FilterAutoSelectorTests: XCTestCase {
-    private func resolve(_ text: String, target: String? = nil, config: FilterAutoConfig = Fixtures.config()) -> FilterChoice {
-        FilterAutoSelector.resolve(config, text: text, targetBundleID: target)
+    private func resolve(_ text: String, config: FilterAutoConfig = Fixtures.config()) -> FilterChoice {
+        FilterAutoSelector.resolve(config, text: text)
     }
 
     func testTwoDistinctPhrasesOfOneFilterPickIt() {
@@ -131,21 +125,6 @@ final class FilterAutoSelectorTests: XCTestCase {
         XCTAssertEqual(lopsided.reason, .fallback, "A tie is any second qualifying filter, never the larger count")
     }
 
-    func testAppRuleAppliesOnlyWhenPhrasesDoNotDecide() {
-        let config = Fixtures.config(apps: [Fixtures.slack])
-        XCTAssertEqual(resolve("see you at lunch", target: "com.example.chat", config: config).reason,
-                       .app(bundleID: "com.example.chat", appName: "Chat"))
-        XCTAssertEqual(resolve("see you at lunch", target: "COM.EXAMPLE.CHAT", config: config).filter.customID, Fixtures.spanish.id)
-        XCTAssertEqual(resolve("the derivative and the integral", target: "com.example.chat", config: config).reason,
-                       .triggers(["derivative", "integral"]), "Phrases outrank the app rule")
-        XCTAssertEqual(resolve("one derivative only", target: "com.example.chat", config: config).reason,
-                       .app(bundleID: "com.example.chat", appName: "Chat"), "One hit falls through to the app rule")
-        XCTAssertEqual(resolve("titration molarity derivative integral", target: "com.example.chat", config: config).reason,
-                       .app(bundleID: "com.example.chat", appName: "Chat"), "A tie falls through to the app rule")
-        XCTAssertEqual(resolve("see you at lunch", target: "com.example.other", config: config).reason, .fallback)
-        XCTAssertEqual(resolve("see you at lunch", target: nil, config: config).reason, .fallback, "Unknown target never guesses")
-    }
-
     /// Non-circular: each control is first shown to hold at most one phrase
     /// of any filter, and most hold exactly one, before the selector runs.
     func testThirtyPlusOneHitControlsNeverSwitch() {
@@ -157,7 +136,7 @@ final class FilterAutoSelectorTests: XCTestCase {
             let counts = Fixtures.all.map { FilterTriggers.hits(of: $0.triggers, in: words).count }
             XCTAssertLessThanOrEqual(counts.max() ?? 0, 1, "“\(text)” is a one-hit control")
             if counts.contains(1) { withAHit += 1 }
-            let choice = resolve(text, config: Fixtures.config(apps: [Fixtures.slack]))
+            let choice = resolve(text)
             XCTAssertEqual(choice.reason, .fallback, "“\(text)” must keep the fallback")
             XCTAssertEqual(choice.filter, CleanupFilterSnapshot.builtIn(.everyday))
         }
@@ -168,23 +147,23 @@ final class FilterAutoSelectorTests: XCTestCase {
         let overlapping = CustomCleanupFilter(
             name: "Testing", baseMode: .technical, instructions: "Be terse.", triggers: ["unit test", "test", "coverage"]
         )
-        let config = FilterAutoConfig(candidates: [overlapping], appFilters: [], fallback: .builtIn(.everyday, learned: []))
-        XCTAssertEqual(FilterAutoSelector.resolve(config, text: "the unit test is green", targetBundleID: nil).reason, .fallback)
+        let config = FilterAutoConfig(candidates: [overlapping], fallback: .builtIn(.everyday, learned: []))
+        XCTAssertEqual(FilterAutoSelector.resolve(config, text: "the unit test is green").reason, .fallback)
         XCTAssertEqual(
-            FilterAutoSelector.resolve(config, text: "the unit test is green and so is the test", targetBundleID: nil).reason,
+            FilterAutoSelector.resolve(config, text: "the unit test is green and so is the test").reason,
             .triggers(["unit test", "test"])
         )
         XCTAssertEqual(
-            FilterAutoSelector.resolve(config, text: "unit test coverage", targetBundleID: nil).reason,
+            FilterAutoSelector.resolve(config, text: "unit test coverage").reason,
             .triggers(["unit test", "coverage"])
         )
     }
 
     func testResolutionIsPureAndRepeatable() {
-        let config = Fixtures.config(apps: [Fixtures.slack])
+        let config = Fixtures.config()
         let text = "the preterite and the subjunctive conjugation"
-        let first = resolve(text, target: "com.example.chat", config: config)
-        for _ in 0..<50 { XCTAssertEqual(resolve(text, target: "com.example.chat", config: config), first) }
+        let first = resolve(text, config: config)
+        for _ in 0..<50 { XCTAssertEqual(resolve(text, config: config), first) }
         XCTAssertEqual(first.reason, .triggers(["subjunctive", "conjugation", "preterite"]))
     }
 
@@ -216,14 +195,13 @@ final class FilterAutoSelectorTests: XCTestCase {
     }
 
     func testReasonAndConfigRoundTripThroughJSON() throws {
-        let config = Fixtures.config(fallback: .custom(Fixtures.plain), apps: [Fixtures.slack])
+        let config = Fixtures.config(fallback: .custom(Fixtures.plain))
         XCTAssertEqual(try JSONDecoder().decode(FilterAutoConfig.self, from: JSONEncoder().encode(config)), config)
-        for reason in [FilterChoiceReason.manual, .fallback, .triggers(["a b", "c"]), .app(bundleID: "x.y", appName: "Y")] {
+        for reason in [FilterChoiceReason.manual, .fallback, .triggers(["a b", "c"])] {
             XCTAssertEqual(try JSONDecoder().decode(FilterChoiceReason.self, from: JSONEncoder().encode(reason)), reason)
         }
         XCTAssertNil(FilterChoiceReason.manual.label, "A filter picked by hand adds nothing to History")
         XCTAssertEqual(FilterChoiceReason.triggers(["derivative", "integral"]).label, "Auto: mentions derivative, integral")
-        XCTAssertEqual(FilterChoiceReason.app(bundleID: "x", appName: "Chat").label, "Auto: Chat")
         XCTAssertEqual(FilterChoiceReason.fallback.label, "Auto: no clear match")
     }
 }
@@ -331,9 +309,9 @@ final class FilterCollectionStoreTests: XCTestCase {
         try CustomCleanupFilterStore.upsert(Fixtures.plain, in: defaults)
         CustomCleanupFilterStore.select(.custom(Fixtures.plain.id), in: defaults)
         XCTAssertFalse(FilterAutoSettings.isEnabled(in: defaults))
-        XCTAssertNil(FilterAutoSettings.currentConfig(in: defaults, targetBundleID: nil, appRules: []))
+        XCTAssertNil(FilterAutoSettings.currentConfig(in: defaults))
         XCTAssertEqual(
-            FilterAutoSettings.currentPlan(in: defaults, targetBundleID: nil, appRules: []),
+            FilterAutoSettings.currentPlan(in: defaults),
             .manual(CustomCleanupFilterStore.currentSnapshot(in: defaults)),
             "Off, the plan is exactly the hand-picked snapshot"
         )
@@ -359,25 +337,20 @@ final class FilterCollectionStoreTests: XCTestCase {
         XCTAssertEqual(FilterAutoSettings.fallback(in: defaults), .custom(Fixtures.plain.id), "A chosen fallback is not overwritten")
     }
 
-    func testDeletedFallbackOrAppFilterNeverGuessesAnotherFilter() throws {
+    func testDeletedFallbackNeverGuessesAnotherFilter() throws {
         try CustomCleanupFilterStore.upsert(Fixtures.calculus, in: defaults)
         try CustomCleanupFilterStore.upsert(Fixtures.plain, in: defaults)
         try CustomCleanupFilterStore.upsert(Fixtures.spanish, in: defaults)
         FilterAutoSettings.setEnabled(true, in: defaults)
         FilterAutoSettings.setFallback(.custom(Fixtures.plain.id), in: defaults)
-        var rule = TargetAppRule(bundleID: "com.example.chat", appName: "Chat")
-        rule.filterSelection = .custom(Fixtures.spanish.id)
-        var config = try XCTUnwrap(FilterAutoSettings.currentConfig(in: defaults, targetBundleID: "com.example.chat", appRules: [rule]))
+        var config = try XCTUnwrap(FilterAutoSettings.currentConfig(in: defaults))
         XCTAssertEqual(config.fallback, .custom(Fixtures.plain))
-        XCTAssertEqual(config.appFilters.map(\.filter), [.custom(Fixtures.spanish)])
         XCTAssertEqual(config.candidates.map(\.id), [Fixtures.calculus.id, Fixtures.spanish.id], "Only filters with two or more phrases")
 
         CustomCleanupFilterStore.delete(id: Fixtures.plain.id, in: defaults)
-        CustomCleanupFilterStore.delete(id: Fixtures.spanish.id, in: defaults)
-        config = try XCTUnwrap(FilterAutoSettings.currentConfig(in: defaults, targetBundleID: "com.example.chat", appRules: [rule]))
+        config = try XCTUnwrap(FilterAutoSettings.currentConfig(in: defaults))
         XCTAssertEqual(config.fallback, .builtIn(.everyday, learned: []), "A deleted fallback is Everyday")
-        XCTAssertEqual(config.appFilters, [], "A deleted app filter is no app filter")
-        XCTAssertEqual(FilterAutoSelector.resolve(config, text: "hello there", targetBundleID: "com.example.chat").reason, .fallback)
+        XCTAssertEqual(FilterAutoSelector.resolve(config, text: "hello there").reason, .fallback)
         XCTAssertEqual(defaults.string(forKey: FilterAutoSettings.fallbackKey), CleanupFilterSelection.custom(Fixtures.plain.id).tag,
                        "The stored choice is kept, not destroyed")
     }
@@ -385,27 +358,17 @@ final class FilterCollectionStoreTests: XCTestCase {
     func testCapturedConfigIgnoresLaterEdits() throws {
         try CustomCleanupFilterStore.upsert(Fixtures.calculus, in: defaults)
         FilterAutoSettings.setEnabled(true, in: defaults)
-        let captured = try XCTUnwrap(FilterAutoSettings.currentConfig(in: defaults, targetBundleID: nil, appRules: []))
+        let captured = try XCTUnwrap(FilterAutoSettings.currentConfig(in: defaults))
         var edited = Fixtures.calculus
         edited.triggers = ["vector", "matrix"]
         edited.instructions = "Changed later."
         try CustomCleanupFilterStore.upsert(edited, in: defaults)
         FilterAutoSettings.setFallback(.builtIn(.writing), in: defaults)
-        let choice = FilterAutoSelector.resolve(captured, text: "the derivative and the integral", targetBundleID: nil)
+        let choice = FilterAutoSelector.resolve(captured, text: "the derivative and the integral")
         XCTAssertEqual(choice.filter.customInstructions, Fixtures.calculus.instructions)
-        XCTAssertEqual(FilterAutoSelector.resolve(captured, text: "vector matrix", targetBundleID: nil).filter.mode, .everyday)
+        XCTAssertEqual(FilterAutoSelector.resolve(captured, text: "vector matrix").filter.mode, .everyday)
     }
 
-    func testOlderAppRulesDecodeWithNoFilter() throws {
-        let data = Data("""
-        [{"id":"\(UUID().uuidString)","bundleID":"com.example.chat","appName":"Chat","cleanupBehavior":"inherit","pasteBehavior":"appDefault","cleanupInstruction":""}]
-        """.utf8)
-        let rules = try JSONDecoder().decode([TargetAppRule].self, from: data)
-        XCTAssertNil(rules.first?.filterSelection)
-        var rule = try XCTUnwrap(rules.first)
-        rule.filterSelection = .builtIn(.technical)
-        XCTAssertEqual(try JSONDecoder().decode(TargetAppRule.self, from: JSONEncoder().encode(rule)).filterSelection, .builtIn(.technical))
-    }
 }
 
 /// Counts every provider request and keeps every prompt.
@@ -447,7 +410,7 @@ final class FilterAutoPipelineTests: XCTestCase {
             appRuleProvider: { TargetAppRuleStore.rule(for: $0, in: rules) },
             bedrockBudgetProvider: { nil },
             filterProvider: { CustomCleanupFilterStore.currentSnapshot(in: defaults) },
-            autoConfigProvider: { FilterAutoSettings.currentConfig(in: defaults, targetBundleID: $0, appRules: rules) },
+            autoConfigProvider: { FilterAutoSettings.currentConfig(in: defaults) },
             failureRecorder: { _ in }
         )
     }
@@ -504,14 +467,10 @@ final class FilterAutoPipelineTests: XCTestCase {
         }
     }
 
-    func testManualPickWinsOverPhrasesAndAppRule() async throws {
-        var rule = TargetAppRule(bundleID: "com.example.chat", appName: "Chat")
-        rule.filterSelection = .custom(Fixtures.spanish.id)
+    func testManualPickWinsOverPhrases() async throws {
         CustomCleanupFilterStore.select(.custom(Fixtures.plain.id), in: defaults)
         let provider = CountingProvider()
-        let outcome = await pipeline(provider, rules: [rule]).finalize(
-            "the derivative and the integral", targetBundleID: "com.example.chat"
-        )
+        let outcome = await pipeline(provider).finalize("the derivative and the integral")
         XCTAssertEqual(outcome.selectedFilter?.customID, Fixtures.plain.id)
         XCTAssertEqual(outcome.filterReason, .manual)
         XCTAssertTrue(try XCTUnwrap(provider.prompts.last).contains(Fixtures.plain.instructions))
@@ -519,25 +478,18 @@ final class FilterAutoPipelineTests: XCTestCase {
 
     func testAutoChoosesLocallyWithOneRequestPerChunk() async throws {
         FilterAutoSettings.setEnabled(true, in: defaults)
-        var rule = TargetAppRule(bundleID: "com.example.chat", appName: "Chat")
-        rule.filterSelection = .custom(Fixtures.spanish.id)
         let words = "find the derivative and then the integral of x squared"
-        for (text, target, expected, reason) in [
-            (words, "com.example.chat", Fixtures.calculus.id, FilterChoiceReason.triggers(["derivative", "integral"])),
-            ("see you at lunch", "com.example.chat", Fixtures.spanish.id, .app(bundleID: "com.example.chat", appName: "Chat")),
-        ] {
-            let provider = CountingProvider()
-            let outcome = await pipeline(provider, rules: [rule]).finalize(text, targetBundleID: target)
-            XCTAssertEqual(outcome.selectedFilter?.customID, expected)
-            XCTAssertEqual(outcome.filterReason, reason)
-            XCTAssertEqual(provider.prompts.count, TranscriptChunker.chunks(text).count, "No request beyond cleanup's own")
-            XCTAssertEqual(provider.filters, [try XCTUnwrap(outcome.selectedFilter)])
-        }
+        let first = CountingProvider()
+        let firstOutcome = await pipeline(first).finalize(words)
+        XCTAssertEqual(firstOutcome.selectedFilter?.customID, Fixtures.calculus.id)
+        XCTAssertEqual(firstOutcome.filterReason, .triggers(["derivative", "integral"]))
+        XCTAssertEqual(first.prompts.count, TranscriptChunker.chunks(words).count, "No request beyond cleanup's own")
+        XCTAssertEqual(first.filters, [try XCTUnwrap(firstOutcome.selectedFilter)])
 
         let long = Array(repeating: "the derivative and then the integral of the curve keep going.", count: 120).joined(separator: " ")
         XCTAssertGreaterThan(TranscriptChunker.chunks(long).count, 1, "Fixture spans several chunks")
         let provider = CountingProvider()
-        let outcome = await pipeline(provider, rules: [rule]).finalize(long, targetBundleID: nil)
+        let outcome = await pipeline(provider).finalize(long)
         XCTAssertEqual(provider.prompts.count, TranscriptChunker.chunks(long).count)
         XCTAssertTrue(provider.filters.allSatisfy { $0 == CleanupFilterSnapshot(filter: Fixtures.calculus) }, "One choice for every chunk")
         XCTAssertEqual(outcome.filterReason, .triggers(["derivative", "integral"]))
@@ -547,7 +499,7 @@ final class FilterAutoPipelineTests: XCTestCase {
         let disabled = await TranscriptCleanupPipeline(
             isEnabled: { false }, providerResolver: { off }, vocabularyProvider: { [] }, appRuleProvider: { _ in nil },
             bedrockBudgetProvider: { nil }, filterProvider: { .builtIn(.everyday) },
-            autoConfigProvider: { [defaults] in FilterAutoSettings.currentConfig(in: defaults!, targetBundleID: $0, appRules: []) },
+            autoConfigProvider: { [defaults] in FilterAutoSettings.currentConfig(in: defaults!) },
             failureRecorder: { _ in }
         ).finalize(words)
         XCTAssertEqual(off.prompts.count, 0)
@@ -564,7 +516,7 @@ final class FilterAutoPipelineTests: XCTestCase {
             vocabularyProvider: { [VocabularyEntry(spoken: "tie tray shun", replacement: "titration")] },
             appRuleProvider: { _ in nil }, bedrockBudgetProvider: { nil },
             filterProvider: { CustomCleanupFilterStore.currentSnapshot(in: defaults) },
-            autoConfigProvider: { FilterAutoSettings.currentConfig(in: defaults, targetBundleID: $0, appRules: []) },
+            autoConfigProvider: { FilterAutoSettings.currentConfig(in: defaults) },
             failureRecorder: { _ in }
         ).finalize("the tie tray shun used one reagent")
         XCTAssertEqual(outcome.filterReason, .triggers(["titration", "reagent"]))

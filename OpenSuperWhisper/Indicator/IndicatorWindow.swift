@@ -279,7 +279,7 @@ class IndicatorViewModel: ObservableObject {
                 try? FileManager.default.removeItem(at: tempURL)
                 print("No speech detected, dictation discarded")
             } else {
-                let plan = cleanupPipeline.selectedPlan(targetBundleID: self.pasteTarget?.bundleID)
+                let plan = cleanupPipeline.selectedPlan()
                 self.isFinalizing = true
                 let cleanup = await self.cleanupPipeline.finalize(
                     rawText,
@@ -381,7 +381,7 @@ class IndicatorViewModel: ObservableObject {
         } catch {
             self.isFinalizing = false
             print("Audio transcription failed; the audio is kept in History.")
-            let plan = cleanupPipeline.selectedPlan(targetBundleID: pasteTarget?.bundleID)
+            let plan = cleanupPipeline.selectedPlan()
             _ = await recordingStore.addFailedDictation(
                 audioAt: tempURL,
                 error: error,

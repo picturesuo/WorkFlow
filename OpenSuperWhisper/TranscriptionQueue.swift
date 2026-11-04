@@ -148,7 +148,7 @@ class TranscriptionQueue: ObservableObject {
             // Captured at enqueue so later filter edits cannot change queued
             // work. Under Auto that is its choices; it picks from the words
             // once they are transcribed.
-            let plan = FilterAutoSettings.currentPlan(targetBundleID: targetBundleID)
+            let plan = FilterAutoSettings.currentPlan()
             let selected = plan.provisionalFilter
             let filter = cleanupRequested ? selected : nil
             let autoConfig = cleanupRequested ? plan.autoConfig : nil

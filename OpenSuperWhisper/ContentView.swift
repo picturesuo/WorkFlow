@@ -321,7 +321,7 @@ class ContentViewModel: ObservableObject {
             return
         } catch {
             print("Audio-file transcription failed; the audio is kept in History.")
-            let plan = cleanupPipeline.selectedPlan(targetBundleID: nil)
+            let plan = cleanupPipeline.selectedPlan()
             let saved = await recordingStore.addFailedDictation(
                 audioAt: tempURL,
                 error: error,

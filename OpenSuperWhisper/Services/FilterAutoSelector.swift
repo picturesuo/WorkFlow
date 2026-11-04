@@ -10,9 +10,8 @@ import Foundation
 // 2. Under Auto, a saved filter wins when at least two of its different
 //    trigger phrases occur as whole words in the dictation and no other
 //    filter also reaches two.
-// 3. Otherwise, a filter named by the target app's rule.
-// 4. Otherwise, Auto's fallback filter. One hit, a tie, no hit, and an
-//    unknown app never guess.
+// 3. Otherwise, Auto's fallback filter. One hit, a tie, or no hit never
+//    guess.
 
 /// Trigger phrases: what a saved filter listens for under Auto.
 enum FilterTriggers {
@@ -152,8 +151,6 @@ enum FilterChoiceReason: Equatable, Sendable {
     case manual
     /// Auto: these different trigger phrases of the filter came up.
     case triggers([String])
-    /// Auto: the target app's rule names this filter.
-    case app(bundleID: String, appName: String)
     /// Auto: nothing was clear enough, so the fallback filter was used.
     case fallback
 
@@ -164,7 +161,6 @@ enum FilterChoiceReason: Equatable, Sendable {
         switch self {
         case .manual: nil
         case .triggers(let phrases): "Auto: mentions \(phrases.joined(separator: ", "))"
-        case .app(_, let appName): "Auto: \(appName)"
         case .fallback: "Auto: no clear match"
         }
     }
@@ -176,27 +172,20 @@ enum FilterChoiceReason: Equatable, Sendable {
             "You picked this filter."
         case .triggers(let phrases):
             "Auto picked this filter because the dictation mentioned \(phrases.map { "“\($0)”" }.joined(separator: " and "))."
-        case .app(_, let appName):
-            "Auto used the filter your \(appName) rule names; no saved filter had two of its phrases in the dictation."
         case .fallback:
-            "Auto used its “When unsure” filter because no saved filter had two of its phrases in the dictation and no app rule named one."
+            "Auto used its “When unsure” filter because no saved filter had two of its phrases in the dictation."
         }
     }
 }
 
 extension FilterChoiceReason: Codable {
-    private enum CodingKeys: String, CodingKey { case kind, phrases, bundleID, appName }
+    private enum CodingKeys: String, CodingKey { case kind, phrases }
 
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         switch try container.decode(String.self, forKey: .kind) {
         case "triggers":
             self = .triggers(try container.decode([String].self, forKey: .phrases))
-        case "app":
-            self = .app(
-                bundleID: try container.decode(String.self, forKey: .bundleID),
-                appName: try container.decode(String.self, forKey: .appName)
-            )
         case "unsure":
             self = .fallback
         default:
@@ -212,10 +201,6 @@ extension FilterChoiceReason: Codable {
         case .triggers(let phrases):
             try container.encode("triggers", forKey: .kind)
             try container.encode(phrases, forKey: .phrases)
-        case .app(let bundleID, let appName):
-            try container.encode("app", forKey: .kind)
-            try container.encode(bundleID, forKey: .bundleID)
-            try container.encode(appName, forKey: .appName)
         case .fallback:
             try container.encode("unsure", forKey: .kind)
         }
@@ -239,16 +224,8 @@ enum CapturedFilter: Codable, Equatable, Sendable {
 /// Everything Auto may choose from, captured once per dictation: when it
 /// stops, or when it is queued.
 struct FilterAutoConfig: Codable, Equatable, Sendable {
-    struct AppFilter: Codable, Equatable, Sendable {
-        let bundleID: String
-        let appName: String
-        let filter: CapturedFilter
-    }
-
     /// Saved filters with enough phrases to ever win.
     var candidates: [CustomCleanupFilter]
-    /// App rules that name a filter; captured only for the target app.
-    var appFilters: [AppFilter]
     var fallback: CapturedFilter
 }
 
@@ -274,12 +251,12 @@ enum CleanupFilterPlan: Equatable, Sendable {
         return nil
     }
 
-    func resolve(text: String, targetBundleID: String?) -> FilterChoice {
+    func resolve(text: String) -> FilterChoice {
         switch self {
         case .fixed(let filter, let reason):
             FilterChoice(filter: filter, reason: reason)
         case .auto(let config):
-            FilterAutoSelector.resolve(config, text: text, targetBundleID: targetBundleID)
+            FilterAutoSelector.resolve(config, text: text)
         }
     }
 }
@@ -292,7 +269,7 @@ struct FilterChoice: Equatable, Sendable {
 enum FilterAutoSelector {
     /// Pure and local: the same captured choices and words always give the
     /// same filter, and nothing here leaves this Mac.
-    static func resolve(_ config: FilterAutoConfig, text: String, targetBundleID: String?) -> FilterChoice {
+    static func resolve(_ config: FilterAutoConfig, text: String) -> FilterChoice {
         let words = FilterTriggers.words(text)
         let qualifying: [(CustomCleanupFilter, [String])] = config.candidates.compactMap { filter in
             let hits = FilterTriggers.hits(of: filter.triggers, in: words)
@@ -300,10 +277,6 @@ enum FilterAutoSelector {
         }
         if qualifying.count == 1, let (filter, hits) = qualifying.first {
             return FilterChoice(filter: CleanupFilterSnapshot(filter: filter), reason: .triggers(hits))
-        }
-        if let bundleID = targetBundleID?.lowercased(),
-           let app = config.appFilters.first(where: { $0.bundleID.lowercased() == bundleID }) {
-            return FilterChoice(filter: app.filter.snapshot, reason: .app(bundleID: app.bundleID, appName: app.appName))
         }
         return FilterChoice(filter: config.fallback.snapshot, reason: .fallback)
     }
@@ -383,40 +356,23 @@ enum FilterAutoSettings {
     /// What Auto may choose from for one dictation, or nil when a filter was
     /// picked by hand.
     static func currentConfig(
-        in defaults: UserDefaults = .standard,
-        targetBundleID: String?,
-        appRules: [TargetAppRule]
+        in defaults: UserDefaults = .standard
     ) -> FilterAutoConfig? {
         guard isEnabled(in: defaults) else { return nil }
         let filters = CustomCleanupFilterStore.load(from: defaults)
         let fallback = capture(fallback(in: defaults, filters: filters), filters: filters, defaults: defaults)
             ?? .builtIn(.everyday, learned: LearnedPreferenceStore.activePreferences(for: .everyday, in: defaults))
-        var appFilters: [FilterAutoConfig.AppFilter] = []
-        if let rule = TargetAppRuleStore.rule(for: targetBundleID, in: appRules),
-           let selection = rule.filterSelection,
-           let filter = capture(selection, filters: filters, defaults: defaults) {
-            appFilters.append(FilterAutoConfig.AppFilter(
-                bundleID: rule.bundleID,
-                appName: rule.appName.isEmpty ? rule.bundleID : rule.appName,
-                filter: filter
-            ))
-        }
         return FilterAutoConfig(
             candidates: filters.filter { $0.triggers.count >= FilterTriggers.minimumDistinctHits },
-            appFilters: appFilters,
             fallback: fallback
         )
     }
 
     /// The plan for a dictation starting or stopping now.
     static func currentPlan(
-        in defaults: UserDefaults = .standard,
-        targetBundleID: String?,
-        appRules: [TargetAppRule]? = nil
+        in defaults: UserDefaults = .standard
     ) -> CleanupFilterPlan {
-        if let config = currentConfig(
-            in: defaults, targetBundleID: targetBundleID, appRules: appRules ?? TargetAppRuleStore.load()
-        ) {
+        if let config = currentConfig(in: defaults) {
             return .auto(config)
         }
         return .manual(CustomCleanupFilterStore.currentSnapshot(in: defaults))

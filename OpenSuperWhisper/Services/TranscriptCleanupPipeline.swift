@@ -110,8 +110,8 @@ final class TranscriptCleanupPipeline {
     private let appRuleProvider: (String?) -> TargetAppRule?
     private let bedrockBudgetProvider: () async -> BedrockBudgetStatus?
     private let filterProvider: () -> CleanupFilterSnapshot
-    /// Auto's choices for a target app, or nil when a filter was picked by hand.
-    private let autoConfigProvider: (String?) -> FilterAutoConfig?
+    /// Auto's choices, or nil when a filter was picked by hand.
+    private let autoConfigProvider: () -> FilterAutoConfig?
     /// Records the last cleanup failure, or clears it with nil.
     private let failureRecorder: (String?) -> Void
 
@@ -128,8 +128,8 @@ final class TranscriptCleanupPipeline {
         filterProvider: @escaping () -> CleanupFilterSnapshot = {
             CustomCleanupFilterStore.currentSnapshot()
         },
-        autoConfigProvider: @escaping (String?) -> FilterAutoConfig? = { targetBundleID in
-            FilterAutoSettings.currentConfig(targetBundleID: targetBundleID, appRules: TargetAppRuleStore.load())
+        autoConfigProvider: @escaping () -> FilterAutoConfig? = {
+            FilterAutoSettings.currentConfig()
         },
         failureRecorder: @escaping (String?) -> Void = { message in
             AppPreferences.shared.bedrockLastErrorMessage = message
@@ -180,13 +180,13 @@ final class TranscriptCleanupPipeline {
     /// The filter a dictation stopped now would use, captured once per
     /// dictation. Under Auto it is the fallback until the words are known.
     func selectedFilter() -> CleanupFilterSnapshot {
-        selectedPlan(targetBundleID: nil).provisionalFilter
+        selectedPlan().provisionalFilter
     }
 
-    /// How a dictation stopped now for this app chooses its filter, captured
-    /// once per dictation so later edits cannot change it.
-    func selectedPlan(targetBundleID: String?) -> CleanupFilterPlan {
-        if let config = autoConfigProvider(targetBundleID) { return .auto(config) }
+    /// How a dictation stopped now chooses its filter, captured once per
+    /// dictation so later edits cannot change it.
+    func selectedPlan() -> CleanupFilterPlan {
+        if let config = autoConfigProvider() { return .auto(config) }
         return .manual(filterProvider())
     }
 
@@ -206,8 +206,8 @@ final class TranscriptCleanupPipeline {
         let localTranscript = VocabularyRewriter.apply(rawTranscript, entries: vocabulary)
         let rawTokenEstimate = LocalTokenEstimator.estimate(rawTranscript)
         // A filter given by the caller wins; Auto reads only these words, on this Mac.
-        let plan = filterOverride.map(CleanupFilterPlan.manual) ?? filterPlan ?? selectedPlan(targetBundleID: targetBundleID)
-        let choice = plan.resolve(text: localTranscript, targetBundleID: targetBundleID)
+        let plan = filterOverride.map(CleanupFilterPlan.manual) ?? filterPlan ?? selectedPlan()
+        let choice = plan.resolve(text: localTranscript)
         let filter = choice.filter
         let appRule = appRuleProvider(targetBundleID)
         let cleanupEnabled: Bool

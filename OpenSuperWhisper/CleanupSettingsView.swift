@@ -944,29 +944,9 @@ struct PersonalizationSettingsView: View {
     @State private var runningApps: [RunningApp] = []
     @State private var selectedBundleID = ""
     @State private var archiveStatus = ""
-    @AppStorage(CustomCleanupFilterStore.dataKey) private var filtersData = Data()
 
     init(learningSession: CorrectionLearningSession? = nil) {
         self.learningSession = learningSession
-    }
-
-    private var savedFilters: [CustomCleanupFilter] {
-        CustomCleanupFilterStore.filters(from: filtersData)
-    }
-
-    /// The rule's filter under Auto. A saved filter that was deleted reads
-    /// as Auto's fallback, which is also what a dictation then uses.
-    private func autoFilterBinding(_ rule: Binding<TargetAppRule>) -> Binding<String?> {
-        Binding(
-            get: {
-                switch rule.wrappedValue.filterSelection {
-                case .custom(let id)? where !savedFilters.contains(where: { $0.id == id }): nil
-                case let selection?: selection.tag
-                case nil: nil
-                }
-            },
-            set: { rule.wrappedValue.filterTag = $0 }
-        )
     }
 
     var body: some View {
@@ -1137,23 +1117,6 @@ struct PersonalizationSettingsView: View {
                     TextField("Optional style, e.g. concise Slack message", text: $rule.cleanupInstruction)
                         .textFieldStyle(.roundedBorder)
                         .accessibilityLabel("Cleanup style for \(rule.appName)")
-                    Picker("Filter under Auto", selection: autoFilterBinding($rule)) {
-                        Text("Auto’s “When unsure” filter").tag(String?.none)
-                        Section("Built-in") {
-                            ForEach(CleanupMode.allCases) { mode in
-                                Text(mode.displayName).tag(Optional(CleanupFilterSelection.builtIn(mode).tag))
-                            }
-                        }
-                        if !savedFilters.isEmpty {
-                            Section("Custom filters") {
-                                ForEach(savedFilters) { filter in
-                                    Text(filter.name).tag(Optional(CleanupFilterSelection.custom(filter.id).tag))
-                                }
-                            }
-                        }
-                    }
-                    .fixedSize()
-                    .help("Used only when Dictation mode is Auto and no saved filter's phrases decide")
                 }
                 .settingsRowPadding()
             }
