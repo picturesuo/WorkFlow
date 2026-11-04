@@ -19,6 +19,9 @@ final class CorrectionLearningSession: ObservableObject {
     @Published private(set) var fileSummary: String?
     @Published private(set) var report: CorrectionLearningReport?
     @Published private(set) var errorMessage: String?
+    /// A short non-blocking note about moving a word into Vocabulary, such as
+    /// when Vocabulary is full, shown without hiding the report.
+    @Published private(set) var vocabularyNotice: String?
     /// Word changes added to Vocabulary from the current report.
     @Published private(set) var addedWordChanges: Set<String> = []
     /// Learned preferences' source dictations no longer in History, as of the
@@ -32,7 +35,7 @@ final class CorrectionLearningSession: ObservableObject {
     private let filterProvider: () -> [CustomCleanupFilter]
     private let retentionProvider: () -> Int?
     private let sourceChecker: ([UUID]) async throws -> Set<UUID>
-    private let vocabularyAdder: (VocabularyEntry) -> Void
+    private let vocabularyAdder: (VocabularyEntry) -> Bool
     private let defaults: UserDefaults
     private var generationID: UUID?
     private var learningTask: Task<Void, Never>?
@@ -53,7 +56,7 @@ final class CorrectionLearningSession: ObservableObject {
         sourceChecker: @escaping ([UUID]) async throws -> Set<UUID> = { ids in
             try await RecordingStore.shared.existingRecordingIDs(ids)
         },
-        vocabularyAdder: @escaping (VocabularyEntry) -> Void = { VocabularyStore.add($0) },
+        vocabularyAdder: @escaping (VocabularyEntry) -> Bool = { VocabularyStore.add($0) },
         defaults: UserDefaults = .standard
     ) {
         self.mode = mode
@@ -113,6 +116,7 @@ final class CorrectionLearningSession: ObservableObject {
         report = nil
         fileSummary = nil
         addedWordChanges = []
+        vocabularyNotice = nil
         learningTask = Task { [weak self] in
             guard let self else { return }
             let outcome = await self.run(document: document, context: context, sending: sending)
@@ -152,7 +156,11 @@ final class CorrectionLearningSession: ObservableObject {
     /// explicit choice; learning never adds one by itself.
     func addToVocabulary(_ change: CorrectionLearningPlan.WordChange) {
         guard !addedWordChanges.contains(change.id) else { return }
-        vocabularyAdder(VocabularyEntry(spoken: change.spoken, replacement: change.replacement))
+        guard vocabularyAdder(VocabularyEntry(spoken: change.spoken, replacement: change.replacement)) else {
+            vocabularyNotice = Self.vocabularyFullNotice
+            return
+        }
+        vocabularyNotice = nil
         addedWordChanges.insert(change.id)
     }
 
@@ -160,9 +168,15 @@ final class CorrectionLearningSession: ObservableObject {
     /// Vocabulary, then removes it from what was learned.
     func moveToVocabulary(_ preference: LearnedPreference) {
         guard preference.inactivity == .wordChange, let from = preference.from, let to = preference.to else { return }
-        vocabularyAdder(VocabularyEntry(spoken: from, replacement: to))
+        guard vocabularyAdder(VocabularyEntry(spoken: from, replacement: to)) else {
+            vocabularyNotice = Self.vocabularyFullNotice
+            return
+        }
+        vocabularyNotice = nil
         LearnedPreferenceStore.delete(preference.id, in: defaults)
     }
+
+    private static let vocabularyFullNotice = "Vocabulary is full (\(VocabularyStore.maximumEntries) entries), so nothing was moved. Remove an entry in Vocabulary, then try again."
 
     private struct Context: Sendable {
         let fallbackMode: CleanupMode

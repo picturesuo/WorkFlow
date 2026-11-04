@@ -173,7 +173,10 @@ class PreferenceLearningTestCase: XCTestCase {
         return id
     }
 
-    func session(_ chat: any CleanupChatCompleting, mode: CleanupMode = .everyday, retention: Int? = nil) -> CorrectionLearningSession {
+    func session(
+        _ chat: any CleanupChatCompleting, mode: CleanupMode = .everyday, retention: Int? = nil,
+        vocabularyAdder: ((VocabularyEntry) -> Bool)? = nil
+    ) -> CorrectionLearningSession {
         let history = history!
         return CorrectionLearningSession(
             mode: mode,
@@ -183,7 +186,7 @@ class PreferenceLearningTestCase: XCTestCase {
             candidateProvider: { try await history.learningCandidates() },
             retentionProvider: { retention },
             sourceChecker: { try await history.existingRecordingIDs($0) },
-            vocabularyAdder: { [weak self] in self?.vocabulary.append($0) },
+            vocabularyAdder: vocabularyAdder ?? { [weak self] in self?.vocabulary.append($0); return true },
             defaults: defaults
         )
     }
@@ -296,6 +299,42 @@ final class PreferenceLearningFlowTests: PreferenceLearningTestCase {
         XCTAssertEqual(LearnedPreferenceStore.preferences(for: .everyday, in: h.defaults).map(\.kind), [.removeFiller, .spelling])
         LearnedPreferenceStore.delete(kept[1].id, in: h.defaults)
         XCTAssertEqual(LearnedPreferenceStore.preferences(for: .everyday, in: h.defaults).map(\.from), ["note book"])
+    }
+
+    /// Regression: at the 500-entry Vocabulary cap the adder reports failure,
+    /// so a kept word change must not be deleted and an offered one must not
+    /// be marked added - the word change is never lost nowhere.
+    func testVocabularyFullKeepsTheWordChangeInsteadOfLosingIt() async throws {
+        let h = harness
+        let full: (VocabularyEntry) -> Bool = { _ in false }
+
+        // Move: a stored word-change preference stays when Vocabulary is full.
+        h.defaults.set(try JSONEncoder().encode([preference(.spelling, from: "lunch", to: "launch")]),
+                       forKey: LearnedPreferenceStore.dataKey)
+        let moveSession = h.session(FixedClassifier(), vocabularyAdder: full)
+        let kept = LearnedPreferenceStore.preferences(for: .everyday, in: h.defaults)
+        XCTAssertEqual(kept.count, 1)
+        moveSession.moveToVocabulary(kept[0])
+        XCTAssertEqual(LearnedPreferenceStore.preferences(for: .everyday, in: h.defaults).map(\.from), ["lunch"],
+                       "A full Vocabulary must not delete the kept word change")
+        XCTAssertNotNil(moveSession.vocabularyNotice)
+        XCTAssertTrue(h.vocabulary.isEmpty)
+
+        // Add: an offered word change stays offerable when Vocabulary is full.
+        let emitted = "The team met for lunch on Friday to review the plan for the spring product release and the budget."
+        try await h.dictation("the team met for lunch on friday to review the plan for the spring product release and the budget", emitted: emitted)
+        let addSession = h.session(FixedClassifier(#"{"preferences": [{"kind": "spelling", "edits": [1], "from": "lunch", "to": "launch"}]}"#),
+                                   vocabularyAdder: full)
+        addSession.document = emitted.replacingOccurrences(of: "for lunch", with: "for launch")
+        addSession.learn()
+        try await h.settle(addSession)
+        let report = try XCTUnwrap(addSession.report, addSession.errorMessage ?? "")
+        XCTAssertEqual(report.plan.wordChanges, [.init(spoken: "lunch", replacement: "launch")])
+        addSession.addToVocabulary(report.plan.wordChanges[0])
+        XCTAssertFalse(addSession.addedWordChanges.contains(report.plan.wordChanges[0].id),
+                       "A full Vocabulary must not mark the change added")
+        XCTAssertNotNil(addSession.vocabularyNotice)
+        XCTAssertTrue(h.vocabulary.isEmpty)
     }
 
     // MARK: A2: content-ambiguous fillers

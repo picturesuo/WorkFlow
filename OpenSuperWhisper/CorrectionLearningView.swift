@@ -94,6 +94,13 @@ struct CorrectionLearningCard: View {
 
             outcome
 
+            if let notice = session.vocabularyNotice {
+                Text(notice)
+                    .font(.caption)
+                    .foregroundColor(.orange)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
             Divider()
 
             learnedList

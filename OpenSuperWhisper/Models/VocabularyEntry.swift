@@ -26,12 +26,17 @@ enum VocabularyStore {
 
     /// Adds one entry the person chose, unless the same replacement for the
     /// same spoken words is already there, and tells open editors to reload.
+    /// Returns true when the entry is present afterward (added or already
+    /// there) and false only when Vocabulary is full.
     @discardableResult
     static func add(_ entry: VocabularyEntry) -> Bool {
         var entries = load()
-        guard entries.count < maximumEntries, !entries.contains(where: {
+        if entries.contains(where: {
             $0.spoken.caseInsensitiveCompare(entry.spoken) == .orderedSame && $0.replacement == entry.replacement
-        }) else { return false }
+        }) {
+            return true
+        }
+        guard entries.count < maximumEntries else { return false }
         entries.append(entry)
         save(entries)
         NotificationCenter.default.post(name: .vocabularyDidChange, object: nil)
