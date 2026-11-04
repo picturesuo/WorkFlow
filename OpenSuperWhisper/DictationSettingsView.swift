@@ -29,6 +29,7 @@ struct DictationSettingsView: View {
             recordingGroup
             speechGroup
             afterDictationGroup
+            SpeakingSettingsGroup(viewModel: viewModel)
             moreOptions
         }
         .alert("Download failed", isPresented: Binding(

@@ -103,6 +103,10 @@ final class AppPreferences {
     @UserDefault(key: "reduceBackgroundAudio", defaultValue: false)
     var reduceBackgroundAudio: Bool
 
+    /// The assumed typing speed that speaking-versus-typing estimates use.
+    @UserDefault(key: SpeakingEfficiency.typingWPMKey, defaultValue: SpeakingEfficiency.defaultTypingWPM)
+    var typingBaselineWPM: Double
+
     @UserDefault(key: "hasCompletedOnboarding", defaultValue: false)
     var hasCompletedOnboarding: Bool
     

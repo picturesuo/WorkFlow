@@ -60,7 +60,15 @@ Settings (⌘,) has four panes; ⌘1 to ⌘4 switch between them, and Settings r
 4. Put the cursor in any text field, hold your chosen shortcut, speak, and release it.
 5. Keep the cursor in the intended field until text appears. WorkFlow targets the app that was active when recording began, but changing fields inside that app can redirect the paste.
 
-Use Homework for developed prose, Technical for compact commands sent to computers or coding agents, and Everyday for natural messages. After using more than one mode, open **Settings → Provider & Cost → Usage this month** to compare their estimated source-to-final token ratios. History also labels each successfully cleaned dictation with its mode and estimated efficiency.
+Use Homework for developed prose, Technical for compact commands sent to computers or coding agents, and Everyday for natural messages.
+
+The main window shows this month's speaking-versus-typing summary, and **Settings → Dictation → Speaking vs typing this month** shows how it is calculated:
+
+- **Speaking pace** is the words the recognizer heard divided by recording minutes, pauses included.
+- **Time saved** is the estimated time to type the words WorkFlow produced at an assumed typing speed (40 WPM unless you change it), minus recording time plus measured processing time. It can be negative. Editing afterward is not measured, and the typing speed is your assumption, not a measurement.
+- Totals add words and seconds across dictations before dividing. Dictations without measured processing time (older ones, or ones queued while WorkFlow was busy) are shown separately as a recording-only estimate. Meetings, imported audio, failures, and items still processing are left out, and a regenerated dictation counts once, as first produced.
+
+History labels each comparable dictation with its time saved, or its speaking pace when processing was not measured. Provider billing tokens stay under **Settings → Provider & Cost**.
 
 To make a mode more specific, open **Settings → Cleanup → Custom filters**, choose **New filter**, pick a base mode, and describe the change in plain language, for example "Use more hyphens." Turn on **Write quantities as digits** if you want numbers as digits. The filter appears next to the built-in modes right away, and the next dictation uses it once you pick it.
 

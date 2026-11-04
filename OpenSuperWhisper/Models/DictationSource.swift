@@ -47,6 +47,12 @@ struct DictationSource: Codable, FetchableRecord, PersistableRecord, Equatable {
     var filterWritesDigits: Bool
     var learnedPreferences: [LearnedPreference]
     var cleanupSource: TranscriptCleanupOutcome.Source?
+    /// Whether the audio was spoken into WorkFlow or imported. Nil for rows
+    /// saved before WorkFlow recorded it.
+    var captureOrigin: CaptureOrigin?
+    /// Measured seconds from stopping the recording to the text being ready.
+    /// Nil when not measured: queued work, failures, and older rows.
+    var processingSeconds: TimeInterval?
 
     init(
         recordingID: UUID,
@@ -58,7 +64,9 @@ struct DictationSource: Codable, FetchableRecord, PersistableRecord, Equatable {
         insertedText: String? = nil,
         disposition: DictationDisposition,
         filter: CleanupFilterSnapshot,
-        cleanupSource: TranscriptCleanupOutcome.Source? = nil
+        cleanupSource: TranscriptCleanupOutcome.Source? = nil,
+        captureOrigin: CaptureOrigin? = nil,
+        processingSeconds: TimeInterval? = nil
     ) {
         self.recordingID = recordingID
         self.capturedAt = capturedAt
@@ -75,6 +83,8 @@ struct DictationSource: Codable, FetchableRecord, PersistableRecord, Equatable {
         self.filterWritesDigits = filter.customWritesDigits
         self.learnedPreferences = filter.learned
         self.cleanupSource = cleanupSource
+        self.captureOrigin = captureOrigin
+        self.processingSeconds = processingSeconds
     }
 
     /// Evidence for a dictation whose cleanup has finished.
@@ -85,7 +95,9 @@ struct DictationSource: Codable, FetchableRecord, PersistableRecord, Equatable {
         cleanup: TranscriptCleanupOutcome,
         fallbackFilter: CleanupFilterSnapshot,
         disposition: DictationDisposition,
-        insertedText: String? = nil
+        insertedText: String? = nil,
+        captureOrigin: CaptureOrigin? = nil,
+        processingSeconds: TimeInterval? = nil
     ) {
         self.init(
             recordingID: recordingID,
@@ -96,7 +108,9 @@ struct DictationSource: Codable, FetchableRecord, PersistableRecord, Equatable {
             insertedText: insertedText,
             disposition: disposition,
             filter: cleanup.selectedFilter ?? fallbackFilter,
-            cleanupSource: cleanup.source
+            cleanupSource: cleanup.source,
+            captureOrigin: captureOrigin,
+            processingSeconds: processingSeconds
         )
     }
 

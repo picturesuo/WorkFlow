@@ -114,6 +114,9 @@ class ContentViewModel: ObservableObject {
     @Published var microphoneService = MicrophoneService.shared
     @Published var recordingError: String?
     @Published var historyDeletionError: String?
+    /// This month's speaking-versus-typing totals for the main window's summary.
+    @Published private(set) var speakingSummary = SpeakingSummary.empty
+    private var speakingSummaryTask: Task<Void, Never>?
     
     private var cancellables = Set<AnyCancellable>()
     private var recorderSessionID: UUID?
@@ -183,6 +186,21 @@ class ContentViewModel: ObservableObject {
 
     func refreshHistory() {
         history.refresh()
+        refreshSpeakingSummary()
+    }
+
+    @discardableResult
+    func refreshSpeakingSummary(now: Date = Date()) -> Task<Void, Never> {
+        speakingSummaryTask?.cancel()
+        let store = recordingStore
+        let monthStart = Calendar.current.dateInterval(of: .month, for: now)?.start ?? now
+        let task = Task { [weak self] in
+            guard let summary = try? await store.speakingSummary(since: monthStart),
+                  !Task.isCancelled else { return }
+            self?.speakingSummary = summary
+        }
+        speakingSummaryTask = task
+        return task
     }
 
     func loadMore() {
@@ -271,6 +289,8 @@ class ContentViewModel: ObservableObject {
         recorderSessionID = nil
         state = .decoding
         resetRecordingStart()
+        // Processing is timed from the moment the person stopped speaking.
+        let stoppedAt = ContinuousClock.now
         
         IndicatorWindowManager.shared.hide()
 
@@ -278,7 +298,7 @@ class ContentViewModel: ObservableObject {
             guard let self = self else { return }
             
             if let tempURL = await self.recorder.stopRecording(sessionID: sessionID) {
-                await self.finishRecording(audioAt: tempURL)
+                await self.finishRecording(audioAt: tempURL, stoppedAt: stoppedAt)
             } else {
                 await MainActor.run {
                     self.state = .idle
@@ -288,7 +308,8 @@ class ContentViewModel: ObservableObject {
     }
 
     /// Transcribes, cleans up, and saves one recording made in this window.
-    func finishRecording(audioAt tempURL: URL) async {
+    /// `stoppedAt` times processing to ready text; without it, none is claimed.
+    func finishRecording(audioAt tempURL: URL, stoppedAt: ContinuousClock.Instant? = nil) async {
         print("start decoding...")
         let duration = await AudioUtil.audioDuration(url: tempURL)
         let rawText: String
@@ -325,6 +346,7 @@ class ContentViewModel: ObservableObject {
                 try? FileManager.default.removeItem(at: tempURL)
                 print("No speech detected, dictation discarded")
             } else {
+                let processingSeconds = stoppedAt.map { SpeakingEfficiency.seconds($0.duration(to: .now)) }
                 let timestamp = Date()
                 let recordingId = UUID()
                 let fileName = AudioRecorder.recordingFileName(id: recordingId)
@@ -362,7 +384,9 @@ class ContentViewModel: ObservableObject {
                     recognizerText: rawText,
                     cleanup: cleanup,
                     fallbackFilter: cleanupPipeline.selectedFilter(),
-                    disposition: .notInserted
+                    disposition: .notInserted,
+                    captureOrigin: .live,
+                    processingSeconds: processingSeconds
                 )
 
                 do {
@@ -410,6 +434,7 @@ struct ContentView: View {
     @State private var meetingTitle = MeetingSessionController.defaultTitle()
     @State private var searchTask: Task<Void, Never>? = nil
     private var writingFilter = WritingFilterPreferences()
+    @AppStorage(SpeakingEfficiency.typingWPMKey) private var typingWPM = SpeakingEfficiency.defaultTypingWPM
     @AppStorage("modifierOnlyHotkey") private var modifierOnlyHotkeyRaw = ModifierKey.fn.rawValue
     @AppStorage("modifierChordHotkey") private var modifierChordHotkeyRaw = ModifierChord.none.rawValue
 
@@ -574,6 +599,12 @@ struct ContentView: View {
                         InputMonitoringNotice(shortcut: currentShortcutDescription) {
                             permissionsManager.requestInputMonitoringPermissionOrOpenSystemPreferences()
                         }
+                    }
+
+                    if debouncedSearchText.isEmpty {
+                        SpeakingSummaryStrip(
+                            presentation: SpeakingPresentation(summary: viewModel.speakingSummary, typingWPM: typingWPM)
+                        ) { SettingsRequest.open(pane: .dictation) }
                     }
 
                     historyList
@@ -1337,6 +1368,7 @@ struct HistoryRow: View {
     let onDelete: () -> Void
     let onRegenerate: () -> Void
     @State private var showTranscription = false
+    @AppStorage(SpeakingEfficiency.typingWPMKey) private var typingWPM = SpeakingEfficiency.defaultTypingWPM
 
     static let horizontalPadding: CGFloat = 20
 
@@ -1429,30 +1461,21 @@ struct HistoryRow: View {
         }
     }
 
-    private var efficiencyBadgeLabel: String? {
-        guard recording.status == .completed,
-              recording.tokenEstimatorID == LocalTokenEstimator.identifier,
-              let mode = recording.cleanupMode,
-              let sourceTokens = recording.rawTokenEstimate,
-              let finalTokens = recording.finalTokenEstimate,
-              sourceTokens > 0,
-              finalTokens > 0 else { return nil }
-        switch recording.cleanupSource {
-        case .bedrock, .ollama, .openAICompatible, .azureOpenAI:
-            let ratio = Double(sourceTokens) / Double(finalTokens)
-            return "\(recording.cleanupFilterName ?? mode.displayName) · \(TokenEfficiencyFormatter.ratio(ratio))"
-        case .rawFallback, .budgetLimited, .disabled, nil:
-            return nil
+    /// Time saved against the assumed typing speed when processing was
+    /// measured, else only the speaking pace; nothing for rows not compared.
+    var speakingBadgeLabel: String? {
+        // A row being regenerated shows its progress, not stale figures.
+        guard recording.status == .completed, let sample = recording.speaking?.sample else { return nil }
+        let totals = SpeakingTotals(sample)
+        if sample.processingSeconds != nil {
+            return SpeakingFormat.saved(totals.savedSeconds(atWPM: typingWPM))
         }
+        return totals.speakingWPM.map { "\(SpeakingFormat.wpm($0)) spoken" }
     }
 
-    private var efficiencyBadgeHelp: String {
-        let source = recording.rawTokenEstimate ?? 0
-        let final = recording.finalTokenEstimate ?? 0
-        let filter = recording.cleanupFilterName.map { name in
-            "Custom filter “\(name)” based on \(recording.cleanupMode?.displayName ?? "a built-in mode"). "
-        } ?? ""
-        return "\(filter)Estimated locally from the source and final text: \(source) → \(final) tokens. Provider billing tokens are reported separately."
+    var speakingBadgeHelp: String {
+        guard let sample = recording.speaking?.sample else { return "" }
+        return SpeakingFormat.explanation(sample, typingWPM: typingWPM)
     }
 
     private var cleanupBadgeColor: Color {
@@ -1535,15 +1558,15 @@ struct HistoryRow: View {
     }
 
     @ViewBuilder
-    private var efficiencyBadge: some View {
-        if let efficiencyBadgeLabel {
-            Text(efficiencyBadgeLabel)
-                .help(efficiencyBadgeHelp)
-                .accessibilityHint(efficiencyBadgeHelp)
+    private var speakingBadge: some View {
+        if let speakingBadgeLabel {
+            Text(speakingBadgeLabel)
+                .help(speakingBadgeHelp)
+                .accessibilityHint(speakingBadgeHelp)
         }
     }
 
-    private var hasBadges: Bool { cleanupBadgeLabel != nil || efficiencyBadgeLabel != nil }
+    private var hasBadges: Bool { cleanupBadgeLabel != nil || speakingBadgeLabel != nil }
 
     private var timeLabel: some View {
         Text("\(recording.timestamp.formatted(date: .omitted, time: .shortened)) · \(TextUtil.formatDuration(recording.duration))")
@@ -1559,7 +1582,7 @@ struct HistoryRow: View {
             HStack(spacing: 5) {
                 timeLabel
                 if cleanupBadgeLabel != nil { separatorDot; cleanupBadge }
-                if efficiencyBadgeLabel != nil { separatorDot; efficiencyBadge }
+                if speakingBadgeLabel != nil { separatorDot; speakingBadge }
             }
             .fixedSize()
             VStack(alignment: .leading, spacing: 2) {
@@ -1567,8 +1590,8 @@ struct HistoryRow: View {
                 if hasBadges {
                     HStack(spacing: 5) {
                         cleanupBadge
-                        if cleanupBadgeLabel != nil && efficiencyBadgeLabel != nil { separatorDot }
-                        efficiencyBadge
+                        if cleanupBadgeLabel != nil && speakingBadgeLabel != nil { separatorDot }
+                        speakingBadge
                     }
                     .fixedSize()
                 }
@@ -1576,7 +1599,7 @@ struct HistoryRow: View {
             VStack(alignment: .leading, spacing: 2) {
                 timeLabel
                 cleanupBadge
-                efficiencyBadge
+                speakingBadge
             }
         }
         .font(.subheadline)

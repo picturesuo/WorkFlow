@@ -78,8 +78,8 @@ enum CleanupMode: String, CaseIterable, Codable, Identifiable {
 }
 
 enum LocalTokenEstimator {
-    /// A deterministic local approximation used only for relative source/final
-    /// comparisons. Provider-reported billing tokens remain separate.
+    /// A deterministic local token approximation stored with each cleanup as a
+    /// cost diagnostic. Provider-reported billing tokens remain separate.
     static let identifier = "workflow-heuristic-v1"
 
     private static let lexicalPattern = try! NSRegularExpression(
@@ -93,71 +93,6 @@ enum LocalTokenEstimator {
         let lexicalCount = lexicalPattern.numberOfMatches(in: text, range: range)
         let byteEstimate = Int(ceil(Double(text.utf8.count) / 4.0))
         return max(1, max(lexicalCount, byteEstimate))
-    }
-}
-
-struct TokenEfficiencySample: Equatable {
-    let mode: CleanupMode
-    let sourceTokens: Int
-    let finalTokens: Int
-}
-
-struct ModeTokenEfficiency: Equatable {
-    let sampleCount: Int
-    let geometricMeanRatio: Double
-}
-
-struct TokenEfficiencySummary: Equatable {
-    fileprivate let values: [CleanupMode: ModeTokenEfficiency]
-
-    static let empty = TokenEfficiencySummary(values: [:])
-
-    subscript(mode: CleanupMode) -> ModeTokenEfficiency? {
-        values[mode]
-    }
-
-    func advantage(of first: CleanupMode, over second: CleanupMode) -> Double? {
-        guard let firstRatio = values[first]?.geometricMeanRatio,
-              let secondRatio = values[second]?.geometricMeanRatio,
-              secondRatio > 0 else { return nil }
-        return firstRatio / secondRatio
-    }
-}
-
-enum TokenEfficiencyCalculator {
-    private struct Accumulator {
-        var sampleCount = 0
-        var logRatioSum = 0.0
-    }
-
-    static func summarize(_ samples: [TokenEfficiencySample]) -> TokenEfficiencySummary {
-        var accumulators: [CleanupMode: Accumulator] = [:]
-        for sample in samples where sample.sourceTokens > 0 && sample.finalTokens > 0 {
-            var accumulator = accumulators[sample.mode] ?? Accumulator()
-            accumulator.sampleCount += 1
-            accumulator.logRatioSum += log(Double(sample.sourceTokens) / Double(sample.finalTokens))
-            accumulators[sample.mode] = accumulator
-        }
-
-        let values = accumulators.mapValues { accumulator in
-            ModeTokenEfficiency(
-                sampleCount: accumulator.sampleCount,
-                geometricMeanRatio: exp(accumulator.logRatioSum / Double(accumulator.sampleCount))
-            )
-        }
-        return TokenEfficiencySummary(values: values)
-    }
-}
-
-enum TokenEfficiencyFormatter {
-    static func ratio(_ value: Double) -> String {
-        if value > 1.005 {
-            return String(format: "%.2f× as efficient", value)
-        }
-        if value < 0.995 {
-            return String(format: "%.2f× more tokens", 1 / value)
-        }
-        return "About the same length"
     }
 }
 

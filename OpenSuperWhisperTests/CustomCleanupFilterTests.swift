@@ -926,7 +926,7 @@ final class CustomFilterProviderTransportTests: XCTestCase {
 
 @MainActor
 final class CustomFilterHistoryTests: XCTestCase {
-    func testCompletedRecordingKeepsFilterLabelAndExcludesItFromBuiltInEfficiency() async throws {
+    func testCompletedRecordingKeepsFilterLabelAndCostCounts() async throws {
         let store = try RecordingStore(
             database: DatabaseQueue(path: ":memory:"),
             recordingsDirectory: FileManager.default.temporaryDirectory,
@@ -962,9 +962,10 @@ final class CustomFilterHistoryTests: XCTestCase {
         let builtInRow = try XCTUnwrap(rows.first { $0.id == builtInID })
         XCTAssertNil(builtInRow.cleanupFilterName)
 
-        let efficiency = try await store.tokenEfficiency(since: .distantPast)
-        XCTAssertEqual(efficiency[.everyday]?.sampleCount, 1)
-        XCTAssertEqual(try XCTUnwrap(efficiency[.everyday]?.geometricMeanRatio), 1, accuracy: 0.0001)
+        // Local estimates stay stored as cost diagnostics.
+        XCTAssertEqual(customRow.rawTokenEstimate, 4)
+        XCTAssertEqual(customRow.finalTokenEstimate, 2)
+        XCTAssertEqual(builtInRow.tokenEstimatorID, LocalTokenEstimator.identifier)
 
         let usage = try await store.bedrockUsage(since: .distantPast)
         XCTAssertEqual(usage.cleanedDictations, 2)

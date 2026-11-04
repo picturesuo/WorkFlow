@@ -230,7 +230,8 @@ class IndicatorViewModel: ObservableObject {
                             rule: rule,
                             globalDefault: AppPreferences.shared.bedrockCleanupEnabled
                         ),
-                        targetBundleID: self.pasteTarget?.bundleID
+                        targetBundleID: self.pasteTarget?.bundleID,
+                        captureOrigin: .live
                     )
                 }
             }
@@ -240,13 +241,20 @@ class IndicatorViewModel: ObservableObject {
         
         state = .decoding
         let recordingStartedAt = self.recordingStartedAt
+        // Processing is timed from the moment the person stopped speaking.
+        let stoppedAt = ContinuousClock.now
         
         Task { [weak self] in
             guard let self = self else { return }
             let generation = self.dictationGeneration ?? self.latestDictationGate.begin()
             
             if let tempURL = await self.recorder.stopRecording(sessionID: sessionID) {
-                await self.finishDictation(audioAt: tempURL, generation: generation, recordingStartedAt: recordingStartedAt)
+                await self.finishDictation(
+                    audioAt: tempURL,
+                    generation: generation,
+                    recordingStartedAt: recordingStartedAt,
+                    stoppedAt: stoppedAt
+                )
             } else {
                 print("!!! Not found record url !!!")
                 self.finishDecoding()
@@ -255,7 +263,13 @@ class IndicatorViewModel: ObservableObject {
     }
 
     /// Transcribes, cleans up, saves, and delivers one stopped dictation.
-    func finishDictation(audioAt tempURL: URL, generation: UInt64, recordingStartedAt: Date?) async {
+    /// `stoppedAt` times processing to ready text; without it, none is claimed.
+    func finishDictation(
+        audioAt tempURL: URL,
+        generation: UInt64,
+        recordingStartedAt: Date?,
+        stoppedAt: ContinuousClock.Instant? = nil
+    ) async {
         let duration = await AudioUtil.audioDuration(url: tempURL)
         do {
             print("start decoding...")
@@ -281,6 +295,7 @@ class IndicatorViewModel: ObservableObject {
                     self.finishDecoding()
                     return
                 }
+                let processingSeconds = stoppedAt.map { SpeakingEfficiency.seconds($0.duration(to: .now)) }
 
                 let timestamp = Date()
                 let recordingId = UUID()
@@ -330,7 +345,9 @@ class IndicatorViewModel: ObservableObject {
                     cleanup: cleanup,
                     fallbackFilter: filter,
                     disposition: disposition,
-                    insertedText: attemptedDelivery ? Self.applyPostProcessing(text) : nil
+                    insertedText: attemptedDelivery ? Self.applyPostProcessing(text) : nil,
+                    captureOrigin: .live,
+                    processingSeconds: processingSeconds
                 )
                 await MainActor.run {
                     self.recordingStore.addRecording(newRecording, source: source)

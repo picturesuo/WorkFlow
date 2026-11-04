@@ -723,8 +723,6 @@ struct ProviderCostSettingsView: View {
                 detail: "They used a provider or model WorkFlow can’t price, so they aren’t in the total."
             ) { EmptyView() }
         }
-        SettingsDivider()
-        efficiencyRows
     }
 
     private func valueRow(_ title: String, _ value: String, detail: String? = nil) -> some View {
@@ -734,52 +732,6 @@ struct ProviderCostSettingsView: View {
                 .foregroundStyle(.secondary)
         }
         .accessibilityElement(children: .combine)
-    }
-
-    private var efficiencyRows: some View {
-        let summary = viewModel.tokenEfficiencySummary
-        return VStack(alignment: .leading, spacing: 8) {
-            Text("Writing efficiency")
-                .font(.system(size: 13))
-            Text("Estimated source tokens ÷ final tokens for successful cleanups, measured on this Mac (\(LocalTokenEstimator.identifier)), not provider billing.")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
-            ForEach(CleanupMode.allCases) { mode in
-                HStack {
-                    Text(mode.displayName)
-                        .font(.callout)
-                    Spacer()
-                    if let metric = summary[mode] {
-                        Text("\(TokenEfficiencyFormatter.ratio(metric.geometricMeanRatio)) · \(countLabel(metric.sampleCount, singular: "sample", plural: "samples"))")
-                            .font(.caption.monospacedDigit())
-                            .foregroundStyle(.secondary)
-                    } else {
-                        Text("No samples yet")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-                }
-                .accessibilityElement(children: .combine)
-            }
-            ForEach([CleanupMode.homework, .everyday], id: \.self) { mode in
-                if let comparison = technicalComparison(over: mode) {
-                    Label(comparison, systemImage: "chart.bar.xaxis")
-                        .font(.caption.weight(.medium))
-                        .foregroundStyle(ThemePalette.linkText(colorScheme))
-                }
-            }
-        }
-        .settingsRowPadding()
-    }
-
-    private func technicalComparison(over mode: CleanupMode) -> String? {
-        guard let advantage = viewModel.tokenEfficiencySummary.advantage(of: .technical, over: mode),
-              advantage > 0 else { return nil }
-        if advantage >= 1 {
-            return String(format: "Technical is %.2f× as token-efficient as %@", advantage, mode.displayName)
-        }
-        return String(format: "%@ is %.2f× as token-efficient as Technical", mode.displayName, 1 / advantage)
     }
 
     // MARK: Connection test
