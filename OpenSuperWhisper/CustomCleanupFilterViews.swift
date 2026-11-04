@@ -76,7 +76,7 @@ struct WritingFilterPreferences: DynamicProperty {
     var selectionDescription: String {
         if autoEnabled {
             let unsure = name(of: autoFallback)
-            return "Auto: a saved filter is used when two of its phrases come up in a dictation; otherwise an app rule’s filter, otherwise \(unsure)."
+            return "Auto: a saved filter is used when two of its phrases come up in a dictation; otherwise \(unsure)."
         }
         switch selection {
         case .builtIn(let mode):

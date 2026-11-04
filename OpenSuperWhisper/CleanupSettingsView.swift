@@ -126,8 +126,8 @@ struct CleanupSettingsView: View {
 }
 
 /// Auto: off by default. On, a saved filter is used when two of its phrases
-/// come up, else an app rule's filter, else the fallback. It never guesses
-/// and makes no request of its own.
+/// come up, else the fallback. It never guesses and makes no request of its
+/// own.
 struct AutoFilterSettingsGroup: View {
     let writingFilter: WritingFilterPreferences
 
@@ -146,8 +146,7 @@ struct AutoFilterSettingsGroup: View {
             )
             SettingsDivider()
             SettingsRow(
-                title: "When unsure, use",
-                detail: "Also used when an app rule names no filter."
+                title: "When unsure, use"
             ) {
                 Picker("Filter when Auto is unsure", selection: writingFilter.autoFallbackBinding) {
                     FilterSelectionOptions(filters: writingFilter.filters)

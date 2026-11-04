@@ -605,7 +605,7 @@ enum DictationModeMenu {
         let autoItem = NSMenuItem(title: WritingFilterPicker.autoTitle, action: selectAuto, keyEquivalent: "")
         autoItem.target = target
         autoItem.state = isAuto ? .on : .off
-        autoItem.toolTip = "Picks a saved filter when two of its phrases come up; otherwise an app rule’s filter, otherwise \(fallbackName)."
+        autoItem.toolTip = "Picks a saved filter when two of its phrases come up; otherwise \(fallbackName)."
         menu.addItem(autoItem)
         menu.addItem(.separator())
         for mode in CleanupMode.allCases {
