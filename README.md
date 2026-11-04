@@ -37,11 +37,15 @@ With **Create with AI**, nothing leaves your Mac until you press **Send**. You c
 
 ## Learn from finished writing
 
-Already turned some dictations into a finished essay, post, or doc? WorkFlow can look back at them. Paste or drop the finished document into **Settings → Personalize → Learn from finished writing**, or choose **Learn…** in the dictation bar, pick a mode, and choose **Learn**. PDF, Word, RTF, OpenDocument, Markdown, and plain text work, up to 100,000 characters.
+Finish a document from your dictations, even weeks later, then paste or drop it into **Settings → Personalize → Learn from finished writing**, or choose **Learn…** in the dictation bar. PDF, Word, RTF, OpenDocument, Markdown, and plain text work, up to 100,000 characters. **Check matches** shows what WorkFlow found without sending anything; **Learn** learns from it.
 
-WorkFlow matches the document to the dictations in your History it came from and keeps small style edits that pass its checks, such as a spelling, a dropped filler, semicolon joins, or digits. The checks reject edits that clearly change values, negations, or meaning, but they can miss a change that only context reveals, so review what it learned. What it learns is a short list of preferences per mode, not a trained model: each one applies to that mode automatically and can be switched off or deleted. Custom filters are never changed.
+WorkFlow finds the dictations inside the document among your 5,000 most recent in History, compares them with your edits, and keeps small style preferences it can check against those edits: spacing, hyphenation, and capitalization, fillers such as "um" or "basically", semicolon joins, digits, and contractions. Each dictation teaches the mode or saved filter it was made with; a saved filter keeps its own list, and its saved instructions never change. Older History with no recorded mode teaches the mode you pick for it.
+
+Edits that change a value or a negation are left out, and so is a word swapped for another, such as "lunch" → "launch" or a respelled name: you can add one to Vocabulary yourself, but it is never learned on its own. These checks can't catch every change of meaning, so look over what was learned. **Details** lists every matched edit, what was left out and why, and the exact lines sent.
 
 It can only match dictations that are still in History, and History saved before WorkFlow kept the original transcript is compared by its final text only. Learn uses your cleanup provider and sends only the short matched edits with a few words around each, never the whole document.
+
+This is preference learning, not model training: no model is retrained. Preferences apply automatically to their mode or filter, and each one can be switched off or deleted; Regenerate never brings back one you removed.
 
 ## Questions stay questions
 
@@ -89,7 +93,7 @@ It reduces background audio; it doesn't promise to remove it:
 
 ## Privacy
 
-Audio never leaves your Mac. With cleanup on, only transcript text goes to the one provider you pick: Amazon Bedrock, Azure OpenAI, local Ollama, or any OpenAI-compatible API. **Send** in Create with AI shares your request and any pasted example. **Learn** shares only the short matched edits with a few words around each; the document itself is read on your Mac and not stored. New dictations keep their original transcript on your Mac until you delete them. Keys live in macOS Keychain, and credentials and transcripts are never logged.
+Audio never leaves your Mac. With cleanup on, only transcript text goes to the one provider you pick: Amazon Bedrock, Azure OpenAI, local Ollama, or any OpenAI-compatible API. **Send** in Create with AI shares your request and any pasted example. **Learn** shares only the short matched edits with a few words around each, and **Check matches** shares nothing; the document itself is read on your Mac and not stored. New dictations keep their original transcript on your Mac until you delete them. Keys live in macOS Keychain, and credentials and transcripts are never logged.
 
 ## Install with your AI
 

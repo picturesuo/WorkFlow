@@ -227,6 +227,49 @@ struct FilterAutoConfig: Codable, Equatable, Sendable {
     /// Saved filters with enough phrases to ever win.
     var candidates: [CustomCleanupFilter]
     var fallback: CapturedFilter
+    /// What the saved filters above learned, captured with them. Each one
+    /// names its filter, so a filter only ever gets its own.
+    var filterLearned: [LearnedPreference]
+
+    init(candidates: [CustomCleanupFilter], fallback: CapturedFilter, filterLearned: [LearnedPreference] = []) {
+        self.candidates = candidates
+        self.fallback = fallback
+        self.filterLearned = filterLearned
+    }
+
+    private enum CodingKeys: String, CodingKey { case candidates, fallback, filterLearned }
+
+    /// Choices captured before filters learned have none.
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        candidates = try container.decode([CustomCleanupFilter].self, forKey: .candidates)
+        fallback = try container.decode(CapturedFilter.self, forKey: .fallback)
+        filterLearned = try container.decodeIfPresent([LearnedPreference].self, forKey: .filterLearned) ?? []
+    }
+
+    /// A saved filter as cleanup uses it, with what it learned.
+    func snapshot(of filter: CustomCleanupFilter) -> CleanupFilterSnapshot {
+        CleanupFilterSnapshot(filter: filter, learned: filterLearned)
+    }
+
+    /// The fallback as cleanup uses it.
+    var fallbackSnapshot: CleanupFilterSnapshot {
+        switch fallback {
+        case .builtIn: fallback.snapshot
+        case .custom(let filter): snapshot(of: filter)
+        }
+    }
+
+    /// The same choices with only the learned preferences still in use, so
+    /// a regeneration never brings back one deleted, switched off, or reset.
+    func keepingStillActive(in defaults: UserDefaults = .standard) -> FilterAutoConfig {
+        var config = self
+        if case .builtIn(let mode, let learned) = fallback {
+            config.fallback = .builtIn(mode, learned: LearnedPreferenceStore.stillActive(learned, in: defaults))
+        }
+        config.filterLearned = LearnedPreferenceStore.stillActive(filterLearned, in: defaults)
+        return config
+    }
 }
 
 /// The filter a dictation will use: fixed, or chosen by Auto from its words.
@@ -242,7 +285,7 @@ enum CleanupFilterPlan: Equatable, Sendable {
     var provisionalFilter: CleanupFilterSnapshot {
         switch self {
         case .fixed(let filter, _): filter
-        case .auto(let config): config.fallback.snapshot
+        case .auto(let config): config.fallbackSnapshot
         }
     }
 
@@ -276,9 +319,9 @@ enum FilterAutoSelector {
             return hits.count >= FilterTriggers.minimumDistinctHits ? (filter, hits) : nil
         }
         if qualifying.count == 1, let (filter, hits) = qualifying.first {
-            return FilterChoice(filter: CleanupFilterSnapshot(filter: filter), reason: .triggers(hits))
+            return FilterChoice(filter: config.snapshot(of: filter), reason: .triggers(hits))
         }
-        return FilterChoice(filter: config.fallback.snapshot, reason: .fallback)
+        return FilterChoice(filter: config.fallbackSnapshot, reason: .fallback)
     }
 }
 
@@ -362,9 +405,15 @@ enum FilterAutoSettings {
         let filters = CustomCleanupFilterStore.load(from: defaults)
         let fallback = capture(fallback(in: defaults, filters: filters), filters: filters, defaults: defaults)
             ?? .builtIn(.everyday, learned: LearnedPreferenceStore.activePreferences(for: .everyday, in: defaults))
+        let candidates = filters.filter { $0.triggers.count >= FilterTriggers.minimumDistinctHits }
+        var learning = candidates
+        if case .custom(let filter) = fallback, !candidates.contains(where: { $0.id == filter.id }) {
+            learning.append(filter)
+        }
         return FilterAutoConfig(
-            candidates: filters.filter { $0.triggers.count >= FilterTriggers.minimumDistinctHits },
-            fallback: fallback
+            candidates: candidates,
+            fallback: fallback,
+            filterLearned: learning.flatMap { LearnedPreferenceStore.activePreferences(for: .filter($0), in: defaults) }
         )
     }
 

@@ -11,6 +11,14 @@ import XCTest
 // reaches a microphone, model, paid provider, Keychain, the general
 // pasteboard, the user's preferences, or their History, and nothing is shown.
 
+/// A synthetic learned preference for a built-in mode or saved filter.
+private func learned(_ kind: LearnedPreference.Kind, mode: CleanupMode, filterID: UUID? = nil) -> LearnedPreference {
+    LearnedPreference(
+        mode: mode, kind: kind, from: nil, to: nil, origin: .finalEdit, evidence: ["synthetic"], fromLegacyOnly: false,
+        learnedAt: Date(), updatedAt: Date(), filterID: filterID
+    )
+}
+
 /// Synthetic saved filters with trigger phrases.
 private enum Fixtures {
     static let calculus = CustomCleanupFilter(
@@ -203,6 +211,29 @@ final class FilterAutoSelectorTests: XCTestCase {
         XCTAssertNil(FilterChoiceReason.manual.label, "A filter picked by hand adds nothing to History")
         XCTAssertEqual(FilterChoiceReason.triggers(["derivative", "integral"]).label, "Auto: mentions derivative, integral")
         XCTAssertEqual(FilterChoiceReason.fallback.label, "Auto: no clear match")
+    }
+
+    func testChoicesCapturedBeforeFiltersLearnedDecodeWithNone() throws {
+        var legacy = try XCTUnwrap(try JSONSerialization.jsonObject(
+            with: JSONEncoder().encode(Fixtures.config(fallback: .custom(Fixtures.plain)))
+        ) as? [String: Any])
+        legacy["filterLearned"] = nil
+        let decoded = try JSONDecoder().decode(FilterAutoConfig.self, from: JSONSerialization.data(withJSONObject: legacy))
+        XCTAssertEqual(decoded, Fixtures.config(fallback: .custom(Fixtures.plain)))
+        XCTAssertEqual(decoded.filterLearned, [])
+        XCTAssertEqual(decoded.fallbackSnapshot, CleanupFilterSnapshot(filter: Fixtures.plain))
+    }
+
+    func testAChosenFilterCarriesOnlyItsOwnLearnedPreferences() {
+        let mine = learned(.contractions, mode: .homework, filterID: Fixtures.calculus.id)
+        let other = learned(.semicolonJoin, mode: .writing, filterID: Fixtures.spanish.id)
+        let builtIn = learned(.connectedSentences, mode: .homework)
+        var config = Fixtures.config()
+        config.filterLearned = [mine, other, builtIn]
+        let choice = resolve("find the derivative and then the integral", config: config)
+        XCTAssertEqual(choice.filter.customID, Fixtures.calculus.id)
+        XCTAssertEqual(choice.filter.learned, [mine], "Never another filter's or a built-in mode's")
+        XCTAssertEqual(choice.filter, CleanupFilterSnapshot(filter: Fixtures.calculus, learned: [mine]))
     }
 }
 
@@ -467,6 +498,72 @@ final class FilterAutoPipelineTests: XCTestCase {
         }
     }
 
+    /// A saved filter Auto picks uses exactly what the same filter picked by
+    /// hand uses, including what it learned, and nothing it did not.
+    func testAutoUsesThePickedFiltersLearnedPreferencesLikeAHandPick() async throws {
+        let calculusLearned = learned(.contractions, mode: .homework, filterID: Fixtures.calculus.id)
+        let spanishLearned = learned(.semicolonJoin, mode: .writing, filterID: Fixtures.spanish.id)
+        let plainLearned = learned(.connectedSentences, mode: .everyday, filterID: Fixtures.plain.id)
+        let everydayLearned = learned(.noContractions, mode: .everyday)
+        LearnedPreferenceStore.save([calculusLearned, spanishLearned, plainLearned, everydayLearned], to: defaults)
+
+        let text = "find the derivative and then the integral of x squared"
+        CustomCleanupFilterStore.select(.custom(Fixtures.calculus.id), in: defaults)
+        let manual = await run(text)
+        XCTAssertEqual(manual.filter?.learned, [calculusLearned])
+
+        FilterAutoSettings.setEnabled(true, in: defaults)
+        FilterAutoSettings.setFallback(.builtIn(.everyday), in: defaults)
+        let auto = await run(text)
+        XCTAssertEqual(auto.reason, .triggers(["derivative", "integral"]))
+        XCTAssertEqual(auto.filter, manual.filter)
+        XCTAssertEqual(auto.prompt, manual.prompt, "Byte for byte the hand-picked prompt")
+        let prompt = try XCTUnwrap(auto.prompt)
+        XCTAssertTrue(prompt.contains(calculusLearned.instruction))
+        XCTAssertTrue(prompt.contains("Learned preferences for the \"Calculus\" filter"))
+        for absent in [spanishLearned, plainLearned, everydayLearned] {
+            XCTAssertFalse(prompt.contains(absent.instruction), absent.instruction)
+        }
+
+        let unsure = await run("see you at lunch on friday")
+        XCTAssertEqual(unsure.reason, .fallback)
+        XCTAssertEqual(unsure.filter?.learned, [everydayLearned], "A built-in fallback keeps its mode's own")
+
+        FilterAutoSettings.setFallback(.custom(Fixtures.plain.id), in: defaults)
+        let custom = await run("see you at lunch on friday")
+        XCTAssertEqual(custom.filter?.customID, Fixtures.plain.id)
+        XCTAssertEqual(custom.filter?.learned, [plainLearned], "A saved fallback keeps its own")
+
+        LearnedPreferenceStore.setLearningEnabled(false, in: defaults)
+        let off = await run(text)
+        XCTAssertEqual(off.filter?.learned, [], "Learning switched off applies nothing")
+    }
+
+    func testRegenerationKeepsOnlyAutoChoicesLearnedPreferencesStillInUse() throws {
+        let kept = learned(.contractions, mode: .homework, filterID: Fixtures.calculus.id)
+        let switchedOff = learned(.semicolonJoin, mode: .homework, filterID: Fixtures.calculus.id)
+        let deleted = learned(.connectedSentences, mode: .everyday, filterID: Fixtures.plain.id)
+        let fallbackKept = learned(.noContractions, mode: .everyday)
+        let fallbackReset = learned(.inlineEnumeration, mode: .everyday)
+        LearnedPreferenceStore.save([kept, switchedOff, deleted, fallbackKept, fallbackReset], to: defaults)
+        FilterAutoSettings.setEnabled(true, in: defaults)
+        FilterAutoSettings.setFallback(.builtIn(.everyday), in: defaults)
+        let captured = try XCTUnwrap(FilterAutoSettings.currentConfig(in: defaults))
+        XCTAssertEqual(Set(captured.filterLearned.map(\.id)), [kept.id, switchedOff.id], "Only candidates' own")
+        XCTAssertEqual(captured.fallback, .builtIn(.everyday, learned: [fallbackKept, fallbackReset]))
+
+        LearnedPreferenceStore.setEnabled(switchedOff.id, false, in: defaults)
+        LearnedPreferenceStore.delete(fallbackReset.id, in: defaults)
+        let regenerated = captured.keepingStillActive(in: defaults)
+        XCTAssertEqual(regenerated.filterLearned, [kept])
+        XCTAssertEqual(regenerated.fallback, .builtIn(.everyday, learned: [fallbackKept]))
+        XCTAssertEqual(regenerated.candidates, captured.candidates, "The choices themselves stay as captured")
+
+        let newer = learned(.digits, mode: .homework, filterID: Fixtures.calculus.id)
+        LearnedPreferenceStore.save(LearnedPreferenceStore.load(from: defaults) + [newer], to: defaults)
+        XCTAssertFalse(captured.keepingStillActive(in: defaults).filterLearned.contains(newer), "Nothing learned after it")
+    }
+
     func testManualPickWinsOverPhrases() async throws {
         CustomCleanupFilterStore.select(.custom(Fixtures.plain.id), in: defaults)
         let provider = CountingProvider()
@@ -569,6 +666,7 @@ final class FilterAutoQueueAndHistoryTests: XCTestCase {
     private static let savedKeys = [
         CustomCleanupFilterStore.modeKey, CustomCleanupFilterStore.selectedIDKey, CustomCleanupFilterStore.dataKey,
         FilterAutoSettings.enabledKey, FilterAutoSettings.fallbackKey, "targetAppRulesData",
+        LearnedPreferenceStore.dataKey, LearnedPreferenceStore.enabledKey,
     ]
     private var originals: [String: Any?] = [:]
     private var store: RecordingStore!
@@ -741,6 +839,42 @@ final class FilterAutoQueueAndHistoryTests: XCTestCase {
         row = try await settled(queue)
         XCTAssertEqual(row.cleanupFilterName, Fixtures.spanish.name)
         XCTAssertTrue(try XCTUnwrap(requests.last).system.contains(Fixtures.spanish.instructions))
+    }
+
+    func testAutoDictationUsesItsFiltersLearnedPreferencesAndRegenerateDropsRemovedOnes() async throws {
+        let contractions = learned(.contractions, mode: .homework, filterID: Fixtures.calculus.id)
+        let semicolons = learned(.semicolonJoin, mode: .homework, filterID: Fixtures.calculus.id)
+        let spanish = learned(.noContractions, mode: .writing, filterID: Fixtures.spanish.id)
+        LearnedPreferenceStore.save([contractions, semicolons, spanish])
+        FilterAutoSettings.setEnabled(true)
+        let engine = GatedSpeech()
+        engine.words = "find the derivative and then the integral of twenty five"
+        let queue = queue(engine)
+        await queue.addFileToQueue(url: try queuedAudio(), cleanupRequested: true)
+
+        var row = try await settled(queue)
+        XCTAssertEqual(row.cleanupFilterName, "Calculus")
+        XCTAssertEqual(row.cleanupFilterReason, .triggers(["derivative", "integral"]))
+        var system = try XCTUnwrap(requests.last).system
+        XCTAssertTrue(system.contains(contractions.instruction))
+        XCTAssertTrue(system.contains(semicolons.instruction))
+        XCTAssertFalse(system.contains(spanish.instruction), "Never another filter's")
+        let evidence = try await store.dictationSource(for: row.id)
+        XCTAssertEqual(evidence?.filterID, Fixtures.calculus.id, "Learning later credits the filter Auto picked")
+        XCTAssertEqual(Set(evidence?.learnedPreferences.map(\.id) ?? []), [contractions.id, semicolons.id])
+
+        LearnedPreferenceStore.delete(semicolons.id)
+        await queue.requeueRecording(row)
+        row = try await settled(queue)
+        XCTAssertEqual(requests.count, 2)
+        system = try XCTUnwrap(requests.last).system
+        XCTAssertTrue(system.contains(contractions.instruction))
+        XCTAssertFalse(system.contains(semicolons.instruction), "Regenerate never brings back a deleted preference")
+
+        LearnedPreferenceStore.setEnabled(contractions.id, false)
+        await queue.requeueRecording(row)
+        row = try await settled(queue)
+        XCTAssertFalse(try XCTUnwrap(requests.last).system.contains("Learned preferences"), "Nor one switched off")
     }
 
     func testQueuedDictationWithAutoOffKeepsTheHandPickedFilter() async throws {
