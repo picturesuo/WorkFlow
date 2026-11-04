@@ -1,0 +1,10 @@
+# no-mistakes repository settings: https://github.com/kunchenguid/no-mistakes
+# Both keys below are trusted-default-branch-only, so they take effect for
+# pull requests opened after this file is on master.
+pr:
+  # Leave the generated "Intent" section out of public pull request
+  # descriptions. Intent still informs review and PR drafting.
+  publish_intent: false
+  # Keep one risk line and the pipeline attestation; omit Testing logs and
+  # pipeline round history, which can carry local run paths.
+  appendix: minimal
