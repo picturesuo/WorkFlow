@@ -145,9 +145,13 @@ class TranscriptionQueue: ObservableObject {
             let timestamp = Date()
             let id = UUID()
             let fileName = AudioRecorder.recordingFileName(id: id)
-            // Captured at enqueue so later filter edits cannot change queued work.
-            let selected = CustomCleanupFilterStore.currentSnapshot()
+            // Captured at enqueue so later filter edits cannot change queued
+            // work. Under Auto that is its choices; it picks from the words
+            // once they are transcribed.
+            let plan = FilterAutoSettings.currentPlan()
+            let selected = plan.provisionalFilter
             let filter = cleanupRequested ? selected : nil
+            let autoConfig = cleanupRequested ? plan.autoConfig : nil
 
             let recording = Recording(
                 id: id,
@@ -165,7 +169,9 @@ class TranscriptionQueue: ObservableObject {
                 cleanupMode: filter?.mode,
                 cleanupFilterName: filter?.customName,
                 cleanupFilterInstructions: filter?.customInstructions,
-                cleanupFilterWritesDigits: filter?.customWritesDigits ?? false
+                cleanupFilterWritesDigits: filter?.customWritesDigits ?? false,
+                cleanupFilterReason: filter == nil || autoConfig != nil ? nil : .manual,
+                cleanupFilterAuto: autoConfig
             )
 
             if mode == .dictation {
@@ -188,6 +194,18 @@ class TranscriptionQueue: ObservableObject {
         } catch {
             print("Failed to add the audio file to the transcription queue.")
         }
+    }
+
+    /// Regenerates with a filter picked by hand from History, which replaces
+    /// whatever was picked or chosen by Auto before.
+    func requeueRecording(_ recording: Recording, with selection: CleanupFilterSelection) async {
+        guard let filter = FilterAutoSettings.capture(
+            selection, filters: CustomCleanupFilterStore.load()
+        )?.snapshot else { return }
+        await recordingStore.setRegenerationFilter(recording.id, filter: filter)
+        var updated = recording
+        updated.cleanupRequested = true
+        await requeueRecording(updated)
     }
 
     func requeueRecording(_ recording: Recording) async {
@@ -391,20 +409,31 @@ class TranscriptionQueue: ObservableObject {
                     // Learned preferences captured at enqueue apply only to the
                     // built-in mode they were captured for.
                     let captured = try? await recordingStore.dictationSource(for: recording.id)?.filter
+                    // The row was read when its turn came, so a filter picked
+                    // for a regeneration is already in it.
+                    let current = recording
+                    let plan: CleanupFilterPlan? = if let auto = current.cleanupFilterAuto {
+                        .auto(auto)
+                    } else {
+                        current.cleanupMode.map {
+                            .fixed(
+                                CleanupFilterSnapshot(
+                                    mode: $0,
+                                    customName: current.cleanupFilterName,
+                                    customInstructions: current.cleanupFilterInstructions,
+                                    customID: captured?.customName == current.cleanupFilterName ? captured?.customID : nil,
+                                    customWritesDigits: current.cleanupFilterWritesDigits,
+                                    learned: captured?.mode == $0 ? captured?.learned ?? [] : []
+                                ),
+                                current.cleanupFilterReason ?? .manual
+                            )
+                        }
+                    }
                     let cleanup = await cleanupPipeline.finalize(
                         text,
                         targetBundleID: recording.targetBundleID,
                         cleanupOverride: true,
-                        filterOverride: recording.cleanupMode.map {
-                            CleanupFilterSnapshot(
-                                mode: $0,
-                                customName: recording.cleanupFilterName,
-                                customInstructions: recording.cleanupFilterInstructions,
-                                customID: captured?.customID,
-                                customWritesDigits: recording.cleanupFilterWritesDigits,
-                                learned: captured?.mode == $0 ? captured?.learned ?? [] : []
-                            )
-                        }
+                        filterPlan: plan
                     )
                     if await discardCancelledOutput(recording) { return }
                     await recordingStore.completeDictationSource(recording.id, recognizerText: text, cleanup: cleanup)

@@ -279,12 +279,12 @@ class IndicatorViewModel: ObservableObject {
                 try? FileManager.default.removeItem(at: tempURL)
                 print("No speech detected, dictation discarded")
             } else {
-                let filter = cleanupPipeline.selectedFilter()
+                let plan = cleanupPipeline.selectedPlan()
                 self.isFinalizing = true
                 let cleanup = await self.cleanupPipeline.finalize(
                     rawText,
                     targetBundleID: self.pasteTarget?.bundleID,
-                    filterOverride: filter
+                    filterPlan: plan
                 )
                 self.isFinalizing = false
 
@@ -319,6 +319,7 @@ class IndicatorViewModel: ObservableObject {
                     cleanupFilterName: cleanup.customFilterName,
                     cleanupFilterInstructions: cleanup.customFilterInstructions,
                     cleanupFilterWritesDigits: cleanup.customFilterWritesDigits,
+                    cleanupFilterReason: cleanup.filterReason,
                     rawTokenEstimate: cleanup.rawTokenEstimate,
                     finalTokenEstimate: cleanup.finalTokenEstimate,
                     tokenEstimatorID: cleanup.tokenEstimatorID
@@ -343,7 +344,7 @@ class IndicatorViewModel: ObservableObject {
                     recordingStartedAt: recordingStartedAt,
                     recognizerText: rawText,
                     cleanup: cleanup,
-                    fallbackFilter: filter,
+                    fallbackFilter: plan.provisionalFilter,
                     disposition: disposition,
                     insertedText: attemptedDelivery ? Self.applyPostProcessing(text) : nil,
                     captureOrigin: .live,
@@ -380,11 +381,13 @@ class IndicatorViewModel: ObservableObject {
         } catch {
             self.isFinalizing = false
             print("Audio transcription failed; the audio is kept in History.")
+            let plan = cleanupPipeline.selectedPlan()
             _ = await recordingStore.addFailedDictation(
                 audioAt: tempURL,
                 error: error,
                 duration: duration,
-                selectedFilter: cleanupPipeline.selectedFilter(),
+                selectedFilter: plan.provisionalFilter,
+                autoConfig: plan.autoConfig,
                 cleanupRequested: cleanupPipeline.cleanupRequested(targetBundleID: pasteTarget?.bundleID),
                 targetBundleID: pasteTarget?.bundleID,
                 recordingStartedAt: recordingStartedAt,

@@ -267,6 +267,7 @@ struct FilterAssistantSheet: View {
                 height: 96,
                 accessibilityLabel: "Proposed filter instructions"
             )
+            FilterTriggerField(phrases: binding.triggers, accessibilityLabel: "Proposed trigger phrases")
             HStack {
                 Toggle("Use for new dictations", isOn: $session.selectAfterSaving)
                     .toggleStyle(.checkbox)

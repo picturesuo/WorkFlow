@@ -37,6 +37,12 @@ struct Recording: Identifiable, Codable, FetchableRecord, PersistableRecord, Equ
     var cleanupFilterName: String? = nil
     var cleanupFilterInstructions: String? = nil
     var cleanupFilterWritesDigits: Bool = false
+    /// Why the filter above was used: picked by hand, or what Auto saw.
+    /// Nil for rows from before Auto existed.
+    var cleanupFilterReason: FilterChoiceReason? = nil
+    /// Auto's choices captured at enqueue, kept until the queued dictation
+    /// is transcribed and the choice is made from its words.
+    var cleanupFilterAuto: FilterAutoConfig? = nil
     var rawTokenEstimate: Int? = nil
     var finalTokenEstimate: Int? = nil
     var tokenEstimatorID: String? = nil
@@ -51,6 +57,7 @@ struct Recording: Identifiable, Codable, FetchableRecord, PersistableRecord, Equ
         case title, mode, cleanupRequested, targetBundleID
         case cleanupMode, rawTokenEstimate, finalTokenEstimate, tokenEstimatorID
         case cleanupFilterName, cleanupFilterInstructions, cleanupFilterWritesDigits
+        case cleanupFilterReason, cleanupFilterAuto
     }
 
     static func == (lhs: Recording, rhs: Recording) -> Bool {
@@ -70,6 +77,8 @@ struct Recording: Identifiable, Codable, FetchableRecord, PersistableRecord, Equ
                lhs.cleanupFilterName == rhs.cleanupFilterName &&
                lhs.cleanupFilterInstructions == rhs.cleanupFilterInstructions &&
                lhs.cleanupFilterWritesDigits == rhs.cleanupFilterWritesDigits &&
+               lhs.cleanupFilterReason == rhs.cleanupFilterReason &&
+               lhs.cleanupFilterAuto == rhs.cleanupFilterAuto &&
                lhs.rawTokenEstimate == rhs.rawTokenEstimate &&
                lhs.finalTokenEstimate == rhs.finalTokenEstimate &&
                lhs.tokenEstimatorID == rhs.tokenEstimatorID &&
@@ -136,6 +145,8 @@ struct Recording: Identifiable, Codable, FetchableRecord, PersistableRecord, Equ
         static let cleanupFilterName = Column(CodingKeys.cleanupFilterName)
         static let cleanupFilterInstructions = Column(CodingKeys.cleanupFilterInstructions)
         static let cleanupFilterWritesDigits = Column(CodingKeys.cleanupFilterWritesDigits)
+        static let cleanupFilterReason = Column(CodingKeys.cleanupFilterReason)
+        static let cleanupFilterAuto = Column(CodingKeys.cleanupFilterAuto)
         static let rawTokenEstimate = Column(CodingKeys.rawTokenEstimate)
         static let finalTokenEstimate = Column(CodingKeys.finalTokenEstimate)
         static let tokenEstimatorID = Column(CodingKeys.tokenEstimatorID)
@@ -412,6 +423,21 @@ class RecordingStore: ObservableObject {
             )
         }
 
+        // Why each dictation used its filter, and Auto's choices for queued
+        // work. Older rows have neither and read as before.
+        migrator.registerMigration("v12_add_filter_choice") { db in
+            let recordingColumns = try db.columns(in: Recording.databaseTableName).map(\.name)
+            try db.alter(table: Recording.databaseTableName) { t in
+                if !recordingColumns.contains("cleanupFilterReason") { t.add(column: "cleanupFilterReason", .text) }
+                if !recordingColumns.contains("cleanupFilterAuto") { t.add(column: "cleanupFilterAuto", .text) }
+            }
+            if !(try db.columns(in: DictationSource.databaseTableName).map(\.name).contains("filterReason")) {
+                try db.alter(table: DictationSource.databaseTableName) { t in
+                    t.add(column: "filterReason", .text)
+                }
+            }
+        }
+
         try migrator.migrate(dbQueue)
     }
 
@@ -591,6 +617,7 @@ class RecordingStore: ObservableObject {
         error: Error,
         duration: TimeInterval,
         selectedFilter: CleanupFilterSnapshot,
+        autoConfig: FilterAutoConfig? = nil,
         cleanupRequested: Bool,
         targetBundleID: String?,
         recordingStartedAt: Date?,
@@ -612,7 +639,11 @@ class RecordingStore: ObservableObject {
             cleanupMode: filter?.mode,
             cleanupFilterName: filter?.customName,
             cleanupFilterInstructions: filter?.customInstructions,
-            cleanupFilterWritesDigits: filter?.customWritesDigits ?? false
+            cleanupFilterWritesDigits: filter?.customWritesDigits ?? false,
+            // Under Auto, Regenerate chooses from the words with the choices
+            // captured now, not with later edits.
+            cleanupFilterReason: filter == nil || autoConfig != nil ? nil : .manual,
+            cleanupFilterAuto: cleanupRequested ? autoConfig : nil
         )
         let audioURL = keepAudio(tempURL, recording.url)
         if audioURL != recording.url {
@@ -675,6 +706,11 @@ class RecordingStore: ObservableObject {
                 source.emittedText = cleanup.text
                 source.cleanupSource = cleanup.source
                 source.disposition = .notInserted
+                // Auto chose from the words just transcribed; the evidence
+                // names the filter actually used and why.
+                if let reason = cleanup.filterReason, reason.isAutomatic, let filter = cleanup.selectedFilter {
+                    source.setFilter(filter, reason: reason)
+                }
                 try source.update(db)
             }
         } catch {
@@ -762,6 +798,10 @@ class RecordingStore: ObservableObject {
                 updated.cleanupFilterName = cleanup.customFilterName
                 updated.cleanupFilterInstructions = cleanup.customFilterInstructions
                 updated.cleanupFilterWritesDigits = cleanup.customFilterWritesDigits
+                if let reason = cleanup.filterReason {
+                    updated.cleanupFilterReason = reason
+                    updated.cleanupFilterAuto = nil
+                }
                 updated.rawTokenEstimate = cleanup.rawTokenEstimate
                 updated.finalTokenEstimate = cleanup.finalTokenEstimate
                 updated.tokenEstimatorID = cleanup.tokenEstimatorID
@@ -825,6 +865,8 @@ class RecordingStore: ObservableObject {
                         Recording.Columns.cleanupFilterName.set(to: cleanup.customFilterName),
                         Recording.Columns.cleanupFilterInstructions.set(to: cleanup.customFilterInstructions),
                         Recording.Columns.cleanupFilterWritesDigits.set(to: cleanup.customFilterWritesDigits),
+                        Recording.Columns.cleanupFilterReason.set(to: cleanup.filterReason.flatMap(Self.encodedReason)),
+                        Recording.Columns.cleanupFilterAuto.set(to: nil),
                         Recording.Columns.rawTokenEstimate.set(to: cleanup.rawTokenEstimate),
                         Recording.Columns.finalTokenEstimate.set(to: cleanup.finalTokenEstimate),
                         Recording.Columns.tokenEstimatorID.set(to: cleanup.tokenEstimatorID)
@@ -841,6 +883,41 @@ class RecordingStore: ObservableObject {
             NotificationCenter.default.post(name: Self.recordingsDidUpdateNotification, object: nil)
         } catch {
             print("Failed to complete recording.")
+        }
+    }
+
+    nonisolated static func encodedReason(_ reason: FilterChoiceReason) -> String? {
+        (try? JSONEncoder().encode(reason)).flatMap { String(data: $0, encoding: .utf8) }
+    }
+
+    /// Sets the filter a regeneration uses, picked by hand from History. The
+    /// original evidence keeps the filter the dictation was made with.
+    func setRegenerationFilter(_ id: UUID, filter: CleanupFilterSnapshot) async {
+        do {
+            _ = try await dbQueue.write { db -> Int in
+                try Recording
+                    .filter(Recording.Columns.id == id)
+                    .updateAll(db, [
+                        Recording.Columns.cleanupRequested.set(to: true),
+                        Recording.Columns.cleanupMode.set(to: filter.mode.rawValue),
+                        Recording.Columns.cleanupFilterName.set(to: filter.customName),
+                        Recording.Columns.cleanupFilterInstructions.set(to: filter.customInstructions),
+                        Recording.Columns.cleanupFilterWritesDigits.set(to: filter.customWritesDigits),
+                        Recording.Columns.cleanupFilterReason.set(to: Self.encodedReason(.manual)),
+                        Recording.Columns.cleanupFilterAuto.set(to: nil),
+                    ])
+            }
+            if let index = recordings.firstIndex(where: { $0.id == id }) {
+                recordings[index].cleanupRequested = true
+                recordings[index].cleanupMode = filter.mode
+                recordings[index].cleanupFilterName = filter.customName
+                recordings[index].cleanupFilterInstructions = filter.customInstructions
+                recordings[index].cleanupFilterWritesDigits = filter.customWritesDigits
+                recordings[index].cleanupFilterReason = .manual
+                recordings[index].cleanupFilterAuto = nil
+            }
+        } catch {
+            print("Failed to save the regeneration filter.")
         }
     }
 

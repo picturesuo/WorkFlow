@@ -12,6 +12,9 @@ struct CustomCleanupFilter: Identifiable, Codable, Equatable {
     /// Homework does, because cleanup models do not reliably follow a digits
     /// instruction. It is an explicit choice, never read from the wording.
     var writesDigits = false
+    /// Phrases that let Auto pick this filter when at least two different
+    /// ones come up in one dictation. Unused unless Auto is chosen.
+    var triggers: [String] = []
 }
 
 extension CustomCleanupFilter {
@@ -30,6 +33,8 @@ extension CustomCleanupFilter {
         baseMode = try container.decode(CleanupMode.self, forKey: .baseMode)
         instructions = try container.decode(String.self, forKey: .instructions)
         writesDigits = try container.decodeIfPresent(Bool.self, forKey: .writesDigits) ?? false
+        // Filters saved before trigger phrases existed decode with none.
+        triggers = try container.decodeIfPresent([String].self, forKey: .triggers) ?? []
     }
 }
 
@@ -133,6 +138,44 @@ enum CleanupFilterSelection: Hashable {
     }
 }
 
+/// Keeps a growing collection of saved filters easy to scan: short lists
+/// stay flat, longer ones group by the built-in mode they build on, and the
+/// Settings list can be searched.
+enum FilterCollection {
+    /// Up to this many saved filters, menus and lists stay flat.
+    static let flatLimit = 8
+
+    static func isLarge(_ filters: [CustomCleanupFilter]) -> Bool {
+        filters.count > flatLimit
+    }
+
+    /// Saved filters by base mode, in the built-in modes' order, each group
+    /// sorted by name. Empty groups are left out.
+    static func grouped(_ filters: [CustomCleanupFilter]) -> [(mode: CleanupMode, filters: [CustomCleanupFilter])] {
+        CleanupMode.allCases.compactMap { mode in
+            let group = filters
+                .filter { $0.baseMode == mode }
+                .sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
+            return group.isEmpty ? nil : (mode, group)
+        }
+    }
+
+    /// Filters whose name, instructions, phrases, or base mode contain every
+    /// word of the query, ignoring case and accents.
+    static func search(_ filters: [CustomCleanupFilter], query: String) -> [CustomCleanupFilter] {
+        let terms = query
+            .split(whereSeparator: \.isWhitespace)
+            .map { $0.folding(options: [.caseInsensitive, .diacriticInsensitive], locale: nil) }
+        guard !terms.isEmpty else { return filters }
+        return filters.filter { filter in
+            let haystack = ([filter.name, filter.instructions, filter.baseMode.displayName] + filter.triggers)
+                .joined(separator: " ")
+                .folding(options: [.caseInsensitive, .diacriticInsensitive], locale: nil)
+            return terms.allSatisfy { haystack.contains($0) }
+        }
+    }
+}
+
 enum CustomCleanupFilterValidationError: LocalizedError, Equatable {
     case emptyName
     case nameTooLong
@@ -141,6 +184,10 @@ enum CustomCleanupFilterValidationError: LocalizedError, Equatable {
     case emptyInstructions
     case instructionsTooLong
     case tooManyFilters
+    case tooManyTriggers
+    case triggerTooLong(String)
+    case triggerTooCommon(String)
+    case duplicateTrigger(String, otherFilter: String)
 
     var errorDescription: String? {
         switch self {
@@ -158,12 +205,20 @@ enum CustomCleanupFilterValidationError: LocalizedError, Equatable {
             "Keep the instructions to \(CustomCleanupFilterStore.maximumInstructionLength) characters or fewer."
         case .tooManyFilters:
             "You can save up to \(CustomCleanupFilterStore.maximumFilters) custom filters."
+        case .tooManyTriggers:
+            "Use up to \(FilterTriggers.maximumCount) phrases for automatic choice."
+        case .triggerTooLong(let phrase):
+            "Keep “\(phrase)” to \(FilterTriggers.maximumWords) words and \(FilterTriggers.maximumLength) characters."
+        case .triggerTooCommon(let phrase):
+            "“\(phrase)” comes up in almost any dictation. Choose a word specific to this kind of writing."
+        case .duplicateTrigger(let phrase, let other):
+            "“\(phrase)” already picks “\(other)”. Each phrase can pick only one filter."
         }
     }
 }
 
 enum CustomCleanupFilterStore {
-    static let maximumFilters = 20
+    static let maximumFilters = 50
     static let maximumNameLength = 40
     static let maximumInstructionLength = 500
 
@@ -237,8 +292,12 @@ enum CustomCleanupFilterStore {
         guard !isNew || existing.count < maximumFilters else {
             throw CustomCleanupFilterValidationError.tooManyFilters
         }
+        let triggers = try FilterTriggers.validated(
+            filter.triggers, others: existing.filter { $0.id != filter.id }
+        )
         return CustomCleanupFilter(
-            id: filter.id, name: name, baseMode: filter.baseMode, instructions: instructions, writesDigits: filter.writesDigits
+            id: filter.id, name: name, baseMode: filter.baseMode, instructions: instructions,
+            writesDigits: filter.writesDigits, triggers: triggers
         )
     }
 
@@ -266,7 +325,11 @@ enum CustomCleanupFilterStore {
         return filters
     }
 
+    /// Picks a filter by hand. That always wins, so it also turns Auto off.
     static func select(_ selection: CleanupFilterSelection, in defaults: UserDefaults = .standard) {
+        if defaults.bool(forKey: FilterAutoSettings.enabledKey) {
+            defaults.set(false, forKey: FilterAutoSettings.enabledKey)
+        }
         switch selection {
         case .builtIn(let mode):
             defaults.set(mode.rawValue, forKey: modeKey)
@@ -322,6 +385,7 @@ enum CustomCleanupFilterStore {
     static func sanitized(_ filters: [CustomCleanupFilter]) -> [CustomCleanupFilter] {
         var seenIDs = Set<UUID>()
         var seenNames = Set<String>()
+        var seenTriggers = Set<String>()
         var result: [CustomCleanupFilter] = []
         for var filter in filters {
             filter.name = String(filter.name.trimmingCharacters(in: .whitespacesAndNewlines).prefix(maximumNameLength))
@@ -331,6 +395,9 @@ enum CustomCleanupFilterStore {
             guard !filter.name.isEmpty, !filter.instructions.isEmpty,
                   seenIDs.insert(filter.id).inserted,
                   seenNames.insert(filter.name.lowercased()).inserted else { continue }
+            // Stored phrases that are invalid, or already pick an earlier
+            // filter, are dropped rather than costing the filter itself.
+            filter.triggers = FilterTriggers.sanitized(filter.triggers, excluding: &seenTriggers)
             result.append(filter)
             if result.count == maximumFilters { break }
         }

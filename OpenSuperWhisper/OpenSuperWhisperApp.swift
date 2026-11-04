@@ -312,33 +312,17 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
 
         let cleanupModeItem = NSMenuItem(title: "Dictation Mode", action: nil, keyEquivalent: "")
         let cleanupModeMenu = NSMenu()
-        let customFilters = CustomCleanupFilterStore.load()
-        let currentSelection = CustomCleanupFilterStore.currentSelection(filters: customFilters)
-        func addWritingItem(_ title: String, selection: CleanupFilterSelection, toolTip: String) {
-            let item = NSMenuItem(
-                title: title,
-                action: #selector(selectCleanupMode(_:)),
-                keyEquivalent: ""
-            )
-            item.target = self
-            item.representedObject = selection.tag
-            item.state = selection == currentSelection ? .on : .off
-            item.toolTip = toolTip
-            cleanupModeMenu.addItem(item)
-        }
-        for mode in CleanupMode.allCases {
-            addWritingItem(mode.displayName, selection: .builtIn(mode), toolTip: mode.description)
-        }
-        if !customFilters.isEmpty {
-            cleanupModeMenu.addItem(.separator())
-            for filter in customFilters {
-                addWritingItem(
-                    filter.name,
-                    selection: .custom(filter.id),
-                    toolTip: filter.summary
-                )
-            }
-        }
+        DictationModeMenu.populate(
+            cleanupModeMenu,
+            filters: CustomCleanupFilterStore.load(),
+            isAuto: FilterAutoSettings.isEnabled(),
+            selection: CustomCleanupFilterStore.currentSelection(),
+            fallback: FilterAutoSettings.fallback(),
+            target: self,
+            select: #selector(selectCleanupMode(_:)),
+            selectAuto: #selector(selectAutoFilter),
+            manage: #selector(openFilters)
+        )
         cleanupModeMenu.addItem(.separator())
         let learnItem = NSMenuItem(
             title: "Learn from Finished Writing…",
@@ -437,6 +421,11 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
         showMainWindow()
     }
 
+    @objc private func openFilters() {
+        showMainWindow()
+        SettingsRequest.open(pane: .cleanup)
+    }
+
     @objc private func openLearning() {
         showMainWindow()
         SettingsRequest.open(pane: .personalize)
@@ -449,6 +438,11 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
         } else if !meeting.isBusy {
             _ = meeting.start(title: MeetingSessionController.defaultTitle())
         }
+    }
+
+    @objc private func selectAutoFilter() {
+        FilterAutoSettings.setEnabled(true)
+        NotificationCenter.default.post(name: .cleanupModeChanged, object: nil)
     }
 
     @objc private func selectCleanupMode(_ sender: NSMenuItem) {
@@ -577,3 +571,73 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
 }
 
 extension AppDelegate: NSWindowDelegate {}
+
+/// The menu-bar Dictation Mode menu: Auto, the built-in modes, and saved
+/// filters, which stay flat while few and move into submenus by base mode
+/// once the collection is large.
+enum DictationModeMenu {
+    static func populate(
+        _ menu: NSMenu,
+        filters: [CustomCleanupFilter],
+        isAuto: Bool,
+        selection: CleanupFilterSelection,
+        fallback: CleanupFilterSelection,
+        fallbackName: String? = nil,
+        target: AnyObject,
+        select: Selector,
+        selectAuto: Selector,
+        manage: Selector
+    ) {
+        func writingItem(_ title: String, selection item: CleanupFilterSelection, toolTip: String) -> NSMenuItem {
+            let menuItem = NSMenuItem(title: title, action: select, keyEquivalent: "")
+            menuItem.target = target
+            menuItem.representedObject = item.tag
+            menuItem.state = !isAuto && item == selection ? .on : .off
+            menuItem.toolTip = toolTip
+            return menuItem
+        }
+        let fallbackName: String = fallbackName ?? {
+            switch fallback {
+            case .builtIn(let mode): mode.displayName
+            case .custom(let id): filters.first { $0.id == id }?.name ?? CleanupMode.everyday.displayName
+            }
+        }()
+        let autoItem = NSMenuItem(title: WritingFilterPicker.autoTitle, action: selectAuto, keyEquivalent: "")
+        autoItem.target = target
+        autoItem.state = isAuto ? .on : .off
+        autoItem.toolTip = "Picks a saved filter when two of its phrases come up; otherwise \(fallbackName)."
+        menu.addItem(autoItem)
+        menu.addItem(.separator())
+        for mode in CleanupMode.allCases {
+            menu.addItem(writingItem(mode.displayName, selection: .builtIn(mode), toolTip: mode.description))
+        }
+        if !filters.isEmpty {
+            menu.addItem(.separator())
+            if FilterCollection.isLarge(filters) {
+                for group in FilterCollection.grouped(filters) {
+                    let groupItem = NSMenuItem(
+                        title: "Based on \(group.mode.displayName) (\(group.filters.count))", action: nil, keyEquivalent: ""
+                    )
+                    let groupMenu = NSMenu()
+                    groupMenu.autoenablesItems = false
+                    for filter in group.filters {
+                        groupMenu.addItem(writingItem(filter.name, selection: .custom(filter.id), toolTip: filter.summary))
+                    }
+                    groupItem.submenu = groupMenu
+                    // The group holding the filter in use shows a dash.
+                    groupItem.state = !isAuto && group.filters.contains { .custom($0.id) == selection } ? .mixed : .off
+                    menu.addItem(groupItem)
+                }
+            } else {
+                for filter in filters {
+                    menu.addItem(writingItem(filter.name, selection: .custom(filter.id), toolTip: filter.summary))
+                }
+            }
+        }
+        menu.addItem(.separator())
+        let manageItem = NSMenuItem(title: "Manage Filters…", action: manage, keyEquivalent: "")
+        manageItem.target = target
+        manageItem.toolTip = "Create, edit, and search custom filters, and set up Auto"
+        menu.addItem(manageItem)
+    }
+}
