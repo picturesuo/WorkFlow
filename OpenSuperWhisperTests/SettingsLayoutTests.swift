@@ -145,7 +145,7 @@ final class SettingsLayoutTests: XCTestCase {
             .dictation: ["Shortcut that starts dictation", "Second key that also starts dictation",
                          "How the shortcut records", "Speech model", "Dictation language"],
             .cleanup: [],
-            .personalize: ["Mode to learn for", "Running app"],
+            .personalize: ["Learned preferences for", "Mode older dictations teach", "Running app"],
             .providerCost: ["Cleanup provider"],
         ]
         try AccessibilityTree.withSwiftUITree {

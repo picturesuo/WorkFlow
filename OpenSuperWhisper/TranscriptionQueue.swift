@@ -16,6 +16,9 @@ class TranscriptionQueue: ObservableObject {
     private var cancelledRecordingIds: Set<UUID> = []
     private var progressCancellable: AnyCancellable?
 
+    /// Where learned preferences live, to check what a regeneration may reuse.
+    private let learningDefaults: UserDefaults
+
     private convenience init() {
         self.init(
             transcriptionService: TranscriptionService.shared,
@@ -27,11 +30,13 @@ class TranscriptionQueue: ObservableObject {
     init(
         transcriptionService: TranscriptionService,
         recordingStore: RecordingStore,
-        cleanupPipeline: TranscriptCleanupPipeline
+        cleanupPipeline: TranscriptCleanupPipeline,
+        learningDefaults: UserDefaults = .standard
     ) {
         self.transcriptionService = transcriptionService
         self.recordingStore = recordingStore
         self.cleanupPipeline = cleanupPipeline
+        self.learningDefaults = learningDefaults
         setupProgressObserver()
     }
     
@@ -380,8 +385,15 @@ class TranscriptionQueue: ObservableObject {
 
                 if recording.cleanupRequested {
                     // Learned preferences captured at enqueue apply only to the
-                    // built-in mode they were captured for.
+                    // mode or filter they were captured for. Queued work keeps
+                    // them as captured; a regeneration keeps only the ones
+                    // still in use, so a deleted, switched-off, or reset
+                    // preference never comes back.
                     let captured = try? await recordingStore.dictationSource(for: recording.id)?.filter
+                    let capturedLearned = captured?.learned ?? []
+                    let learned = isRegeneration
+                        ? LearnedPreferenceStore.stillActive(capturedLearned, in: learningDefaults)
+                        : capturedLearned
                     let cleanup = await cleanupPipeline.finalize(
                         text,
                         targetBundleID: recording.targetBundleID,
@@ -393,7 +405,7 @@ class TranscriptionQueue: ObservableObject {
                                 customInstructions: recording.cleanupFilterInstructions,
                                 customID: captured?.customID,
                                 customWritesDigits: recording.cleanupFilterWritesDigits,
-                                learned: captured?.mode == $0 ? captured?.learned ?? [] : []
+                                learned: captured?.mode == $0 ? learned : []
                             )
                         }
                     )

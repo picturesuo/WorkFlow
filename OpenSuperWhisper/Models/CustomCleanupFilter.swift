@@ -45,8 +45,9 @@ struct CleanupFilterSnapshot: Equatable, Sendable {
     let customID: UUID?
     /// Whether the saved filter writes spoken quantities as digits.
     let customWritesDigits: Bool
-    /// Enabled learned preferences for a built-in mode. A custom filter keeps
-    /// exactly its saved instructions, so it never carries learned ones.
+    /// Enabled learned preferences for this built-in mode or saved filter.
+    /// A saved filter carries only what it learned itself, never a built-in
+    /// mode's, and its saved instructions are never changed.
     let learned: [LearnedPreference]
 
     init(
@@ -65,23 +66,26 @@ struct CleanupFilterSnapshot: Equatable, Sendable {
             self.customInstructions = nil
             self.customID = nil
             self.customWritesDigits = false
-            self.learned = learned.filter { $0.mode == mode && $0.isEnabled }
+            self.learned = learned.filter { $0.mode == mode && $0.filterID == nil && $0.isEnabled && $0.isApplicable }
         } else {
             self.customName = name
             self.customInstructions = instructions
             self.customID = customID
             self.customWritesDigits = customWritesDigits
-            self.learned = []
+            self.learned = customID.map { id in
+                learned.filter { $0.filterID == id && $0.isEnabled && $0.isApplicable }
+            } ?? []
         }
     }
 
-    init(filter: CustomCleanupFilter) {
+    init(filter: CustomCleanupFilter, learned: [LearnedPreference] = []) {
         self.init(
             mode: filter.baseMode,
             customName: filter.name,
             customInstructions: filter.instructions,
             customID: filter.id,
-            customWritesDigits: filter.writesDigits
+            customWritesDigits: filter.writesDigits,
+            learned: learned
         )
     }
 
@@ -92,9 +96,10 @@ struct CleanupFilterSnapshot: Equatable, Sendable {
     var isCustom: Bool { customName != nil }
 
     /// Whether a successful cleanup finishes spoken quantities as digits on
-    /// this Mac: built-in Homework always does, a saved filter when it says so.
+    /// this Mac: built-in Homework always does, a saved filter when it says
+    /// so, and either when it learned the person writes digits.
     var writesDigits: Bool {
-        isCustom ? customWritesDigits : mode == .homework
+        (isCustom ? customWritesDigits : mode == .homework) || learned.contains { $0.kind == .digits }
     }
 
     /// Whether cleanup may choose a number style, which also turns on the
@@ -259,10 +264,12 @@ enum CustomCleanupFilterStore {
         return filters
     }
 
+    /// Deletes a filter and what it learned.
     @discardableResult
     static func delete(id: UUID, in defaults: UserDefaults = .standard) -> [CustomCleanupFilter] {
         let filters = load(from: defaults).filter { $0.id != id }
         save(filters, to: defaults)
+        LearnedPreferenceStore.removeFilter(id, in: defaults)
         return filters
     }
 
@@ -307,7 +314,10 @@ enum CustomCleanupFilterStore {
         switch currentSelection(in: defaults, filters: filters) {
         case .custom(let id):
             if let filter = filters.first(where: { $0.id == id }) {
-                return CleanupFilterSnapshot(filter: filter)
+                return CleanupFilterSnapshot(
+                    filter: filter,
+                    learned: LearnedPreferenceStore.activePreferences(for: .filter(filter), in: defaults)
+                )
             }
             return builtInSnapshot(baseMode(in: defaults), in: defaults)
         case .builtIn(let mode):

@@ -1,10 +1,56 @@
 import CryptoKit
 import Foundation
 
-// Correction learning compares a finished document the user pastes with the
+// Preference learning compares a finished document the user pastes with the
 // dictations WorkFlow produced for it, and keeps only reusable, validated
-// style preferences for one built-in mode. Everything here is local and
+// style preferences for the built-in mode or saved filter each dictation was
+// made with. Nothing here trains a model. Everything is local and
 // deterministic except the single classification request the session sends.
+
+/// Which built-in mode or saved filter History recorded for a dictation.
+enum CorrectionProvenance: Hashable, Sendable {
+    /// A built-in mode recorded with the dictation.
+    case mode(CleanupMode)
+    /// A saved filter recorded with the dictation.
+    case filter(UUID)
+    /// A saved filter whose identity History did not record.
+    case unknownFilter
+    /// Older History that recorded no mode at all.
+    case unrecorded
+}
+
+/// What a learned preference belongs to: a built-in mode, or a saved filter.
+/// Identity is the mode or the filter id; a filter's name, base mode, and
+/// digits choice are carried along for prompts and contract checks.
+struct LearningTarget: Hashable, Sendable {
+    let mode: CleanupMode
+    let filterID: UUID?
+    let filterName: String?
+    let filterWritesDigits: Bool
+
+    static func mode(_ mode: CleanupMode) -> LearningTarget {
+        LearningTarget(mode: mode, filterID: nil, filterName: nil, filterWritesDigits: false)
+    }
+
+    static func filter(_ filter: CustomCleanupFilter) -> LearningTarget {
+        LearningTarget(mode: filter.baseMode, filterID: filter.id, filterName: filter.name, filterWritesDigits: filter.writesDigits)
+    }
+
+    var isFilter: Bool { filterID != nil }
+
+    /// Stable key for stored evidence: the mode's raw value for built-ins, so
+    /// what earlier versions stored keeps its meaning.
+    var storageKey: String { filterID.map { "filter:" + $0.uuidString } ?? mode.rawValue }
+
+    /// "Writing" or "Lab report".
+    var displayName: String { filterName ?? mode.displayName }
+
+    /// "Writing mode" or "the Lab report filter".
+    var phrase: String { filterName.map { "the \($0) filter" } ?? "\(mode.displayName) mode" }
+
+    static func == (lhs: LearningTarget, rhs: LearningTarget) -> Bool { lhs.storageKey == rhs.storageKey }
+    func hash(into hasher: inout Hasher) { hasher.combine(storageKey) }
+}
 
 /// One completed dictation that a finished document may contain.
 struct CorrectionCandidate: Equatable, Sendable {
@@ -15,7 +61,8 @@ struct CorrectionCandidate: Equatable, Sendable {
     /// What cleanup received; nil for legacy History, which kept no original.
     let cleanupInput: String?
     let recognizer: String?
-    let selectedMode: CleanupMode?
+    /// The mode or filter the dictation was made with, as recorded.
+    let provenance: CorrectionProvenance
 
     var isLegacy: Bool { cleanupInput == nil }
 
@@ -25,14 +72,14 @@ struct CorrectionCandidate: Equatable, Sendable {
         emitted: String,
         cleanupInput: String? = nil,
         recognizer: String? = nil,
-        selectedMode: CleanupMode? = nil
+        provenance: CorrectionProvenance = .unrecorded
     ) {
         self.id = id
         self.timestamp = timestamp
         self.emitted = emitted
         self.cleanupInput = cleanupInput
         self.recognizer = recognizer
-        self.selectedMode = selectedMode
+        self.provenance = provenance
     }
 
     /// New dictations use their first emitted text and original input, even if
@@ -40,24 +87,42 @@ struct CorrectionCandidate: Equatable, Sendable {
     /// saved text is the only thing known, and no original words are invented.
     init?(recording: Recording, source: DictationSource?) {
         if let source, let emitted = source.emittedText, let recognizer = source.recognizerText {
+            let provenance: CorrectionProvenance = if let id = source.filterID {
+                .filter(id)
+            } else if source.filterName != nil {
+                .unknownFilter
+            } else {
+                .mode(source.selectedMode)
+            }
             self.init(
                 id: recording.id,
                 timestamp: recording.timestamp,
                 emitted: emitted,
                 cleanupInput: source.cleanupInput,
                 recognizer: recognizer,
-                selectedMode: source.selectedMode
+                provenance: provenance
             )
         } else {
+            // Legacy rows name a saved filter but never recorded which one.
+            let provenance: CorrectionProvenance = if recording.cleanupFilterName != nil {
+                .unknownFilter
+            } else if let mode = recording.cleanupMode {
+                .mode(mode)
+            } else {
+                .unrecorded
+            }
             self.init(
                 id: recording.id,
                 timestamp: recording.timestamp,
                 emitted: recording.transcription,
-                selectedMode: recording.cleanupMode
+                provenance: provenance
             )
         }
         guard !emitted.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return nil }
     }
+
+    /// Words in the dictation, which decides whether it can ever match.
+    var wordCount: Int { CorrectionText.words(emitted).count }
 }
 
 /// A reusable style preference from a closed set of kinds. Its instruction is
@@ -110,6 +175,7 @@ struct LearnedPreference: Codable, Equatable, Identifiable, Sendable {
     }
 
     var id = UUID()
+    /// The built-in mode, or for a saved filter the mode it was based on.
     let mode: CleanupMode
     let kind: Kind
     /// The spelling to replace, or the word for filler kinds.
@@ -124,10 +190,47 @@ struct LearnedPreference: Codable, Equatable, Identifiable, Sendable {
     var fromLegacyOnly: Bool
     var learnedAt: Date
     var updatedAt: Date
+    /// The saved filter this belongs to; nil for a built-in mode.
+    var filterID: UUID? = nil
+    /// History rows the supporting edits came from; never their text.
+    var sourceRecordingIDs: [UUID] = []
+
+    enum CodingKeys: String, CodingKey {
+        case id, mode, kind, from, to, isEnabled, origin, evidence, fromLegacyOnly, learnedAt, updatedAt
+        case filterID, sourceRecordingIDs
+    }
+
+    var target: LearningTarget { LearningTarget(mode: mode, filterID: filterID, filterName: nil, filterWritesDigits: false) }
 
     var formatsNumbers: Bool { kind == .digits || kind == .percentSign }
 
     var key: String { [kind.rawValue, from?.lowercased() ?? "", to ?? ""].joined(separator: "|") }
+
+    /// Why a kept preference no longer applies under the current contract.
+    enum Inactivity: Equatable, Sendable {
+        /// A spelling that changes letters, so it may change a word or a name.
+        case wordChange
+        /// Removing a word that is often content, such as "like" or "right".
+        case ambiguousFiller
+    }
+
+    /// Preferences learned before the current contract stay listed, but do
+    /// not apply, until the person converts or deletes them.
+    var inactivity: Inactivity? {
+        switch kind {
+        case .spelling:
+            guard let from, let to else { return nil }
+            return CorrectionText.isOrthographicChange(from: from, to: to) ? nil : .wordChange
+        case .removeFiller:
+            guard let from else { return nil }
+            return Self.removableFillers.contains(from.lowercased()) ? nil : .ambiguousFiller
+        default:
+            return nil
+        }
+    }
+
+    /// Well formed and within what is learned and applied automatically now.
+    var isApplicable: Bool { isWellFormed && inactivity == nil }
 
     var instruction: String {
         switch kind {
@@ -156,9 +259,19 @@ struct LearnedPreference: Codable, Equatable, Identifiable, Sendable {
         }
     }
 
+    /// The same for a target: a saved filter that writes digits already
+    /// formats numbers on this Mac.
+    static func isRedundant(_ kind: Kind, in target: LearningTarget) -> Bool {
+        isRedundant(kind, in: target.mode) || (target.filterWritesDigits && (kind == .digits || kind == .percentSign))
+    }
+
     static func isAllowed(_ kind: Kind, in mode: CleanupMode) -> Bool {
         // Homework writes quantities as digits by request; edits cannot undo that.
         !(mode == .homework && kind == .numberWords)
+    }
+
+    static func isAllowed(_ kind: Kind, in target: LearningTarget) -> Bool {
+        isAllowed(kind, in: target.mode) && !(target.filterWritesDigits && kind == .numberWords)
     }
 
     /// Words the filler kinds may name. Anything else is a content edit.
@@ -167,6 +280,13 @@ struct LearnedPreference: Codable, Equatable, Identifiable, Sendable {
         "so", "really", "right", "okay", "ok", "well", "anyway", "you know", "i mean",
         "kind of", "sort of"
     ]
+
+    /// Fillers whose removal is learned automatically. The others ("like",
+    /// "right", "just", "so", "well", "actually", ...) are often content
+    /// ("I like it", "turn right"), and no check can tell a filler use from a
+    /// content use, so removing them is never learned. Restoring any of them
+    /// (keep_word) is still learned, since that keeps what the speaker said.
+    static let removableFillers: Set<String> = ["um", "uh", "erm", "hmm", "basically", "you know", "i mean"]
 
     static let maximumPhraseLength = 40
     static let maximumPhraseWords = 4
@@ -182,13 +302,15 @@ struct LearnedPreference: Codable, Equatable, Identifiable, Sendable {
         return phrase
     }
 
-    /// Re-checks a stored or proposed preference against the closed contract.
+    /// Re-checks a stored or proposed preference against the closed contract
+    /// for what may be kept. A spelling that trades meaning is never kept;
+    /// `isApplicable` decides what applies.
     var isWellFormed: Bool {
         switch kind {
         case .spelling:
             guard let from, let to, Self.sanitizedPhrase(from) == from, Self.sanitizedPhrase(to) == to,
                   from != to else { return false }
-            return CorrectionText.isSpellingChange(from: from, to: to)
+            return CorrectionText.isRespelling(from: from, to: to)
         case .removeFiller, .keepWord:
             guard let from, Self.sanitizedPhrase(from) == from, to == nil else { return false }
             return Self.fillerWords.contains(from.lowercased())
@@ -198,14 +320,36 @@ struct LearnedPreference: Codable, Equatable, Identifiable, Sendable {
     }
 }
 
-/// Learned preferences per built-in mode, kept in preferences on this Mac.
+extension LearnedPreference {
+    /// Preferences saved before saved filters or source tracking existed
+    /// decode as built-in preferences with no recorded sources.
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(UUID.self, forKey: .id)
+        mode = try container.decode(CleanupMode.self, forKey: .mode)
+        kind = try container.decode(Kind.self, forKey: .kind)
+        from = try container.decodeIfPresent(String.self, forKey: .from)
+        to = try container.decodeIfPresent(String.self, forKey: .to)
+        isEnabled = try container.decode(Bool.self, forKey: .isEnabled)
+        origin = try container.decode(Origin.self, forKey: .origin)
+        evidence = try container.decode([String].self, forKey: .evidence)
+        fromLegacyOnly = try container.decode(Bool.self, forKey: .fromLegacyOnly)
+        learnedAt = try container.decode(Date.self, forKey: .learnedAt)
+        updatedAt = try container.decode(Date.self, forKey: .updatedAt)
+        filterID = try container.decodeIfPresent(UUID.self, forKey: .filterID)
+        sourceRecordingIDs = try container.decodeIfPresent([UUID].self, forKey: .sourceRecordingIDs) ?? []
+    }
+}
+
+/// Learned preferences per built-in mode and saved filter, kept in
+/// preferences on this Mac.
 /// Every write starts from a fresh load, so a cancelled or late request can
 /// never overwrite a reset or an edit made meanwhile.
 enum LearnedPreferenceStore {
     static let dataKey = "learnedPreferencesData"
     static let enabledKey = "correctionLearningEnabled"
-    /// Fingerprints of edits already classified per mode, accepted or not, so
-    /// a repeated document is never sent again.
+    /// Fingerprints of edits already classified per mode or filter, accepted
+    /// or not, so a repeated document is never sent again.
     static let reviewedKey = "learnedPreferencesReviewedEdits"
     static let maximumReviewedPerMode = 500
     static let maximumRulesPerMode = 12
@@ -241,14 +385,34 @@ enum LearnedPreferenceStore {
         defaults.set(try? JSONEncoder().encode(sanitized(preferences)), forKey: dataKey)
     }
 
+    /// Everything kept for a built-in mode, including preferences that no
+    /// longer apply.
     static func preferences(for mode: CleanupMode, in defaults: UserDefaults = .standard) -> [LearnedPreference] {
-        load(from: defaults).filter { $0.mode == mode }
+        preferences(for: .mode(mode), in: defaults)
+    }
+
+    static func preferences(for target: LearningTarget, in defaults: UserDefaults = .standard) -> [LearnedPreference] {
+        load(from: defaults).filter { $0.target == target }
     }
 
     /// What cleanup applies for a mode now: nothing while learning is off.
     static func activePreferences(for mode: CleanupMode, in defaults: UserDefaults = .standard) -> [LearnedPreference] {
+        activePreferences(for: .mode(mode), in: defaults)
+    }
+
+    static func activePreferences(for target: LearningTarget, in defaults: UserDefaults = .standard) -> [LearnedPreference] {
         guard isLearningEnabled(in: defaults) else { return [] }
-        return preferences(for: mode, in: defaults).filter(\.isEnabled)
+        return preferences(for: target, in: defaults).filter { $0.isEnabled && $0.isApplicable }
+    }
+
+    /// The captured preferences a regeneration may still use: only those the
+    /// person has not deleted, switched off, or reset since, and nothing
+    /// learned after the dictation.
+    static func stillActive(_ captured: [LearnedPreference], in defaults: UserDefaults = .standard) -> [LearnedPreference] {
+        guard isLearningEnabled(in: defaults), !captured.isEmpty else { return [] }
+        let stored = load(from: defaults)
+        let active = Set(stored.filter { $0.isEnabled && $0.isApplicable }.map { "\($0.target.storageKey)|\($0.key)" })
+        return captured.filter { active.contains("\($0.target.storageKey)|\($0.key)") }
     }
 
     static func setEnabled(_ id: UUID, _ isEnabled: Bool, in defaults: UserDefaults = .standard) {
@@ -263,23 +427,42 @@ enum LearnedPreferenceStore {
     }
 
     static func reset(_ mode: CleanupMode, in defaults: UserDefaults = .standard) {
-        save(load(from: defaults).filter { $0.mode != mode }, to: defaults)
+        reset(.mode(mode), in: defaults)
+    }
+
+    static func reset(_ target: LearningTarget, in defaults: UserDefaults = .standard) {
+        save(load(from: defaults).filter { $0.target != target }, to: defaults)
         var reviewed = reviewedEdits(in: defaults)
-        reviewed[mode.rawValue] = nil
+        reviewed[target.storageKey] = nil
         defaults.set(reviewed, forKey: reviewedKey)
     }
 
-    /// Fingerprints of edits already learned from or classified for a mode.
+    /// A deleted saved filter takes what it learned with it.
+    static func removeFilter(_ id: UUID, in defaults: UserDefaults = .standard) {
+        let target = LearningTarget(mode: .everyday, filterID: id, filterName: nil, filterWritesDigits: false)
+        guard load(from: defaults).contains(where: { $0.filterID == id }) || reviewedEdits(in: defaults)[target.storageKey] != nil else { return }
+        reset(target, in: defaults)
+    }
+
+    /// Fingerprints of edits already learned from or classified for a target.
     static func knownEvidence(for mode: CleanupMode, in defaults: UserDefaults = .standard) -> Set<String> {
-        Set(preferences(for: mode, in: defaults).flatMap(\.evidence))
-            .union(reviewedEdits(in: defaults)[mode.rawValue] ?? [])
+        knownEvidence(for: .mode(mode), in: defaults)
+    }
+
+    static func knownEvidence(for target: LearningTarget, in defaults: UserDefaults = .standard) -> Set<String> {
+        Set(preferences(for: target, in: defaults).flatMap(\.evidence))
+            .union(reviewedEdits(in: defaults)[target.storageKey] ?? [])
     }
 
     static func markReviewed(_ fingerprints: [String], for mode: CleanupMode, in defaults: UserDefaults = .standard) {
+        markReviewed(fingerprints, for: .mode(mode), in: defaults)
+    }
+
+    static func markReviewed(_ fingerprints: [String], for target: LearningTarget, in defaults: UserDefaults = .standard) {
         var reviewed = reviewedEdits(in: defaults)
-        let current = reviewed[mode.rawValue] ?? []
+        let current = reviewed[target.storageKey] ?? []
         let fresh = fingerprints.filter { !current.contains($0) }
-        reviewed[mode.rawValue] = Array((current + fresh).suffix(maximumReviewedPerMode))
+        reviewed[target.storageKey] = Array((current + fresh).suffix(maximumReviewedPerMode))
         defaults.set(reviewed, forKey: reviewedKey)
     }
 
@@ -294,10 +477,22 @@ enum LearnedPreferenceStore {
         now: Date = Date(),
         in defaults: UserDefaults = .standard
     ) -> MergeResult {
+        merge(learned, into: .mode(mode), now: now, in: defaults)
+    }
+
+    /// Adds or reinforces preferences for one target. Only preferences within
+    /// the current contract are added or reinforced.
+    @discardableResult
+    static func merge(
+        _ learned: [LearnedPreference],
+        into target: LearningTarget,
+        now: Date = Date(),
+        in defaults: UserDefaults = .standard
+    ) -> MergeResult {
         var values = load(from: defaults)
         var result = MergeResult()
-        for preference in learned where preference.mode == mode && preference.isWellFormed {
-            if let index = values.firstIndex(where: { $0.mode == mode && $0.key == preference.key }) {
+        for preference in learned where preference.target == target && preference.isApplicable {
+            if let index = values.firstIndex(where: { $0.target == target && $0.key == preference.key }) {
                 let known = Set(values[index].evidence)
                 let fresh = preference.evidence.filter { !known.contains($0) }
                 guard !fresh.isEmpty else {
@@ -305,14 +500,17 @@ enum LearnedPreferenceStore {
                     continue
                 }
                 values[index].evidence = Array((values[index].evidence + fresh).suffix(maximumEvidencePerRule))
+                let sources = values[index].sourceRecordingIDs
+                values[index].sourceRecordingIDs = Array((sources + preference.sourceRecordingIDs.filter { !sources.contains($0) })
+                    .suffix(maximumEvidencePerRule))
                 values[index].fromLegacyOnly = values[index].fromLegacyOnly && preference.fromLegacyOnly
                 values[index].updatedAt = now
                 result.reinforced.append(values[index])
                 continue
             }
-            // The newer habit replaces a contradicting one for the same mode.
+            // The newer habit replaces a contradicting one for the same target.
             let conflicts = values.filter {
-                $0.mode == mode && $0.kind == preference.kind.conflicting
+                $0.target == target && $0.kind == preference.kind.conflicting
                     && ($0.from?.lowercased() == preference.from?.lowercased())
             }
             if !conflicts.isEmpty {
@@ -320,7 +518,7 @@ enum LearnedPreferenceStore {
                 values.removeAll { ids.contains($0.id) }
                 result.replaced.append(contentsOf: conflicts)
             }
-            guard values.filter({ $0.mode == mode }).count < maximumRulesPerMode else {
+            guard values.filter({ $0.target == target }).count < maximumRulesPerMode else {
                 result.skippedForLimit += 1
                 continue
             }
@@ -336,13 +534,15 @@ enum LearnedPreferenceStore {
 
     static func sanitized(_ values: [LearnedPreference]) -> [LearnedPreference] {
         var seen = Set<String>()
-        var perMode: [CleanupMode: Int] = [:]
+        var perTarget: [String: Int] = [:]
         var result: [LearnedPreference] = []
         for var value in values where value.isWellFormed && LearnedPreference.isAllowed(value.kind, in: value.mode) {
-            guard seen.insert("\(value.mode.rawValue)|\(value.key)").inserted,
-                  perMode[value.mode, default: 0] < maximumRulesPerMode else { continue }
+            let scope = value.target.storageKey
+            guard seen.insert("\(scope)|\(value.key)").inserted,
+                  perTarget[scope, default: 0] < maximumRulesPerMode else { continue }
             value.evidence = Array(value.evidence.suffix(maximumEvidencePerRule))
-            perMode[value.mode, default: 0] += 1
+            value.sourceRecordingIDs = Array(value.sourceRecordingIDs.suffix(maximumEvidencePerRule))
+            perTarget[scope, default: 0] += 1
             result.append(value)
         }
         return result
@@ -391,14 +591,16 @@ enum CorrectionText {
         String(normalized(text).filter { $0.isLetter || $0.isNumber })
     }
 
-    /// A change of spelling, spacing, hyphenation, or capitalization, not of
-    /// wording: "key board" → "keyboard", "long term" → "long-term". It never
-    /// changes a number, a negation, or a contraction, and never trades a word
-    /// for one that means something else: another weekday or month, a
+    /// A respelling rather than a rewording: "key board" → "keyboard",
+    /// "recieve" → "receive", "get hub" → "GitHub". It never changes a number,
+    /// a negation, or a contraction, and never trades a word for one the
+    /// checks know means something else: another weekday or month, a
     /// look-alike ("accept" → "except"), or its counterpart by a polarity
     /// prefix or suffix ("possible" → "impossible", "include" → "exclude",
-    /// "careful" → "careless").
-    static func isSpellingChange(from: String, to: String) -> Bool {
+    /// "careful" → "careless"). Letters alone cannot tell "Smyth" → "Smith"
+    /// or "lunch" → "launch" from a misspelling, so only the orthographic
+    /// subset is ever learned automatically.
+    static func isRespelling(from: String, to: String) -> Bool {
         let source = letters(from)
         let target = letters(to)
         guard !source.isEmpty, !target.isEmpty,
@@ -411,6 +613,20 @@ enum CorrectionText {
               !tradesMeaning(words(from), words(to)) else { return false }
         let distance = editDistance(Array(source), Array(target))
         return Double(distance) / Double(max(source.count, target.count)) <= 0.34
+    }
+
+    /// The same letters written another way: spacing, hyphenation, or
+    /// capitalization only ("note book" → "notebook", "iphone" → "iPhone").
+    /// These are the only spellings learned automatically.
+    static func isOrthographicChange(from: String, to: String) -> Bool {
+        letters(from) == letters(to) && isRespelling(from: from, to: to)
+    }
+
+    /// A respelling that changes letters, so it may change a word or a name
+    /// ("lunch" → "launch", "Anna" → "Anne"). Never learned on its own; the
+    /// person may add it to Vocabulary.
+    static func isWordChange(from: String, to: String) -> Bool {
+        letters(from) != letters(to) && isRespelling(from: from, to: to)
     }
 
     private static func apostrophes(in text: String) -> Int {
@@ -516,10 +732,38 @@ struct CorrectionEdit: Equatable, Sendable {
     }
 }
 
+/// A matched edit that is never sent or learned, and why.
+struct CorrectionExclusion: Equatable, Sendable {
+    enum Reason: String, Equatable, Sendable {
+        /// More than a few words changed: a rewrite, not a habit.
+        case tooLong
+        /// Inside quotation marks, so not the person's own wording.
+        case quoted
+        /// Words added across a line break may be a column or heading.
+        case crossesLine
+        case changesNegation
+        case changesValue
+        /// A word swapped for another ("lunch" → "launch"): the person may
+        /// add it to Vocabulary, but it is never learned on its own.
+        case wordChange
+        /// Repeated takes made with different modes or filters.
+        case mixedScope
+    }
+
+    let candidateID: UUID
+    let emitted: String
+    let final: String
+    let before: String
+    let after: String
+    let documentPosition: Int
+    let reason: Reason
+}
+
 struct CorrectionAlignment: Equatable {
     struct Passage: Equatable {
         let candidateID: UUID
         let isLegacy: Bool
+        let provenance: CorrectionProvenance
         let documentTokens: Range<Int>
         let matchedWords: Int
         let similarity: Double
@@ -528,10 +772,19 @@ struct CorrectionAlignment: Equatable {
     }
 
     var passages: [Passage] = []
-    /// Edits too large, numeric, or quoted to teach a style habit.
-    var excludedEdits = 0
+    /// Edits that are never sent or learned, with the reason for each.
+    var exclusions: [CorrectionExclusion] = []
     /// Document regions two dictations matched about equally well.
     var ambiguousRegions = 0
+    /// Dictations that shared some unique wording with the document but
+    /// were rewritten too much to match confidently.
+    var nearMisses = 0
+    /// Dictations whose wording appears more than once in the document, so
+    /// no copy can be told apart.
+    var repeatedPassages = 0
+
+    /// Edits too large, numeric, quoted, or reworded to teach a style habit.
+    var excludedEdits: Int { exclusions.count }
 
     var edits: [CorrectionEdit] {
         var numbered: [CorrectionEdit] = []
@@ -580,14 +833,23 @@ enum CorrectionAligner {
             guard candidateWords.count >= minimumMatchedWords else { continue }
             let candidateAnchors = anchorPositions(candidateWords.map { candidateTokens[$0].key })
             var anchors: [(candidate: Int, document: Int)] = []
+            var repeatedAnchors = 0
             for (shingle, positions) in candidateAnchors where positions.count == 1 {
-                if let documentPositions = documentAnchors[shingle], documentPositions.count == 1 {
-                    anchors.append((positions[0], documentPositions[0]))
+                if let documentPositions = documentAnchors[shingle] {
+                    if documentPositions.count == 1 {
+                        anchors.append((positions[0], documentPositions[0]))
+                    } else {
+                        repeatedAnchors += 1
+                    }
                 }
             }
             anchors.sort { $0.candidate < $1.candidate }
 
             let anchorChains = chains(anchors)
+            if anchorChains.isEmpty, repeatedAnchors >= 2 { alignment.repeatedPassages += 1 }
+            var matchedAny = false
+            var rewritten = false
+            defer { if rewritten, !matchedAny { alignment.nearMisses += 1 } }
             for chain in anchorChains {
                 let candidateRange = candidateTokenRange(
                     chain: chain,
@@ -610,29 +872,45 @@ enum CorrectionAligner {
                     window: window,
                     quoted: quoted,
                     lineEnds: lineEnds,
-                    excluded: &alignment.excludedEdits
+                    excluded: &alignment.exclusions,
+                    rewritten: &rewritten
                 ) {
                     found.append(passage)
+                    matchedAny = true
                 }
             }
         }
 
         // The strongest passage claims a region. A near-equal rival there is a
-        // repeated take: only edits both takes show are kept.
+        // repeated take: only edits both takes show are kept, and none when
+        // the takes were made with different modes or filters, since the
+        // edits could then belong to either.
         for passage in found.sorted(by: { $0.matchedWords > $1.matchedWords }) {
             if let index = alignment.passages.firstIndex(where: { overlap($0.documentTokens, passage.documentTokens) > 0.3 }) {
                 let claimed = alignment.passages[index]
                 if Double(passage.matchedWords) >= 0.9 * Double(claimed.matchedWords) {
-                    let shared = Set(passage.edits.map(\.matchKey))
                     if !alignment.passages[index].isAmbiguous { alignment.ambiguousRegions += 1 }
                     alignment.passages[index].isAmbiguous = true
-                    alignment.passages[index].edits = claimed.edits.filter { shared.contains($0.matchKey) }
+                    if passage.provenance != claimed.provenance {
+                        alignment.exclusions += claimed.edits.map { exclusion($0, .mixedScope) }
+                        alignment.passages[index].edits = []
+                    } else {
+                        let shared = Set(passage.edits.map(\.matchKey))
+                        alignment.passages[index].edits = claimed.edits.filter { shared.contains($0.matchKey) }
+                    }
                 }
                 continue
             }
             alignment.passages.append(passage)
         }
         return alignment
+    }
+
+    private static func exclusion(_ edit: CorrectionEdit, _ reason: CorrectionExclusion.Reason) -> CorrectionExclusion {
+        CorrectionExclusion(
+            candidateID: edit.candidateID, emitted: edit.emitted, final: edit.final, before: edit.before, after: edit.after,
+            documentPosition: edit.documentPosition, reason: reason
+        )
     }
 
     private static func anchorPositions(_ words: [String]) -> [String: [Int]] {
@@ -704,7 +982,8 @@ enum CorrectionAligner {
         window: Range<Int>,
         quoted: Set<Int>,
         lineEnds: Set<Int>,
-        excluded: inout Int
+        excluded: inout [CorrectionExclusion],
+        rewritten: inout Bool
     ) -> CorrectionAlignment.Passage? {
         let left = Array(candidateTokens[candidateRange])
         let right = Array(documentTokens[window])
@@ -734,7 +1013,11 @@ enum CorrectionAligner {
         let candidateWords = left.filter(\.isWord).count
         guard matched >= minimumMatchedWords,
               Double(matched) / Double(max(candidateWords, 1)) >= minimumCoverage,
-              2 * Double(matched) / Double(max(leftWords + rightWords, 1)) >= minimumSimilarity else { return nil }
+              2 * Double(matched) / Double(max(leftWords + rightWords, 1)) >= minimumSimilarity else {
+            // Shared unique wording, but too little of it to be confident.
+            rewritten = true
+            return nil
+        }
 
         let documentIndices = operations.compactMap { operation -> Int? in
             switch operation {
@@ -777,15 +1060,32 @@ enum CorrectionAligner {
                 return (start..<end).contains(where: lineEnds.contains)
                     || (lineEnds.contains(start - 1) && lineEnds.contains(end))
             } ?? false
-            // A changed value or a flipped negation is content, not style.
-            guard leftSlice.filter(\.isWord).count <= maximumEditWords,
-                  rightSlice.filter(\.isWord).count <= maximumEditWords,
-                  !isQuoted,
-                  !crossesLine,
-                  CleanupGuard.negationCount(in: emitted) == CleanupGuard.negationCount(in: final),
-                  CorrectionText.numberValues(emitted) == CorrectionText.numberValues(final)
-                    || isNumberFormatting(emitted, final) else {
-                excluded += 1
+            let before = context(left, before: leftStart, in: candidate.emitted)
+            let after = context(left, after: leftStart + leftSlice.count, in: candidate.emitted)
+            // A changed value or a flipped negation is content, not style, and
+            // a word swapped for another may be a fact or a name.
+            let reason: CorrectionExclusion.Reason? = if leftSlice.filter(\.isWord).count > maximumEditWords
+                || rightSlice.filter(\.isWord).count > maximumEditWords {
+                .tooLong
+            } else if isQuoted {
+                .quoted
+            } else if crossesLine {
+                .crossesLine
+            } else if CleanupGuard.negationCount(in: emitted) != CleanupGuard.negationCount(in: final) {
+                .changesNegation
+            } else if CorrectionText.numberValues(emitted) != CorrectionText.numberValues(final)
+                && !isNumberFormatting(emitted, final) {
+                .changesValue
+            } else if CorrectionText.isWordChange(from: emitted, to: final) {
+                .wordChange
+            } else {
+                nil
+            }
+            if let reason {
+                excluded.append(CorrectionExclusion(
+                    candidateID: candidate.id, emitted: emitted, final: final, before: before, after: after,
+                    documentPosition: documentPosition, reason: reason
+                ))
                 continue
             }
             let candidateOffset = candidateRange.lowerBound + leftStart
@@ -802,8 +1102,8 @@ enum CorrectionAligner {
                 candidateID: candidate.id,
                 emitted: emitted,
                 final: final,
-                before: context(left, before: leftStart, in: candidate.emitted),
-                after: context(left, after: leftStart + leftSlice.count, in: candidate.emitted),
+                before: before,
+                after: after,
                 origin: origin,
                 isLegacy: candidate.isLegacy,
                 cleanupInput: cleanupInput,
@@ -813,6 +1113,7 @@ enum CorrectionAligner {
         return CorrectionAlignment.Passage(
             candidateID: candidate.id,
             isLegacy: candidate.isLegacy,
+            provenance: candidate.provenance,
             documentTokens: documentRange,
             matchedWords: matched,
             similarity: 2 * Double(matched) / Double(max(leftWords + rightWords, 1)),
@@ -926,7 +1227,7 @@ enum CorrectionAligner {
         let emittedKeys = candidateTokens[candidateSpan].map(\.key)
         if inputSlice.map(\.key) == emittedKeys, !candidateSpan.isEmpty,
            candidateSpan.allSatisfy({ map.carriedFrom[$0] != nil }) {
-            return (CorrectionText.isSpellingChange(from: emitted, to: final) ? .recognition : .finalEdit, inputText)
+            return (CorrectionText.isRespelling(from: emitted, to: final) ? .recognition : .finalEdit, inputText)
         }
         if CorrectionText.words(inputText) == CorrectionText.words(final), inputText != emitted {
             return (.cleanup, inputText)

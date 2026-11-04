@@ -23,6 +23,25 @@ enum VocabularyStore {
             Array(entries.prefix(maximumEntries))
         )
     }
+
+    /// Adds one entry the person chose, unless the same replacement for the
+    /// same spoken words is already there, and tells open editors to reload.
+    @discardableResult
+    static func add(_ entry: VocabularyEntry) -> Bool {
+        var entries = load()
+        guard entries.count < maximumEntries, !entries.contains(where: {
+            $0.spoken.caseInsensitiveCompare(entry.spoken) == .orderedSame && $0.replacement == entry.replacement
+        }) else { return false }
+        entries.append(entry)
+        save(entries)
+        NotificationCenter.default.post(name: .vocabularyDidChange, object: nil)
+        return true
+    }
+}
+
+extension Notification.Name {
+    /// Posted when Vocabulary changed outside its editor.
+    static let vocabularyDidChange = Notification.Name("WorkFlowVocabularyDidChange")
 }
 
 enum VocabularyRewriter {

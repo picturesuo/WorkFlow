@@ -663,9 +663,13 @@ class RecordingStore: ObservableObject {
         }
     }
 
+    /// How many of the newest completed dictations a finished document is compared with.
+    nonisolated static let learningCandidateLimit = 5_000
+
     /// Completed dictations, newest first, with their original evidence when
-    /// it exists. Meetings are excluded: they are never inserted into a document.
-    nonisolated func learningCandidates(limit: Int = 1_000) async throws -> [CorrectionCandidate] {
+    /// it exists, read off the main actor. Meetings are excluded: they are
+    /// never inserted into a document.
+    nonisolated func learningCandidates(limit: Int = RecordingStore.learningCandidateLimit) async throws -> [CorrectionCandidate] {
         try await dbQueue.read { db in
             let recordings = try Recording
                 .filter(Recording.Columns.mode == RecordingMode.dictation.rawValue)
@@ -678,6 +682,14 @@ class RecordingStore: ObservableObject {
                 .fetchAll(db)
             let sourcesByID = Dictionary(sources.map { ($0.recordingID, $0) }, uniquingKeysWith: { first, _ in first })
             return recordings.compactMap { CorrectionCandidate(recording: $0, source: sourcesByID[$0.id]) }
+        }
+    }
+
+    /// Which of these History rows still exist; reads ids only.
+    nonisolated func existingRecordingIDs(_ ids: [UUID]) async throws -> Set<UUID> {
+        guard !ids.isEmpty else { return [] }
+        return try await dbQueue.read { db in
+            Set(try Recording.filter(keys: ids).fetchAll(db).map(\.id))
         }
     }
     
