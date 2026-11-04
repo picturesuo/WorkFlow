@@ -184,12 +184,13 @@ final class BedrockCleanupService {
 
         guard (200..<300).contains(httpResponse.statusCode) else {
             let serviceError = try? JSONDecoder().decode(ServiceErrorResponse.self, from: result.data)
-            let message = serviceError?.message ?? HTTPURLResponse.localizedString(forStatusCode: httpResponse.statusCode)
+            let message = serviceError?.message.map(ProviderErrorText.redacted)
+                ?? HTTPURLResponse.localizedString(forStatusCode: httpResponse.statusCode)
             throw BedrockCleanupError.requestFailed(statusCode: httpResponse.statusCode, message: message)
         }
 
-        let decoded = try JSONDecoder().decode(ConverseResponse.self, from: result.data)
-        guard let text = decoded.output.message.content.first?.text else {
+        guard let decoded = try? JSONDecoder().decode(ConverseResponse.self, from: result.data),
+              let text = decoded.output.message.content.first?.text else {
             throw BedrockCleanupError.invalidResponse
         }
         let response = BedrockCleanupResponse(
@@ -245,6 +246,19 @@ private struct ConverseResponse: Decodable {
     let usage: Usage?
 }
 
+/// Bedrock service errors send `message`; errors from AWS's front door, such
+/// as a rejected key, send `Message`.
 private struct ServiceErrorResponse: Decodable {
     let message: String?
+
+    private enum CodingKeys: String, CodingKey {
+        case message
+        case capitalizedMessage = "Message"
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        message = try container.decodeIfPresent(String.self, forKey: .message)
+            ?? container.decodeIfPresent(String.self, forKey: .capitalizedMessage)
+    }
 }

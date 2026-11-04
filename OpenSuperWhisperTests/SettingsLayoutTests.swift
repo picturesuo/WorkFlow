@@ -41,6 +41,11 @@ final class SettingsLayoutTests: XCTestCase {
         "azureOpenAIEndpoint": "https://fixture.openai.azure.com",
         "azureOpenAIDeployment": "fixture-deployment",
         "azureOpenAIReasoningDeployment": true,
+        "openAIModelID": "gpt-6-luna",
+        "openAIReasoningEffort": OpenAIReasoningEffort.none.rawValue,
+        "openAITimeoutSeconds": 10.0,
+        "anthropicModelID": "claude-haiku-5-5",
+        "anthropicTimeoutSeconds": 10.0,
         "meetingCleanupEnabled": true,
         "suppressBlankAudio": false,
         "showTimestamps": true,
@@ -129,6 +134,27 @@ final class SettingsLayoutTests: XCTestCase {
         }
     }
 
+    /// The OpenAI and Anthropic fields, with and without a stored key.
+    func testDirectProviderFieldsRenderForReview() throws {
+        for provider in [CleanupProviderID.openAI, .anthropic] {
+            UserDefaults.standard.set(provider.rawValue, forKey: "cleanupProviderID")
+            for (stored, label) in [(false, "empty"), (true, "stored")] {
+                let credentials = StoredCredentialStatus(bedrock: { false }, cleanup: { $0 == provider.credentialAccount && stored })
+                for size in [CGSize(width: 600, height: 1350), CGSize(width: 760, height: 1350)] {
+                    for scheme in [ColorScheme.light, .dark] {
+                        let bitmap = try render(
+                            SettingsView(selection: .constant(.providerCost), credentials: credentials, size: size),
+                            size: size,
+                            scheme: scheme,
+                            name: "settings-provider-\(provider.rawValue)-\(label)-\(Int(size.width))"
+                        )
+                        XCTAssertEqual(purplePixels(in: bitmap), 0, "\(provider) \(label) \(Int(size.width)) \(scheme)")
+                    }
+                }
+            }
+        }
+    }
+
     // MARK: Keyboard and VoiceOver
 
     func testVocabularyRowsKeepAVoiceOverNameWhenEmpty() {
@@ -197,7 +223,8 @@ final class SettingsLayoutTests: XCTestCase {
                        size: size, scheme: .light, name: nil)
         }
         XCTAssertEqual(calls.bedrock, SettingsPane.allCases.count, "One Bedrock presence check per sheet")
-        XCTAssertEqual(calls.cleanup, 2 * SettingsPane.allCases.count, "One check each for the compatible and Azure accounts")
+        XCTAssertEqual(calls.cleanup, CleanupCredentialAccount.allCases.count * SettingsPane.allCases.count,
+                       "One check per provider key account")
 
         let model = SettingsViewModel(credentials: stub(bedrockStored: false))
         XCTAssertFalse(model.hasBedrockAPIKey)

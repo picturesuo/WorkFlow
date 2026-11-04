@@ -272,10 +272,9 @@ class SettingsViewModel: ObservableObject {
 
     @Published var bedrockAPIKeyInput = ""
     @Published private(set) var hasBedrockAPIKey = false
-    /// Whether the OpenAI-compatible and Azure keys are stored; the provider
-    /// pane updates these after it saves or removes one.
-    @Published var hasCompatibleAPIKey: Bool
-    @Published var hasAzureAPIKey: Bool
+    /// Which provider keys besides Bedrock's are stored; the provider pane
+    /// updates this after it saves or removes one.
+    @Published var storedCleanupKeys: Set<CleanupCredentialAccount>
     @Published private(set) var bedrockStatus = ""
     @Published private(set) var isTestingBedrock = false
     @Published private(set) var bedrockUsageSummary = BedrockUsageSummary()
@@ -331,8 +330,7 @@ class SettingsViewModel: ObservableObject {
         self.launchAtLogin = prefs.launchAtLogin
         self.bedrockLastErrorMessage = prefs.bedrockLastErrorMessage
         self.bedrockLastErrorDate = prefs.bedrockLastErrorDate
-        self.hasCompatibleAPIKey = credentials.cleanup(.openAICompatible)
-        self.hasAzureAPIKey = credentials.cleanup(.azureOpenAI)
+        self.storedCleanupKeys = Set(CleanupCredentialAccount.allCases.filter(credentials.cleanup))
 
         do {
             self.hasBedrockAPIKey = try credentials.bedrock()
@@ -1047,4 +1045,16 @@ struct OnboardingUnifiedModels {
             )
         )
     ]
+}
+
+extension SettingsViewModel {
+    /// Whether the provider's own key is stored. Ollama needs none.
+    func hasStoredKey(for providerID: CleanupProviderID) -> Bool {
+        switch providerID {
+        case .bedrock: hasBedrockAPIKey
+        case .ollama: true
+        case .openAICompatible, .azureOpenAI, .openAI, .anthropic:
+            providerID.credentialAccount.map(storedCleanupKeys.contains) ?? false
+        }
+    }
 }
