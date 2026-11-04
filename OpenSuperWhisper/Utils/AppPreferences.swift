@@ -211,6 +211,24 @@ final class AppPreferences {
     @UserDefault(key: "azureOpenAIReasoningDeployment", defaultValue: false)
     var azureOpenAIReasoningDeployment: Bool
 
+    // Direct OpenAI and Anthropic settings. Each key is stored separately in
+    // Keychain. Default models were checked against each provider's model
+    // documentation; both stay editable.
+    @UserDefault(key: "openAIModelID", defaultValue: OpenAIChatCleanupService.recommendedOpenAIModelID)
+    var openAIModelID: String
+
+    @UserDefault(key: "openAIReasoningEffort", defaultValue: OpenAIReasoningEffort.none.rawValue)
+    var openAIReasoningEffort: String
+
+    @UserDefault(key: "openAITimeoutSeconds", defaultValue: 10.0)
+    var openAITimeoutSeconds: Double
+
+    @UserDefault(key: "anthropicModelID", defaultValue: AnthropicCleanupService.recommendedModelID)
+    var anthropicModelID: String
+
+    @UserDefault(key: "anthropicTimeoutSeconds", defaultValue: 10.0)
+    var anthropicTimeoutSeconds: Double
+
     @OptionalUserDefault(key: "personalVocabularyData")
     var personalVocabularyData: Data?
 

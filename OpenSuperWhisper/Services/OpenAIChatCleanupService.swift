@@ -7,6 +7,7 @@ enum OpenAIChatCleanupError: LocalizedError, Equatable {
     case emptyResponse
     case incompleteResponse
     case unsafeRewrite
+    case refused
 
     var errorDescription: String? {
         switch self {
@@ -16,8 +17,33 @@ enum OpenAIChatCleanupError: LocalizedError, Equatable {
         case .emptyResponse: "The cleanup provider returned no transcript."
         case .incompleteResponse: "The cleanup provider stopped before finishing the transcript."
         case .unsafeRewrite: "The cleanup provider changed the transcript too aggressively."
+        case .refused: "The cleanup provider declined to rewrite this text."
         }
     }
+}
+
+/// The `reasoning_effort` WorkFlow sends to OpenAI. Reasoning models think by
+/// default, which costs time and tokens a short rewrite doesn't need; older
+/// non-reasoning models reject the parameter, so it can be left out.
+enum OpenAIReasoningEffort: String, CaseIterable, Identifiable {
+    case none
+    case minimal
+    case low
+    case notSent = "not_sent"
+
+    var id: String { rawValue }
+
+    var displayName: String {
+        switch self {
+        case .none: "None (fastest)"
+        case .minimal: "Minimal"
+        case .low: "Low"
+        case .notSent: "Don’t send (older models)"
+        }
+    }
+
+    /// Whether the model may spend completion tokens on reasoning.
+    var reasons: Bool { self == .minimal || self == .low }
 }
 
 final class OpenAIChatCleanupService: TranscriptCleanupProviding, CleanupChatCompleting {
@@ -37,9 +63,15 @@ final class OpenAIChatCleanupService: TranscriptCleanupProviding, CleanupChatCom
     /// `temperature`; they get a low reasoning effort and extra completion
     /// headroom because reasoning tokens count against the completion limit.
     let usesReasoningParameters: Bool
+    /// Direct OpenAI only.
+    let reasoningEffort: OpenAIReasoningEffort
     private let session: URLSession
 
     static let reasoningTokenHeadroom = 1_024
+    static let openAIBaseURL = "https://api.openai.com/v1"
+    /// OpenAI's models page lists GPT-6 Luna for cost-sensitive, high-volume
+    /// work, with Chat Completions support and a `none` reasoning effort.
+    static let recommendedOpenAIModelID = "gpt-6-luna"
 
     init(
         providerID: CleanupProviderID,
@@ -48,6 +80,7 @@ final class OpenAIChatCleanupService: TranscriptCleanupProviding, CleanupChatCom
         apiKey: String?,
         timeout: TimeInterval,
         usesReasoningParameters: Bool = false,
+        reasoningEffort: OpenAIReasoningEffort = .notSent,
         session: URLSession? = nil
     ) {
         self.providerID = providerID
@@ -56,6 +89,7 @@ final class OpenAIChatCleanupService: TranscriptCleanupProviding, CleanupChatCom
         self.apiKey = apiKey
         self.timeout = timeout
         self.usesReasoningParameters = usesReasoningParameters
+        self.reasoningEffort = reasoningEffort
         self.session = session ?? Self.sharedSession
     }
 
@@ -111,6 +145,9 @@ final class OpenAIChatCleanupService: TranscriptCleanupProviding, CleanupChatCom
         }
     }
 
+    /// Whether a request without a key is refused before anything is sent.
+    private var requiresKey: Bool { providerID == .azureOpenAI || providerID == .openAI }
+
     /// OpenAI and Azure report `finish_reason`; Ollama reports `done_reason`.
     static let incompleteStopReasons: Set<String> = ["length", "content_filter"]
 
@@ -137,8 +174,8 @@ final class OpenAIChatCleanupService: TranscriptCleanupProviding, CleanupChatCom
             } else {
                 request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
             }
-        } else if providerID == .azureOpenAI {
-            throw CleanupProviderError.missingCredential("Azure OpenAI")
+        } else if requiresKey {
+            throw CleanupProviderError.missingCredential(providerID.displayName)
         }
 
         let messages = [ChatMessage(role: "system", content: chat.systemPrompt)]
@@ -167,6 +204,18 @@ final class OpenAIChatCleanupService: TranscriptCleanupProviding, CleanupChatCom
                     reasoningEffort: usesReasoningParameters ? "low" : nil
                 )
             )
+        } else if providerID == .openAI {
+            // Chat Completions: `max_tokens` is deprecated in favor of
+            // `max_completion_tokens`, which also bounds reasoning tokens.
+            request.httpBody = try JSONEncoder().encode(
+                OpenAIDirectRequest(
+                    model: model,
+                    messages: messages,
+                    temperature: reasoningEffort == .notSent ? 0 : nil,
+                    maxCompletionTokens: reasoningEffort.reasons ? maxTokens + Self.reasoningTokenHeadroom : maxTokens,
+                    reasoningEffort: reasoningEffort == .notSent ? nil : reasoningEffort.rawValue
+                )
+            )
         } else {
             request.httpBody = try JSONEncoder().encode(
                 OpenAIRequest(
@@ -189,26 +238,35 @@ final class OpenAIChatCleanupService: TranscriptCleanupProviding, CleanupChatCom
         }
         guard (200..<300).contains(httpResponse.statusCode) else {
             let message = (try? JSONDecoder().decode(ServiceErrorEnvelope.self, from: result.data))?.error.message
-                ?? HTTPURLResponse.localizedString(forStatusCode: httpResponse.statusCode)
-            throw OpenAIChatCleanupError.requestFailed(statusCode: httpResponse.statusCode, message: message)
+            throw OpenAIChatCleanupError.requestFailed(
+                statusCode: httpResponse.statusCode,
+                message: ProviderErrorText.describe(statusCode: httpResponse.statusCode, providerMessage: message)
+            )
         }
 
         if providerID == .ollama {
-            let decoded = try JSONDecoder().decode(OllamaResponse.self, from: result.data)
+            guard let decoded = try? JSONDecoder().decode(OllamaResponse.self, from: result.data) else {
+                throw OpenAIChatCleanupError.invalidResponse
+            }
             let reply = CleanupProviderResult(
-                text: decoded.message.content,
+                text: decoded.message.content ?? "",
                 inputTokens: decoded.promptEvalCount,
                 outputTokens: decoded.evalCount,
                 modelID: model
             )
             return (reply, decoded.doneReason)
         }
-        let decoded = try JSONDecoder().decode(OpenAIResponse.self, from: result.data)
-        guard let choice = decoded.choices.first else {
+        guard let decoded = try? JSONDecoder().decode(OpenAIResponse.self, from: result.data),
+              let choice = decoded.choices.first else {
             throw OpenAIChatCleanupError.invalidResponse
         }
+        // `content` is null when the model refuses; the refusal text itself
+        // is not shown, since it can quote the transcript.
+        if let refusal = choice.message.refusal, !refusal.isEmpty, (choice.message.content ?? "").isEmpty {
+            throw OpenAIChatCleanupError.refused
+        }
         let reply = CleanupProviderResult(
-            text: choice.message.content,
+            text: choice.message.content ?? "",
             inputTokens: decoded.usage?.promptTokens,
             outputTokens: decoded.usage?.completionTokens,
             modelID: model
@@ -292,9 +350,28 @@ extension OpenAIChatCleanupService {
     }
 }
 
-private struct ChatMessage: Codable {
+private struct ChatMessage: Encodable {
     let role: String
     let content: String
+}
+
+private struct ReplyMessage: Decodable {
+    let content: String?
+    let refusal: String?
+}
+
+private struct OpenAIDirectRequest: Encodable {
+    let model: String
+    let messages: [ChatMessage]
+    let temperature: Double?
+    let maxCompletionTokens: Int
+    let reasoningEffort: String?
+
+    enum CodingKeys: String, CodingKey {
+        case model, messages, temperature
+        case maxCompletionTokens = "max_completion_tokens"
+        case reasoningEffort = "reasoning_effort"
+    }
 }
 
 private struct OpenAIRequest: Encodable {
@@ -341,7 +418,7 @@ private struct OllamaRequest: Encodable {
 
 private struct OpenAIResponse: Decodable {
     struct Choice: Decodable {
-        let message: ChatMessage
+        let message: ReplyMessage
         let finishReason: String?
         enum CodingKeys: String, CodingKey {
             case message
@@ -361,7 +438,7 @@ private struct OpenAIResponse: Decodable {
 }
 
 private struct OllamaResponse: Decodable {
-    let message: ChatMessage
+    let message: ReplyMessage
     let promptEvalCount: Int?
     let evalCount: Int?
     let doneReason: String?

@@ -5,8 +5,13 @@ enum CleanupProviderID: String, CaseIterable, Codable, Identifiable {
     case ollama
     case openAICompatible = "openai_compatible"
     case azureOpenAI = "azure_openai"
+    case openAI = "openai"
+    case anthropic
 
     var id: String { rawValue }
+
+    /// The order the provider picker lists them in.
+    static let pickerOrder: [CleanupProviderID] = [.bedrock, .openAI, .anthropic, .azureOpenAI, .ollama, .openAICompatible]
 
     var displayName: String {
         switch self {
@@ -14,6 +19,19 @@ enum CleanupProviderID: String, CaseIterable, Codable, Identifiable {
         case .ollama: "Ollama (local, free)"
         case .openAICompatible: "OpenAI-compatible"
         case .azureOpenAI: "Azure OpenAI"
+        case .openAI: "OpenAI"
+        case .anthropic: "Anthropic"
+        }
+    }
+
+    /// The Keychain account that holds this provider's own key, if it uses one.
+    var credentialAccount: CleanupCredentialAccount? {
+        switch self {
+        case .bedrock, .ollama: nil
+        case .openAICompatible: .openAICompatible
+        case .azureOpenAI: .azureOpenAI
+        case .openAI: .openAI
+        case .anthropic: .anthropic
         }
     }
 
@@ -23,6 +41,8 @@ enum CleanupProviderID: String, CaseIterable, Codable, Identifiable {
         case .ollama: .ollama
         case .openAICompatible: .openAICompatible
         case .azureOpenAI: .azureOpenAI
+        case .openAI: .openAI
+        case .anthropic: .anthropic
         }
     }
 }
@@ -122,20 +142,41 @@ struct BedrockCleanupProvider: TranscriptCleanupProviding, CleanupChatCompleting
 }
 
 enum CleanupProviderFactory {
-    static func makeSelected() throws -> any TranscriptCleanupProviding {
-        try makeSelectedProvider()
+    /// What the factory reads besides preferences. Production loads keys from
+    /// Keychain and uses each service's own session; tests substitute
+    /// synthetic keys and a fixture session so no real key or network is used.
+    struct Environment {
+        var loadBedrockKey: () throws -> String?
+        var loadCleanupKey: (CleanupCredentialAccount) throws -> String?
+        var session: URLSession?
+        var bedrockService: BedrockCleanupService
+
+        static let keychain = Environment(
+            loadBedrockKey: { try BedrockCredentialStore.loadAPIKey() },
+            loadCleanupKey: { try CleanupCredentialStore.loadAPIKey(for: $0) },
+            session: nil,
+            bedrockService: .shared
+        )
+    }
+
+    static func makeSelected(environment: Environment = .keychain) throws -> any TranscriptCleanupProviding {
+        try make(selectedProviderID(), environment: environment)
     }
 
     /// The same selected provider and stored credential, for bounded requests
     /// that are not transcript cleanup. There is no fallback to another provider.
-    static func makeSelectedChat() throws -> any CleanupChatCompleting {
-        try makeSelectedProvider()
+    static func makeSelectedChat(environment: Environment = .keychain) throws -> any CleanupChatCompleting {
+        try make(selectedProviderID(), environment: environment)
+    }
+
+    static func selectedProviderID() -> CleanupProviderID {
+        CleanupProviderID(rawValue: AppPreferences.shared.cleanupProviderID) ?? .bedrock
     }
 
     /// Where a request to the selected provider goes, without loading a key.
     static func selectedDestination() -> CleanupProviderDestination {
         let prefs = AppPreferences.shared
-        let providerID = CleanupProviderID(rawValue: prefs.cleanupProviderID) ?? .bedrock
+        let providerID = selectedProviderID()
         switch providerID {
         case .bedrock:
             return CleanupProviderDestination(providerID: providerID, model: prefs.bedrockModelID, isOnThisMac: false)
@@ -153,20 +194,28 @@ enum CleanupProviderFactory {
             )
         case .azureOpenAI:
             return CleanupProviderDestination(providerID: providerID, model: prefs.azureOpenAIDeployment, isOnThisMac: false)
+        case .openAI:
+            return CleanupProviderDestination(providerID: providerID, model: prefs.openAIModelID, isOnThisMac: false)
+        case .anthropic:
+            return CleanupProviderDestination(providerID: providerID, model: prefs.anthropicModelID, isOnThisMac: false)
         }
     }
 
-    private static func makeSelectedProvider() throws -> any TranscriptCleanupProviding & CleanupChatCompleting {
+    /// Builds one provider from the current preferences and its own key.
+    /// Save & Test passes an environment that offers the key being tested.
+    static func make(
+        _ providerID: CleanupProviderID,
+        environment: Environment = .keychain
+    ) throws -> any TranscriptCleanupProviding & CleanupChatCompleting {
         let prefs = AppPreferences.shared
-        let providerID = CleanupProviderID(rawValue: prefs.cleanupProviderID) ?? .bedrock
 
         switch providerID {
         case .bedrock:
-            guard let apiKey = try BedrockCredentialStore.loadAPIKey(), !apiKey.isEmpty else {
+            guard let apiKey = try environment.loadBedrockKey(), !apiKey.isEmpty else {
                 throw CleanupProviderError.missingCredential("Bedrock")
             }
             return BedrockCleanupProvider(
-                service: .shared,
+                service: environment.bedrockService,
                 apiKey: apiKey,
                 configuration: BedrockCleanupConfiguration(
                     region: prefs.bedrockRegion,
@@ -180,10 +229,11 @@ enum CleanupProviderFactory {
                 baseURL: prefs.ollamaBaseURL,
                 modelID: prefs.ollamaModelID,
                 apiKey: nil,
-                timeout: prefs.ollamaTimeoutSeconds
+                timeout: prefs.ollamaTimeoutSeconds,
+                session: environment.session
             )
         case .openAICompatible:
-            let apiKey = try CleanupCredentialStore.loadAPIKey(for: .openAICompatible)
+            let apiKey = try environment.loadCleanupKey(.openAICompatible)
             guard (apiKey?.isEmpty == false) || OpenAIChatCleanupService.isLocalBaseURL(prefs.openAICompatibleBaseURL) else {
                 throw CleanupProviderError.missingCredential("OpenAI-compatible")
             }
@@ -192,21 +242,46 @@ enum CleanupProviderFactory {
                 baseURL: prefs.openAICompatibleBaseURL,
                 modelID: prefs.openAICompatibleModelID,
                 apiKey: apiKey,
-                timeout: prefs.openAICompatibleTimeoutSeconds
+                timeout: prefs.openAICompatibleTimeoutSeconds,
+                session: environment.session
             )
         case .azureOpenAI:
-            guard let apiKey = try CleanupCredentialStore.loadAPIKey(for: .azureOpenAI), !apiKey.isEmpty else {
-                throw CleanupProviderError.missingCredential("Azure OpenAI")
-            }
             return OpenAIChatCleanupService(
                 providerID: .azureOpenAI,
                 baseURL: prefs.azureOpenAIEndpoint,
                 modelID: prefs.azureOpenAIDeployment,
-                apiKey: apiKey,
+                apiKey: try requiredKey(.azureOpenAI, environment: environment),
                 timeout: prefs.azureOpenAITimeoutSeconds,
-                usesReasoningParameters: prefs.azureOpenAIReasoningDeployment
+                usesReasoningParameters: prefs.azureOpenAIReasoningDeployment,
+                session: environment.session
+            )
+        case .openAI:
+            return OpenAIChatCleanupService(
+                providerID: .openAI,
+                baseURL: OpenAIChatCleanupService.openAIBaseURL,
+                modelID: prefs.openAIModelID,
+                apiKey: try requiredKey(.openAI, environment: environment),
+                timeout: prefs.openAITimeoutSeconds,
+                reasoningEffort: OpenAIReasoningEffort(rawValue: prefs.openAIReasoningEffort) ?? .none,
+                session: environment.session
+            )
+        case .anthropic:
+            return AnthropicCleanupService(
+                modelID: prefs.anthropicModelID,
+                apiKey: try requiredKey(.anthropic, environment: environment),
+                timeout: prefs.anthropicTimeoutSeconds,
+                session: environment.session
             )
         }
+    }
+
+    private static func requiredKey(_ providerID: CleanupProviderID, environment: Environment) throws -> String {
+        guard let account = providerID.credentialAccount,
+              let apiKey = try environment.loadCleanupKey(account)?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !apiKey.isEmpty else {
+            throw CleanupProviderError.missingCredential(providerID.displayName)
+        }
+        return apiKey
     }
 }
 

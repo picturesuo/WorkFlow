@@ -3,9 +3,11 @@ import Security
 
 /// Each key-based provider owns a separate Keychain account, so one provider's
 /// key is never sent to another provider's endpoint.
-enum CleanupCredentialAccount: String {
+enum CleanupCredentialAccount: String, CaseIterable {
     case openAICompatible = "openai-compatible"
     case azureOpenAI = "azure-openai"
+    case openAI = "openai"
+    case anthropic
 
     /// Only the OpenAI-compatible key predates the WorkFlow rename.
     var migratesLegacyIdentities: Bool { self == .openAICompatible }

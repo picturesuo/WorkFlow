@@ -253,7 +253,7 @@ enum FilterAssistantUsageStore {
             } else {
                 usage.unpricedRequests += 1
             }
-        case .openAICompatible, .azureOpenAI:
+        case .openAICompatible, .azureOpenAI, .openAI, .anthropic:
             usage.unpricedRequests += 1
         }
         months[key] = usage

@@ -61,7 +61,7 @@ That's an estimate from the token counts WorkFlow recorded, not an AWS bill, and
 
 As a thought experiment, talking nonstop for a month with Bedrock cleanup on works out to roughly **$1.60-$2.10** at these prices (30 days × 24 hours at 150 words a minute and 1.33 tokens a word, output about as long as input, plus a 250-370 token prompt per request, sent once per dictation or per 4,800-character chunk of a long recording). That's a rough range, not a cap or a promise: WorkFlow isn't built as an always-on recorder, Homework mode can write more than you said, and the default stop pauses Bedrock cleanup after roughly 4-5 days of this.
 
-Local Ollama cleanup has no per-request fee. Azure OpenAI and other OpenAI-compatible APIs bill at their own rates, which WorkFlow doesn't estimate and the monthly stop doesn't cover, so set a spend limit with the provider.
+Local Ollama cleanup has no per-request fee. OpenAI, Anthropic, Azure OpenAI, and other OpenAI-compatible APIs bill at their own rates, which WorkFlow doesn't estimate and the monthly stop doesn't cover, so set a spend limit with the provider.
 
 ### Claude and ChatGPT plans
 
@@ -72,7 +72,7 @@ A Claude or ChatGPT chat subscription isn't an API key, and API use is billed se
 
 Both need at least seven days on the plan, and unused credits expire instead of rolling over. When they run out and the organization has no purchased credits, API requests stop until more credits arrive. These are Anthropic's and OpenAI's offers and can change, so check the linked pages.
 
-What that means for WorkFlow today: Claude's credits don't cover Claude on Amazon Bedrock, and WorkFlow doesn't connect to Anthropic's API directly, so they don't pay for WorkFlow cleanup. WorkFlow's OpenAI-compatible provider can point at OpenAI's API, but it hasn't been tested with current OpenAI models. WorkFlow connects with an API key you type into its secure settings field, never a chat sign-in, and its cost estimate and monthly stop cover only Amazon Bedrock.
+What that means for WorkFlow today: Claude's credits don't cover Claude on Amazon Bedrock. WorkFlow's **Anthropic** and **OpenAI** providers call each company's API directly with a key you create there, so that use bills to the key's API organization like any other API request. WorkFlow connects with an API key you type into its secure settings field, never a chat sign-in, and its cost estimate and monthly stop cover only Amazon Bedrock.
 
 ## Music while you dictate
 
@@ -89,7 +89,7 @@ It reduces background audio; it doesn't promise to remove it:
 
 ## Privacy
 
-Audio never leaves your Mac. With cleanup on, only transcript text goes to the one provider you pick: Amazon Bedrock, Azure OpenAI, local Ollama, or any OpenAI-compatible API. **Send** in Create with AI shares your request and any pasted example. **Learn** shares only the short matched edits with a few words around each; the document itself is read on your Mac and not stored. New dictations keep their original transcript on your Mac until you delete them. Keys live in macOS Keychain, and credentials and transcripts are never logged.
+Audio never leaves your Mac. With cleanup on, only transcript text goes to the one provider you pick: Amazon Bedrock, OpenAI, Anthropic, Azure OpenAI, local Ollama, or any OpenAI-compatible API. **Send** in Create with AI shares your request and any pasted example. **Learn** shares only the short matched edits with a few words around each; the document itself is read on your Mac and not stored. New dictations keep their original transcript on your Mac until you delete them. Keys live in macOS Keychain, and credentials and transcripts are never logged.
 
 ## Install with your AI
 

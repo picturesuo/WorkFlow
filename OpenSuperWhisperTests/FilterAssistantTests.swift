@@ -224,7 +224,12 @@ final class FilterAssistantTransportTests: XCTestCase {
             _ = try await service.complete(chat)
             XCTFail("Expected failure")
         } catch {
-            XCTAssertEqual(error as? OpenAIChatCleanupError, .requestFailed(statusCode: 401, message: "Invalid key"))
+            // A key error says what to do; the provider's own text, which can
+            // quote part of the key, is not repeated.
+            XCTAssertEqual(
+                error as? OpenAIChatCleanupError,
+                .requestFailed(statusCode: 401, message: "The API key was rejected. Enter a new key and Save & Test.")
+            )
         }
     }
 
