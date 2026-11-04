@@ -28,6 +28,8 @@ struct TranscriptCleanupOutcome: Equatable {
     /// The mode and filter selected for this dictation, kept even when
     /// cleanup was off and so shaped nothing.
     let selectedFilter: CleanupFilterSnapshot?
+    /// Why this dictation used its filter: picked by hand, or what Auto saw.
+    let filterReason: FilterChoiceReason?
 
     /// Whether the saved filter that shaped this cleanup writes quantities as digits.
     var customFilterWritesDigits: Bool {
@@ -47,7 +49,8 @@ struct TranscriptCleanupOutcome: Equatable {
         finalTokenEstimate: Int? = nil,
         tokenEstimatorID: String? = nil,
         cleanupInput: String? = nil,
-        selectedFilter: CleanupFilterSnapshot? = nil
+        selectedFilter: CleanupFilterSnapshot? = nil,
+        filterReason: FilterChoiceReason? = nil
     ) {
         self.text = text
         self.source = source
@@ -62,6 +65,7 @@ struct TranscriptCleanupOutcome: Equatable {
         self.tokenEstimatorID = tokenEstimatorID
         self.cleanupInput = cleanupInput
         self.selectedFilter = selectedFilter
+        self.filterReason = filterReason
     }
 
     init(
@@ -74,7 +78,8 @@ struct TranscriptCleanupOutcome: Equatable {
         rawTokenEstimate: Int?,
         finalTokenEstimate: Int?,
         tokenEstimatorID: String?,
-        cleanupInput: String? = nil
+        cleanupInput: String? = nil,
+        filterReason: FilterChoiceReason? = nil
     ) {
         self.init(
             text: text,
@@ -89,7 +94,8 @@ struct TranscriptCleanupOutcome: Equatable {
             finalTokenEstimate: finalTokenEstimate,
             tokenEstimatorID: tokenEstimatorID,
             cleanupInput: cleanupInput,
-            selectedFilter: filter
+            selectedFilter: filter,
+            filterReason: filterReason
         )
     }
 }
@@ -104,6 +110,8 @@ final class TranscriptCleanupPipeline {
     private let appRuleProvider: (String?) -> TargetAppRule?
     private let bedrockBudgetProvider: () async -> BedrockBudgetStatus?
     private let filterProvider: () -> CleanupFilterSnapshot
+    /// Auto's choices for a target app, or nil when a filter was picked by hand.
+    private let autoConfigProvider: (String?) -> FilterAutoConfig?
     /// Records the last cleanup failure, or clears it with nil.
     private let failureRecorder: (String?) -> Void
 
@@ -120,6 +128,9 @@ final class TranscriptCleanupPipeline {
         filterProvider: @escaping () -> CleanupFilterSnapshot = {
             CustomCleanupFilterStore.currentSnapshot()
         },
+        autoConfigProvider: @escaping (String?) -> FilterAutoConfig? = { targetBundleID in
+            FilterAutoSettings.currentConfig(targetBundleID: targetBundleID, appRules: TargetAppRuleStore.load())
+        },
         failureRecorder: @escaping (String?) -> Void = { message in
             AppPreferences.shared.bedrockLastErrorMessage = message
             AppPreferences.shared.bedrockLastErrorDate = message == nil ? nil : Date()
@@ -131,6 +142,7 @@ final class TranscriptCleanupPipeline {
         self.appRuleProvider = appRuleProvider
         self.bedrockBudgetProvider = bedrockBudgetProvider
         self.filterProvider = filterProvider
+        self.autoConfigProvider = autoConfigProvider
         self.failureRecorder = failureRecorder
     }
 
@@ -165,9 +177,17 @@ final class TranscriptCleanupPipeline {
         )
     }
 
-    /// The filter a dictation stopped now would use, captured once per dictation.
+    /// The filter a dictation stopped now would use, captured once per
+    /// dictation. Under Auto it is the fallback until the words are known.
     func selectedFilter() -> CleanupFilterSnapshot {
-        filterProvider()
+        selectedPlan(targetBundleID: nil).provisionalFilter
+    }
+
+    /// How a dictation stopped now for this app chooses its filter, captured
+    /// once per dictation so later edits cannot change it.
+    func selectedPlan(targetBundleID: String?) -> CleanupFilterPlan {
+        if let config = autoConfigProvider(targetBundleID) { return .auto(config) }
+        return .manual(filterProvider())
     }
 
     /// Whether `finalize` would clean up a dictation for this app.
@@ -179,12 +199,16 @@ final class TranscriptCleanupPipeline {
         _ rawTranscript: String,
         targetBundleID: String? = nil,
         cleanupOverride: Bool? = nil,
-        filterOverride: CleanupFilterSnapshot? = nil
+        filterOverride: CleanupFilterSnapshot? = nil,
+        filterPlan: CleanupFilterPlan? = nil
     ) async -> TranscriptCleanupOutcome {
         let vocabulary = vocabularyProvider()
         let localTranscript = VocabularyRewriter.apply(rawTranscript, entries: vocabulary)
         let rawTokenEstimate = LocalTokenEstimator.estimate(rawTranscript)
-        let filter = filterOverride ?? filterProvider()
+        // A filter given by the caller wins; Auto reads only these words, on this Mac.
+        let plan = filterOverride.map(CleanupFilterPlan.manual) ?? filterPlan ?? selectedPlan(targetBundleID: targetBundleID)
+        let choice = plan.resolve(text: localTranscript, targetBundleID: targetBundleID)
+        let filter = choice.filter
         let appRule = appRuleProvider(targetBundleID)
         let cleanupEnabled: Bool
         if let cleanupOverride {
@@ -207,7 +231,8 @@ final class TranscriptCleanupPipeline {
                 finalTokenEstimate: LocalTokenEstimator.estimate(localTranscript),
                 tokenEstimatorID: LocalTokenEstimator.identifier,
                 cleanupInput: localTranscript,
-                selectedFilter: filter
+                selectedFilter: filter,
+                filterReason: choice.reason
             )
         }
 
@@ -233,8 +258,9 @@ final class TranscriptCleanupPipeline {
                     filter: filter,
                     rawTokenEstimate: rawTokenEstimate,
                     finalTokenEstimate: LocalTokenEstimator.estimate(localTranscript),
-                    tokenEstimatorID: LocalTokenEstimator.identifier,
-                    cleanupInput: localTranscript
+                        tokenEstimatorID: LocalTokenEstimator.identifier,
+                    cleanupInput: localTranscript,
+                    filterReason: choice.reason
                 )
             }
             let systemPrompt = CleanupPromptBuilder.systemPrompt(
@@ -272,7 +298,8 @@ final class TranscriptCleanupPipeline {
                 rawTokenEstimate: rawTokenEstimate,
                 finalTokenEstimate: LocalTokenEstimator.estimate(finalText),
                 tokenEstimatorID: LocalTokenEstimator.identifier,
-                cleanupInput: localTranscript
+                cleanupInput: localTranscript,
+                filterReason: choice.reason
             )
         } catch {
             print(Self.safeFailureMessage)
@@ -287,7 +314,8 @@ final class TranscriptCleanupPipeline {
                 rawTokenEstimate: rawTokenEstimate,
                 finalTokenEstimate: LocalTokenEstimator.estimate(localTranscript),
                 tokenEstimatorID: LocalTokenEstimator.identifier,
-                cleanupInput: localTranscript
+                cleanupInput: localTranscript,
+                filterReason: choice.reason
             )
         }
     }

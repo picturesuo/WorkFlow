@@ -7,6 +7,8 @@ struct FilterAssistantProposal: Equatable {
     var baseMode: CleanupMode
     var instructions: String
     var writesDigits = false
+    /// Phrases Auto listens for, shown for review like everything else.
+    var triggers: [String] = []
 }
 
 /// One validated assistant turn: a short message and, unless the assistant
@@ -66,13 +68,14 @@ enum FilterAssistantPrompt {
     You help a person design one reusable writing filter for WorkFlow, a dictation app. WorkFlow lightly rewrites each future dictation with a built-in base mode and the filter's style instructions. You never rewrite, finish, solve, grade, or answer anything yourself.
 
     Reply with exactly one JSON object and nothing else, no code fences:
-    {"message": "<one or two friendly sentences>", "filter": {"name": "<at most \(CustomCleanupFilterStore.maximumNameLength) characters>", "base_mode": "everyday" | "technical" | "homework" | "writing", "instructions": "<at most \(CustomCleanupFilterStore.maximumInstructionLength) characters>", "digits": true | false}}
+    {"message": "<one or two friendly sentences>", "filter": {"name": "<at most \(CustomCleanupFilterStore.maximumNameLength) characters>", "base_mode": "everyday" | "technical" | "homework" | "writing", "instructions": "<at most \(CustomCleanupFilterStore.maximumInstructionLength) characters>", "digits": true | false, "triggers": ["<short phrase>", "<short phrase>"]}}
     Only when essential meaning is unclear, set "filter" to null and make "message" one short question for the person.
 
     The filter:
     - "instructions" are reusable, plain-language style preferences for wording, punctuation, capitalization, hyphenation, and number or math notation. Write them as rules for future dictations, with a short example of each rule.
     - Never ask the rewriter to solve, calculate, simplify, answer, grade, summarize, or add content, and never let it change a value, name, identifier, or equation.
     - "digits" is true when the person wants spoken quantities written as digits, as in math notation; WorkFlow then writes them as digits on the Mac after cleanup. Otherwise it is false.
+    - "triggers" are 2 to \(FilterTriggers.maximumCount) short words or phrases, each 1 to \(FilterTriggers.maximumWords) words, that come up when the person dictates this kind of writing and rarely otherwise, such as subject terms ("derivative", "integral"). Never use common words. WorkFlow uses them only when the person turns on automatic filter choice, and only when two different ones come up in one dictation. Use an empty list when nothing is specific enough.
     - Keep a name and base mode that fit the person's class or assignment when one is given. Never use the names Everyday, Technical, Homework, or Writing.
     - When refining, return the complete updated filter, keeping earlier rules unless the person changes them.
 
@@ -104,7 +107,7 @@ enum FilterAssistantPrompt {
             \(existingFilter.writesDigits)
             \(delimited(existingFilter.instructions))
             >>>
-            """)
+            """ + triggerSection(existingFilter.triggers))
         }
         if let currentDraft {
             sections.append("""
@@ -115,7 +118,7 @@ enum FilterAssistantPrompt {
             \(currentDraft.writesDigits)
             \(delimited(currentDraft.instructions))
             >>>
-            """)
+            """ + triggerSection(currentDraft.triggers))
         }
         if let context = context?.trimmingCharacters(in: .whitespacesAndNewlines), !context.isEmpty {
             sections.append("CLASS OR ASSIGNMENT:\n<<<\n\(delimited(context))\n>>>")
@@ -126,6 +129,12 @@ enum FilterAssistantPrompt {
         let request = request.trimmingCharacters(in: .whitespacesAndNewlines)
         sections.append("REQUEST:\n<<<\n\(delimited(request.isEmpty ? "Make a filter that matches the style of this example." : request))\n>>>")
         return sections.joined(separator: "\n\n")
+    }
+
+    /// Saved or drafted trigger phrases, so a refinement keeps them.
+    private static func triggerSection(_ triggers: [String]) -> String {
+        guard !triggers.isEmpty else { return "" }
+        return "\nITS TRIGGER PHRASES:\n<<<\n\(delimited(FilterTriggers.joined(triggers)))\n>>>"
     }
 
     /// Strips marker sequences so the person's text can never close its block.
@@ -155,9 +164,9 @@ enum FilterAssistantPrompt {
         guard let filterValue = object["filter"], !(filterValue is NSNull) else {
             return FilterAssistantReply(message: message, proposal: nil)
         }
-        // "digits" may be left out, which means false.
+        // "digits" and "triggers" may be left out, which means false and none.
         guard let filter = filterValue as? [String: Any],
-              Set(filter.keys).subtracting(["digits"]) == ["name", "base_mode", "instructions"],
+              Set(filter.keys).subtracting(["digits", "triggers"]) == ["name", "base_mode", "instructions"],
               let rawName = filter["name"] as? String,
               let rawMode = filter["base_mode"] as? String,
               let rawInstructions = filter["instructions"] as? String,
@@ -166,6 +175,7 @@ enum FilterAssistantPrompt {
             throw FilterAssistantError.malformedResponse
         }
         let writesDigits = (filter["digits"] as? Bool) ?? false
+        let triggers = try parseTriggers(filter["triggers"])
         let name = rawName.trimmingCharacters(in: .whitespacesAndNewlines)
         let instructions = rawInstructions.trimmingCharacters(in: .whitespacesAndNewlines)
         guard let mode = CleanupMode(rawValue: rawMode.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()) else {
@@ -185,8 +195,23 @@ enum FilterAssistantPrompt {
         }
         return FilterAssistantReply(
             message: message,
-            proposal: FilterAssistantProposal(name: name, baseMode: mode, instructions: instructions, writesDigits: writesDigits)
+            proposal: FilterAssistantProposal(
+                name: name, baseMode: mode, instructions: instructions, writesDigits: writesDigits, triggers: triggers
+            )
         )
+    }
+
+    /// Trigger phrases follow the editor's own rules; an unusable list is
+    /// rejected whole, never trimmed, so the draft is what was reviewed.
+    /// Whether another saved filter already uses a phrase is checked on Save.
+    private static func parseTriggers(_ value: Any?) throws -> [String] {
+        guard let value, !(value is NSNull) else { return [] }
+        guard let phrases = value as? [String] else { throw FilterAssistantError.malformedResponse }
+        do {
+            return try FilterTriggers.validated(phrases, others: [])
+        } catch {
+            throw FilterAssistantError.invalidProposal("trigger phrases must be specific and 1–\(FilterTriggers.maximumWords) words")
+        }
     }
 }
 

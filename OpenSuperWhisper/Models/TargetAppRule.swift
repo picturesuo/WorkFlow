@@ -53,6 +53,15 @@ struct TargetAppRule: Identifiable, Codable, Equatable {
     var cleanupBehavior: TargetCleanupBehavior = .inherit
     var pasteBehavior: TargetPasteBehavior = .appDefault
     var cleanupInstruction = ""
+    /// The filter this app uses under Auto when no saved filter's phrases
+    /// decide, as a selection tag; nil leaves Auto's fallback. A filter
+    /// picked by hand always wins over it.
+    var filterTag: String? = nil
+
+    var filterSelection: CleanupFilterSelection? {
+        get { filterTag.flatMap(CleanupFilterSelection.init(tag:)) }
+        set { filterTag = newValue?.tag }
+    }
 }
 
 enum TargetAppRuleStore {

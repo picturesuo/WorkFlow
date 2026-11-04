@@ -53,6 +53,9 @@ struct DictationSource: Codable, FetchableRecord, PersistableRecord, Equatable {
     /// Measured seconds from stopping the recording to the text being ready.
     /// Nil when not measured: queued work, failures, and older rows.
     var processingSeconds: TimeInterval?
+    /// Why the filter was used: picked by hand, or what Auto saw. Nil for
+    /// evidence from before Auto, and while Auto has not chosen yet.
+    var filterReason: FilterChoiceReason?
 
     init(
         recordingID: UUID,
@@ -64,6 +67,7 @@ struct DictationSource: Codable, FetchableRecord, PersistableRecord, Equatable {
         insertedText: String? = nil,
         disposition: DictationDisposition,
         filter: CleanupFilterSnapshot,
+        filterReason: FilterChoiceReason? = nil,
         cleanupSource: TranscriptCleanupOutcome.Source? = nil,
         captureOrigin: CaptureOrigin? = nil,
         processingSeconds: TimeInterval? = nil
@@ -82,9 +86,21 @@ struct DictationSource: Codable, FetchableRecord, PersistableRecord, Equatable {
         self.filterInstructions = filter.customInstructions
         self.filterWritesDigits = filter.customWritesDigits
         self.learnedPreferences = filter.learned
+        self.filterReason = filterReason
         self.cleanupSource = cleanupSource
         self.captureOrigin = captureOrigin
         self.processingSeconds = processingSeconds
+    }
+
+    /// Records the filter a dictation used and why.
+    mutating func setFilter(_ filter: CleanupFilterSnapshot, reason: FilterChoiceReason?) {
+        selectedMode = filter.mode
+        filterID = filter.customID
+        filterName = filter.customName
+        filterInstructions = filter.customInstructions
+        filterWritesDigits = filter.customWritesDigits
+        learnedPreferences = filter.learned
+        filterReason = reason
     }
 
     /// Evidence for a dictation whose cleanup has finished.
@@ -108,6 +124,7 @@ struct DictationSource: Codable, FetchableRecord, PersistableRecord, Equatable {
             insertedText: insertedText,
             disposition: disposition,
             filter: cleanup.selectedFilter ?? fallbackFilter,
+            filterReason: cleanup.filterReason,
             cleanupSource: cleanup.source,
             captureOrigin: captureOrigin,
             processingSeconds: processingSeconds

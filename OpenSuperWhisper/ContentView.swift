@@ -321,11 +321,13 @@ class ContentViewModel: ObservableObject {
             return
         } catch {
             print("Audio-file transcription failed; the audio is kept in History.")
+            let plan = cleanupPipeline.selectedPlan(targetBundleID: nil)
             let saved = await recordingStore.addFailedDictation(
                 audioAt: tempURL,
                 error: error,
                 duration: duration,
-                selectedFilter: cleanupPipeline.selectedFilter(),
+                selectedFilter: plan.provisionalFilter,
+                autoConfig: plan.autoConfig,
                 cleanupRequested: cleanupPipeline.cleanupRequested(targetBundleID: nil),
                 targetBundleID: nil,
                 recordingStartedAt: nil,
@@ -368,6 +370,7 @@ class ContentViewModel: ObservableObject {
                     cleanupFilterName: cleanup.customFilterName,
                     cleanupFilterInstructions: cleanup.customFilterInstructions,
                     cleanupFilterWritesDigits: cleanup.customFilterWritesDigits,
+                    cleanupFilterReason: cleanup.filterReason,
                     rawTokenEstimate: cleanup.rawTokenEstimate,
                     finalTokenEstimate: cleanup.finalTokenEstimate,
                     tokenEstimatorID: cleanup.tokenEstimatorID
@@ -517,7 +520,13 @@ struct ContentView: View {
                                             Task {
                                                 await TranscriptionQueue.shared.requeueRecording(recording)
                                             }
-                                        }
+                                        },
+                                        onRegenerateWith: { selection in
+                                            Task {
+                                                await TranscriptionQueue.shared.requeueRecording(recording, with: selection)
+                                            }
+                                        },
+                                        regenerationFilters: writingFilter.filters
                                     )
                                     .id(recording.id)
                                     .onAppear {
@@ -918,6 +927,8 @@ private struct DictationControls: View {
             status: status,
             shortcut: shortcut,
             writingSelection: writingFilter.selectionBinding,
+            writingAuto: writingFilter.autoBinding,
+            autoFallbackName: writingFilter.name(of: writingFilter.autoFallback),
             customFilters: writingFilter.filters,
             writingHelp: writingFilter.selectionDescription,
             onLearn: { SettingsRequest.open(pane: .personalize) },
@@ -975,6 +986,9 @@ struct DictationDock: View {
     let status: DictationDockStatus
     let shortcut: String
     @Binding var writingSelection: CleanupFilterSelection
+    /// Offers Auto in the picker when given.
+    var writingAuto: Binding<Bool>?
+    var autoFallbackName = CleanupMode.everyday.displayName
     var customFilters: [CustomCleanupFilter] = []
     var writingHelp = ""
     /// Opens Learn from finished writing; the dock shows no link without it.
@@ -1024,7 +1038,12 @@ struct DictationDock: View {
     }
 
     private var writingPicker: some View {
-        WritingFilterPicker(selection: $writingSelection, customFilters: customFilters)
+        WritingFilterPicker(
+            selection: $writingSelection,
+            customFilters: customFilters,
+            isAuto: writingAuto,
+            autoFallbackName: autoFallbackName
+        )
             .labelsHidden()
             .help(writingHelp)
             .accessibilityHint("Changes how AI cleanup rewrites future dictations")
@@ -1070,8 +1089,16 @@ struct DictationDock: View {
             .lineLimit(1)
     }
 
+    /// While recording under Auto, the filter is not known yet: it is chosen
+    /// from the words once they are transcribed.
+    private var detailText: String {
+        let detail = status.detail(shortcut: shortcut)
+        guard status.isRecording, writingAuto?.wrappedValue == true else { return detail }
+        return "\(detail) · Auto picks the filter after"
+    }
+
     private var statusDetail: some View {
-        Text(status.detail(shortcut: shortcut))
+        Text(detailText)
             .font(.subheadline)
             .foregroundStyle(.secondary)
             .monospacedDigit()
@@ -1265,6 +1292,8 @@ struct RecordingRow: View {
     let searchQuery: String
     let onDelete: () -> Void
     let onRegenerate: () -> Void
+    var onRegenerateWith: ((CleanupFilterSelection) -> Void)?
+    var regenerationFilters: [CustomCleanupFilter] = []
     private let audioRecorder = AudioRecorder.shared
     @Environment(\.transcriptPasteboard) private var pasteboardName
     @State private var isPlaying = false
@@ -1291,7 +1320,9 @@ struct RecordingRow: View {
                 pasteboard.setString(recording.transcription, forType: .string)
             },
             onDelete: onDelete,
-            onRegenerate: onRegenerate
+            onRegenerate: onRegenerate,
+            onRegenerateWith: onRegenerateWith,
+            regenerationFilters: regenerationFilters
         )
         .onReceive(
             audioRecorder.$isPlaying.combineLatest(audioRecorder.$currentlyPlayingURL)
@@ -1367,6 +1398,10 @@ struct HistoryRow: View {
     let onCopy: () -> Void
     let onDelete: () -> Void
     let onRegenerate: () -> Void
+    /// Regenerates with a filter picked by hand; the row offers no
+    /// "Regenerate with" menu without it.
+    var onRegenerateWith: ((CleanupFilterSelection) -> Void)?
+    var regenerationFilters: [CustomCleanupFilter] = []
     @State private var showTranscription = false
     @AppStorage(SpeakingEfficiency.typingWPMKey) private var typingWPM = SpeakingEfficiency.defaultTypingWPM
 
@@ -1478,6 +1513,32 @@ struct HistoryRow: View {
         return SpeakingFormat.explanation(sample, typingWPM: typingWPM)
     }
 
+    /// Which filter Auto chose and why. Filters picked by hand show nothing
+    /// new, so rows look as they always did unless Auto was on.
+    var filterChoiceLabel: String? {
+        guard recording.status == .completed,
+              recording.cleanupSource != .disabled,
+              let reason = recording.cleanupFilterReason,
+              let label = reason.label else { return nil }
+        let name = recording.cleanupFilterName ?? recording.cleanupMode?.displayName ?? CleanupMode.everyday.displayName
+        return "\(name) · \(label)"
+    }
+
+    @ViewBuilder
+    private var filterChoiceBadge: some View {
+        if let filterChoiceLabel, let reason = recording.cleanupFilterReason {
+            Label(filterChoiceLabel, systemImage: "wand.and.stars")
+                .labelStyle(CompactLabelStyle(spacing: 4))
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+                .truncationMode(.tail)
+                .help("\(reason.explanation)\(onRegenerateWith == nil ? "" : " To use another filter, choose Regenerate With in this row’s menu.")")
+                .accessibilityLabel("Filter: \(filterChoiceLabel)")
+                .accessibilityHint(reason.explanation)
+        }
+    }
+
     private var cleanupBadgeColor: Color {
         switch recording.cleanupSource {
         case .rawFallback, .budgetLimited:
@@ -1503,6 +1564,33 @@ struct HistoryRow: View {
                 Label(actions.title(action), systemImage: actions.systemImage(action))
             }
             .disabled(!actions.isEnabled(action))
+        }
+        if let onRegenerateWith, recording.mode == .dictation {
+            Menu {
+                Section("Built-in") {
+                    ForEach(CleanupMode.allCases) { mode in
+                        Button(mode.displayName) { onRegenerateWith(.builtIn(mode)) }
+                    }
+                }
+                if FilterCollection.isLarge(regenerationFilters) {
+                    ForEach(FilterCollection.grouped(regenerationFilters), id: \.mode) { group in
+                        Menu("Based on \(group.mode.displayName)") {
+                            ForEach(group.filters) { filter in
+                                Button(filter.name) { onRegenerateWith(.custom(filter.id)) }
+                            }
+                        }
+                    }
+                } else if !regenerationFilters.isEmpty {
+                    Section("Custom filters") {
+                        ForEach(regenerationFilters) { filter in
+                            Button(filter.name) { onRegenerateWith(.custom(filter.id)) }
+                        }
+                    }
+                }
+            } label: {
+                Label("Regenerate With", systemImage: "wand.and.stars")
+            }
+            .disabled(!actions.isEnabled(.regenerate))
         }
         Divider()
         Button(role: .destructive) { perform(.delete) } label: {
@@ -1626,6 +1714,7 @@ struct HistoryRow: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
                 // Room for the row's buttons and its actions menu.
                 .padding(.trailing, CGFloat(actions.visible.count) * 24 + 40)
+            filterChoiceBadge
 
             if recording.mode == .meeting {
                 Label(recording.title.flatMap { $0.isEmpty ? nil : $0 } ?? "Meeting", systemImage: "person.2")
