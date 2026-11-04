@@ -529,21 +529,42 @@ final class CorrectionPreferenceValidationTests: XCTestCase {
             ("then", "than"), ("tree", "three"), ("its", "it's")
         ]
         for (from, to) in meaningChanges {
-            XCTAssertFalse(CorrectionText.isSpellingChange(from: from, to: to), "\(from) → \(to)")
-            XCTAssertFalse(CorrectionText.isSpellingChange(from: to, to: from), "\(to) → \(from)")
+            XCTAssertFalse(CorrectionText.isRespelling(from: from, to: to), "\(from) → \(to)")
+            XCTAssertFalse(CorrectionText.isRespelling(from: to, to: from), "\(to) → \(from)")
+            XCTAssertFalse(CorrectionText.isWordChange(from: from, to: to), "Never offered for Vocabulary: \(from) → \(to)")
             XCTAssertTrue(CorrectionPreferenceValidator.validate(
                 [ProposedPreference(kind: .spelling, edits: [1], from: from, to: to, word: nil)],
                 edits: [edit(from, to)], mode: .everyday
             ).accepted.isEmpty, "\(from) → \(to)")
         }
-        // Respellings close to those rules still count.
-        let respellings = [
-            ("key board", "keyboard"), ("long term", "long-term"), ("note book", "notebook"), ("colour", "color"),
-            ("Smyth", "Smith"), ("recieve", "receive"), ("unecessary", "unnecessary"), ("carefull", "careful"),
-            ("dissapear", "disappear"), ("can not", "cannot"), ("get hub", "GitHub"), ("monday", "Monday")
+        // The same letters written another way are learned automatically.
+        let orthographic = [
+            ("key board", "keyboard"), ("long term", "long-term"), ("note book", "notebook"), ("can not", "cannot"),
+            ("monday", "Monday"), ("iphone", "iPhone")
         ]
-        for (from, to) in respellings {
-            XCTAssertTrue(CorrectionText.isSpellingChange(from: from, to: to), "\(from) → \(to)")
+        for (from, to) in orthographic {
+            XCTAssertTrue(CorrectionText.isOrthographicChange(from: from, to: to), "\(from) → \(to)")
+            XCTAssertEqual(CorrectionPreferenceValidator.validate(
+                [ProposedPreference(kind: .spelling, edits: [1], from: from, to: to, word: nil)],
+                edits: [edit(from, to)], mode: .everyday
+            ).accepted.count, 1, "\(from) → \(to)")
+        }
+        // A respelling that changes letters may be a name ("Smyth" → "Smith")
+        // or a regional or corrected spelling; letters cannot tell which, so
+        // it is never learned on its own and is offered for Vocabulary instead.
+        let wordChanges = [
+            ("colour", "color"), ("Smyth", "Smith"), ("recieve", "receive"), ("unecessary", "unnecessary"),
+            ("carefull", "careful"), ("dissapear", "disappear"), ("get hub", "GitHub")
+        ]
+        for (from, to) in wordChanges {
+            XCTAssertTrue(CorrectionText.isWordChange(from: from, to: to), "\(from) → \(to)")
+            XCTAssertFalse(CorrectionText.isOrthographicChange(from: from, to: to), "\(from) → \(to)")
+            let result = CorrectionPreferenceValidator.validate(
+                [ProposedPreference(kind: .spelling, edits: [1], from: from, to: to, word: nil)],
+                edits: [edit(from, to)], mode: .everyday
+            )
+            XCTAssertTrue(result.accepted.isEmpty, "\(from) → \(to)")
+            XCTAssertEqual(result.outcomes.map(\.status), [.wordChange], "\(from) → \(to)")
         }
     }
 }
@@ -650,7 +671,7 @@ final class LearnedPreferenceScopeTests: XCTestCase {
         ).first!
         CustomCleanupFilterStore.select(.custom(custom.id), in: defaults)
         let customSnapshot = CustomCleanupFilterStore.currentSnapshot(in: defaults)
-        XCTAssertTrue(customSnapshot.learned.isEmpty, "A custom filter keeps exactly its saved instructions")
+        XCTAssertTrue(customSnapshot.learned.isEmpty, "A saved filter never inherits a mode's learned preferences")
         XCTAssertEqual(customSnapshot.customID, custom.id)
         XCTAssertEqual(CustomCleanupFilterStore.load(from: defaults), [custom], "Learning never edits custom filters")
     }
@@ -673,16 +694,18 @@ final class LearnedPreferenceScopeTests: XCTestCase {
     }
 
     func testWritingKeepsTheSpeakersLongConnectedFlow() throws {
-        // A synthetic sample in the spirit of the user's blog: numbered clauses,
-        // a semicolon join, vocabulary kept, only stutters and filler removed.
-        let spoken = "Starting my third year of school, I realized that um first that cheap pens were not a good long term plan, and second that I missed I missed the sketching I did as a kid. So I decided to make a few notebooks for my friends and before choosing paper I wanted to read what people said."
-        let written = "Starting my third year of school, I realized that (1) cheap pens were not a good long term plan, and (2) that I missed the sketching I did as a kid. So I decided to make a few notebooks for my friends; and before choosing paper, I wanted to read what people said."
+        // An invented sample with the features Writing must keep: spoken
+        // "first ... second ..." items marked inline as (1) and (2), one
+        // semicolon join, the speaker's own words, and only a filler and a
+        // stutter removed.
+        let spoken = "the ferry schedule changed twice this spring um which meant we had to plan around two things first the early boat no longer stops at the north pier and second the the last boat now leaves before the market closes the harbor office posted a notice but nobody at the cafe had seen it"
+        let written = "The ferry schedule changed twice this spring, which meant we had to plan around two things: (1) the early boat no longer stops at the north pier, and (2) the last boat now leaves before the market closes. The harbor office posted a notice; but nobody at the cafe had seen it."
         XCTAssertEqual(try CleanupGuard.postprocess(written, source: spoken, mode: .writing, allowsNumberFormatting: true), written)
         XCTAssertThrowsError(
             try CleanupGuard.postprocess(written, source: spoken, mode: .everyday),
             "Everyday does not inherit Writing's inline markers"
         )
-        let shortened = "I needed better pens. I missed sketching. I made notebooks."
+        let shortened = "The schedule changed. Boats left early. Nobody knew."
         XCTAssertThrowsError(try CleanupGuard.postprocess(shortened, source: spoken + " " + spoken, mode: .writing, allowsNumberFormatting: true),
                              "Writing may not compress the speaker into short sentences")
     }
@@ -1216,8 +1239,9 @@ final class CorrectionLearningLayoutTests: XCTestCase {
         }
     }
 
-    /// "Learn for" picks the mode a document teaches, never the mode new
-    /// dictations use, says so to VoiceOver, and Learn leaves it alone too.
+    /// The fallback picker sets the mode only older dictations without a
+    /// recorded mode teach, never the mode new dictations use, says so to
+    /// VoiceOver, and Learn leaves the dictation mode alone too.
     func testLearnForPickerSaysAndKeepsTheDictationModeUnchanged() async throws {
         let (defaults, suite) = try makeDefaults()
         defer { defaults.removePersistentDomain(forName: suite) }
@@ -1241,7 +1265,7 @@ final class CorrectionLearningLayoutTests: XCTestCase {
                     card.segmentedControls.first.map { $0.label(forSegment: $0.selectedSegment) })
         }
         XCTAssertEqual(hints, [CorrectionLearningCard.dictationModeNote], "VoiceOver hears that this is not the dictation mode")
-        XCTAssertEqual(selected, "Homework", "Learn now teaches Homework")
+        XCTAssertEqual(selected, "Homework", "Older dictations now teach Homework")
 
         session.document = "A finished Homework document that matches no dictation."
         session.learn()

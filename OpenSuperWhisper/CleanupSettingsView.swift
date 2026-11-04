@@ -959,6 +959,10 @@ struct PersonalizationSettingsView: View {
         }
         .onAppear { refreshRunningApps() }
         .onChange(of: vocabulary) { _, value in VocabularyStore.save(value) }
+        // Learning adds a word change only when the person chooses it.
+        .onReceive(NotificationCenter.default.publisher(for: .vocabularyDidChange)) { _ in
+            vocabulary = VocabularyStore.load()
+        }
         .onChange(of: rules) { _, value in TargetAppRuleStore.save(value) }
     }
 
