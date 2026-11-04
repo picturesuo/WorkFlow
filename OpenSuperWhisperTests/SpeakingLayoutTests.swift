@@ -58,6 +58,7 @@ final class SpeakingLayoutTests: XCTestCase {
         return store
     }
 
+    @discardableResult
     private func render<Content: View>(_ view: Content, size: CGSize, scheme: ColorScheme, name: String) throws -> NSBitmapImageRep {
         let host = NSHostingView(rootView: view.frame(width: size.width, height: size.height).environment(\.colorScheme, scheme))
         let window = NSWindow(contentRect: NSRect(origin: .zero, size: size), styleMask: [.borderless], backing: .buffered, defer: false)

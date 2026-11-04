@@ -6,9 +6,11 @@ import XCTest
 // (Messages) cleanup providers. Every request is answered by an in-process
 // URLProtocol fixture; keys are synthetic placeholders that only look like
 // real ones so redaction can be checked. Nothing touches Keychain or the network.
+// The keys are assembled at runtime so secret scanners never see a full
+// key-shaped literal in the source.
 
-private let syntheticOpenAIKey = "sk-proj-SYNTHETICtestKEY000000000000000000000000"
-private let syntheticAnthropicKey = "sk-ant-api03-SYNTHETICtestKEY0000000000000000000000"
+private let syntheticOpenAIKey = ["sk", "proj", "SYNTHETICtestKEY" + String(repeating: "0", count: 24)].joined(separator: "-")
+private let syntheticAnthropicKey = ["sk", "ant", "api03", "SYNTHETICtestKEY" + String(repeating: "0", count: 22)].joined(separator: "-")
 
 /// Answers each request from `handler`, records what was sent, and can hold a
 /// request open forever to exercise timeouts.
@@ -104,7 +106,7 @@ enum ProviderFixtureReplies {
     }
 
     static func openAIError(_ message: String, type: String, code: String?) -> String {
-        encode(["error": ["message": message, "type": type, "param": NSNull(), "code": code ?? NSNull()]])
+        encode(["error": ["message": message, "type": type, "param": NSNull(), "code": code.map { $0 as Any } ?? NSNull()]])
     }
 
     static func anthropicError(_ message: String, type: String) -> String {
@@ -474,7 +476,7 @@ final class ProviderErrorTextTests: XCTestCase {
     func testKeyShapedTokensAreRedacted() {
         let samples = [
             "Incorrect API key provided: sk-proj-abc123************************wxyz.",
-            "invalid x-api-key sk-ant-api03-AbCdEfGhIjKlMnOpQrStUvWxYz0123456789",
+            "invalid x-api-key \(syntheticAnthropicKey)",
             "Authorization: Bearer abc.def.ghi",
             "The security token ABSKQmVkcm9ja0FQSUtleS1leGFtcGxl is invalid",
             "token 0123456789abcdef0123456789abcdef0123 leaked"
