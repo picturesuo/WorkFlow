@@ -132,17 +132,19 @@ final class MainWindowLayoutTests: XCTestCase {
                 window.assertControlsFitWithoutOverlapping()
 
                 let record = try XCTUnwrap(window.recordButton)
-                let meeting = try XCTUnwrap(window.meetingButton)
+                XCTAssertNil(window.meetingStopButton, "Meeting recording lives in More until a meeting runs")
+                XCTAssertEqual(window.popUps.filter { window.frameInHost($0).maxY <= WFChrome.titleBarHeight }.count, 1, "More")
+                let canStartMeeting = MainToolbar.meetingAvailable(isMeetingRecording: false, isMeetingBusy: false, dictationState: model.state)
                 switch state {
                 case "ready":
                     XCTAssertTrue(record.isEnabled, "Start recording is available when ready")
-                    XCTAssertTrue(meeting.isEnabled, "A meeting can start when ready")
+                    XCTAssertTrue(canStartMeeting, "A meeting can start when ready")
                 case "recording":
                     XCTAssertTrue(record.isEnabled, "Stop stays available while recording")
-                    XCTAssertFalse(meeting.isEnabled, "No meeting over a dictation")
+                    XCTAssertFalse(canStartMeeting, "No meeting over a dictation")
                 case "transcribing":
                     XCTAssertFalse(record.isEnabled, "No second recording while transcribing")
-                    XCTAssertFalse(meeting.isEnabled)
+                    XCTAssertFalse(canStartMeeting)
                 default:
                     XCTAssertFalse(record.isEnabled, "Nothing to record with")
                 }
@@ -269,25 +271,40 @@ final class MainWindowLayoutTests: XCTestCase {
 
     func testToolbarButtonsCallTheirActions() throws {
         var calls: [String] = []
-        func toolbar(meetingAvailable: Bool) -> some View {
+        func toolbar(recording: Bool = false, inProgress: Bool = false, meetingAvailable: Bool = true) -> some View {
             MainToolbar(
-                searchText: .constant(""), meetingLabel: "Start meeting", isMeetingRecording: false,
+                searchText: .constant(""), meetingLabel: recording ? "Stop & save meeting" : "Start meeting",
+                isMeetingRecording: recording, isMeetingInProgress: inProgress,
                 isMeetingAvailable: meetingAvailable, canDeleteAll: true,
                 onMeeting: { calls.append("meeting") }, onDeleteAll: { calls.append("delete") }, onSettings: { calls.append("settings") }
             )
         }
-        let available = OffscreenHost(toolbar(meetingAvailable: true), size: CGSize(width: 560, height: 40))
-        let buttons = available.buttons.sorted { available.frameInHost($0).minX < available.frameInHost($1).minX }
-        XCTAssertEqual(buttons.count, 2, "Meeting and Settings are buttons; More is a menu")
-        XCTAssertEqual(available.popUps.count, 1, "More opens a menu")
-        XCTAssertEqual(available.searchFields.first?.placeholderString, "Search History")
-        buttons.forEach { $0.performClick(nil) }
-        XCTAssertEqual(calls, ["meeting", "settings"], "Delete All is only reachable through the More menu and its confirmation")
+        let idle = OffscreenHost(toolbar(), size: CGSize(width: 560, height: 40))
+        XCTAssertEqual(idle.buttons.count, 1, "Only Settings is a button; meetings start from More")
+        XCTAssertEqual(idle.popUps.count, 1, "More opens a menu")
+        XCTAssertEqual(idle.searchFields.first?.placeholderString, "Search History")
+        let idleToolbar = MainToolbar(searchText: .constant(""), meetingLabel: "Start meeting", isMeetingRecording: false,
+                                      isMeetingAvailable: true, canDeleteAll: true, onMeeting: {}, onDeleteAll: {}, onSettings: {})
+        XCTAssertEqual(idleToolbar.moreMenuItems, [.init(title: "Start Meeting Recording…", isEnabled: true),
+                                                   .init(title: "Delete All Recordings…", isEnabled: true)])
+        idle.buttons.forEach { $0.performClick(nil) }
+        XCTAssertEqual(calls, ["settings"], "Delete All is only reachable through the More menu and its confirmation")
 
-        let busy = OffscreenHost(toolbar(meetingAvailable: false), size: CGSize(width: 560, height: 40))
-        let meeting = try XCTUnwrap(busy.buttons.min { busy.frameInHost($0).minX < busy.frameInHost($1).minX })
-        XCTAssertFalse(meeting.isEnabled)
-        withExtendedLifetime((available, busy)) {}
+        calls = []
+        let recording = OffscreenHost(toolbar(recording: true, inProgress: true), size: CGSize(width: 560, height: 40))
+        let buttons = recording.buttons.sorted { recording.frameInHost($0).minX < recording.frameInHost($1).minX }
+        XCTAssertEqual(buttons.count, 2, "A running meeting puts its stop button in the toolbar")
+        buttons.forEach { $0.performClick(nil) }
+        XCTAssertEqual(calls, ["meeting", "settings"])
+        let recordingToolbar = MainToolbar(searchText: .constant(""), meetingLabel: "Stop & save meeting", isMeetingRecording: true,
+                                           isMeetingInProgress: true, isMeetingAvailable: true, canDeleteAll: false,
+                                           onMeeting: {}, onDeleteAll: {}, onSettings: {})
+        XCTAssertEqual(recordingToolbar.moreMenuItems.map(\.isEnabled), [false, false], "No second meeting; nothing to delete")
+
+        let saving = OffscreenHost(toolbar(inProgress: true, meetingAvailable: false), size: CGSize(width: 560, height: 40))
+        let stop = try XCTUnwrap(saving.buttons.min { saving.frameInHost($0).minX < saving.frameInHost($1).minX })
+        XCTAssertFalse(stop.isEnabled, "Nothing to stop while the meeting saves")
+        withExtendedLifetime((idle, recording, saving)) {}
     }
 
     func testDockLearnAndRecordRouteAndModePickerSaves() throws {
@@ -616,10 +633,11 @@ final class MainWindowHost: HostedControls {
         buttons.filter { frameInHost($0).maxY <= WFChrome.titleBarHeight }
     }
 
-    var meetingButton: NSButton? { toolbarButtons.min { frameInHost($0).minX < frameInHost($1).minX } }
+    /// The toolbar's stop-meeting button, present only while a meeting runs.
+    var meetingStopButton: NSButton? { toolbarButtons.count > 1 ? toolbarButtons.min { frameInHost($0).minX < frameInHost($1).minX } : nil }
 
     var recordButton: NSButton? {
-        let bottom = buttons.filter { frameInHost($0).minY > host.bounds.height - 60 }
+        let bottom = buttons.filter { frameInHost($0).minY > host.bounds.height - 72 }
         return bottom.max { frameInHost($0).maxX < frameInHost($1).maxX }
     }
 
@@ -640,7 +658,7 @@ final class MainWindowHost: HostedControls {
         let chrome: [NSView] = (buttons as [NSView]) + popUps + searchFields + segmentedControls
         let controls = chrome.filter { view in list.map { !view.isDescendant(of: $0) } ?? true }
         let frames = controls.map { frameInHost($0) }
-        XCTAssertGreaterThanOrEqual(frames.count, 7, "Search, meeting, More, Settings, modes, microphone, record", file: file, line: line)
+        XCTAssertGreaterThanOrEqual(frames.count, 6, "Search, More, Settings, modes, microphone, record", file: file, line: line)
         for (index, frame) in frames.enumerated() {
             XCTAssertTrue(host.bounds.insetBy(dx: -0.5, dy: -0.5).contains(frame), "\(controls[index]) at \(frame) is clipped", file: file, line: line)
             if frame.maxY <= WFChrome.titleBarHeight {

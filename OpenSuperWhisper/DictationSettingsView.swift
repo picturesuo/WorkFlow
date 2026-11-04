@@ -11,6 +11,7 @@ struct DictationSettingsView: View {
     @State private var showsModels = false
     @State private var showsMoreOptions = false
     @State private var downloadError: String?
+    @State private var meetingCleanupEnabled = AppPreferences.shared.meetingCleanupEnabled
 
     private enum ShortcutChoice: Hashable {
         case modifier(ModifierKey)
@@ -451,8 +452,8 @@ struct DictationSettingsView: View {
             SettingsDisclosureRow(
                 title: "More options",
                 detail: viewModel.selectedEngine == "whisper"
-                    ? "Sounds, Escape, startup, History storage, and Whisper decoding."
-                    : "Sounds, Escape, startup, and History storage.",
+                    ? "Sounds, Escape, startup, meetings, History storage, and Whisper decoding."
+                    : "Sounds, Escape, startup, meetings, and History storage.",
                 isExpanded: $showsMoreOptions
             )
         }
@@ -503,6 +504,17 @@ struct DictationSettingsView: View {
                     isOn: $viewModel.startHiddenInMenuBar
                 )
             }
+            SettingsGroup(
+                title: "Meetings",
+                footer: "Start a meeting recording from More (⋯) in the main window or from the menu bar. Meetings record the microphone as is and never paste."
+            ) {
+                SettingsToggleRow(
+                    title: "Clean up meeting transcripts",
+                    detail: "Off keeps long meetings on this Mac and free.",
+                    isOn: $meetingCleanupEnabled
+                )
+            }
+            .onChange(of: meetingCleanupEnabled) { _, value in AppPreferences.shared.meetingCleanupEnabled = value }
             SettingsGroup(title: "History storage") {
                 RecordingStorageSettingsView()
             }

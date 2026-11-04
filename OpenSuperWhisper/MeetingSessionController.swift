@@ -12,6 +12,8 @@ final class MeetingSessionController: ObservableObject {
 
     @Published private(set) var state: State = .idle
     @Published private(set) var errorMessage: String?
+    /// When the current meeting started recording, for the window's clock.
+    @Published private(set) var startedAt: Date?
     private var cleanupRequested = false
     private var activeSessionID: UUID?
 
@@ -67,12 +69,14 @@ final class MeetingSessionController: ObservableObject {
         activeSessionID = sessionID
         self.cleanupRequested = cleanupRequested ?? AppPreferences.shared.meetingCleanupEnabled
         state = .recording(title: normalizedTitle.isEmpty ? Self.defaultTitle() : normalizedTitle)
+        startedAt = Date()
         return true
     }
 
     func stop(cleanupRequested: Bool? = nil) async {
         guard case .recording(let title) = state, let sessionID = activeSessionID else { return }
         activeSessionID = nil
+        startedAt = nil
         state = .saving(title: title)
 
         guard let url = await AudioRecorder.shared.stopRecording(sessionID: sessionID) else {
@@ -96,6 +100,7 @@ final class MeetingSessionController: ObservableObject {
             AudioRecorder.shared.cancelRecording(sessionID: sessionID)
         }
         activeSessionID = nil
+        startedAt = nil
         cleanupRequested = false
         state = .idle
     }
@@ -106,6 +111,7 @@ final class MeetingSessionController: ObservableObject {
 
     private func fail(_ message: String) {
         activeSessionID = nil
+        startedAt = nil
         cleanupRequested = false
         errorMessage = message
         state = .idle

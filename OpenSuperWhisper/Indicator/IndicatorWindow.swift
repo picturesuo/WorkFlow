@@ -497,39 +497,107 @@ class IndicatorViewModel: ObservableObject {
     }
 }
 
+/// The live dot: vermilion with a soft glow, still when Reduce Motion is on.
 struct RecordingIndicator: View {
     let isBlinking: Bool
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    
+    @WFReduceMotion private var reduceMotion
+
     var body: some View {
         Circle()
-            .fill(
-                LinearGradient(
-                    colors: [Color.red.opacity(0.8), Color.red],
-                    startPoint: .topLeading,
-                    endPoint: .bottomTrailing
-                )
-            )
+            .fill(ThemePalette.signal(.dark))
             .frame(width: 8, height: 8)
-            .opacity(isBlinking && !reduceMotion ? 0.3 : 1.0)
-            .animation(reduceMotion ? nil : .easeInOut(duration: 0.4), value: isBlinking)
+            .background(
+                Circle()
+                    .fill(ThemePalette.signal(.dark).opacity(0.4))
+                    .frame(width: 13, height: 13)
+                    .blur(radius: 2)
+                    .opacity(isBlinking && !reduceMotion ? 0.2 : 1)
+            )
+            .animation(reduceMotion ? nil : .easeInOut(duration: 0.6), value: isBlinking)
+            .accessibilityHidden(true)
+    }
+}
+
+/// Recent microphone levels as rounded bars, newest on the right, so the
+/// capsule shows the voice it hears. Silence leaves short, even bars.
+struct IndicatorWaveform: View {
+    let levels: [CGFloat]
+    var color: Color = BrandPalette.ivory
+    static let barWidth: CGFloat = 3
+    static let spacing: CGFloat = 2.5
+    static let minHeight: CGFloat = 3
+    static let maxHeight: CGFloat = 18
+    @WFReduceMotion private var reduceMotion
+
+    static func width(bars: Int) -> CGFloat {
+        CGFloat(bars) * barWidth + CGFloat(max(bars - 1, 0)) * spacing
+    }
+
+    var body: some View {
+        HStack(alignment: .center, spacing: Self.spacing) {
+            ForEach(Array(levels.enumerated()), id: \.offset) { index, level in
+                Capsule()
+                    .fill(color.opacity(0.55 + 0.45 * Double(index + 1) / Double(max(levels.count, 1))))
+                    .frame(width: Self.barWidth,
+                           height: Self.minHeight + (Self.maxHeight - Self.minHeight) * min(max(level, 0), 1))
+            }
+        }
+        .frame(width: Self.width(bars: levels.count), height: Self.maxHeight)
+        .animation(reduceMotion ? nil : WFMotion.level, value: levels)
+        .accessibilityHidden(true)
+    }
+}
+
+/// The waveform fed by the shared meter; only this view redraws at its rate.
+struct LiveIndicatorWaveform: View {
+    @ObservedObject private var meter = InputLevelMeter.shared
+
+    var body: some View {
+        IndicatorWaveform(levels: meter.history)
+    }
+}
+
+/// While transcribing, the bars settle into a slow travelling wave. With
+/// Reduce Motion they hold still at a gentle slope.
+struct IndicatorProcessingWave: View {
+    var bars = 5
+    @WFReduceMotion private var reduceMotion
+
+    static func levels(bars: Int, at time: TimeInterval) -> [CGFloat] {
+        (0..<bars).map { index in
+            CGFloat(0.35 + 0.3 * sin(time * 2 * .pi * 0.8 - Double(index) * 0.75))
+        }
+    }
+
+    var body: some View {
+        if reduceMotion {
+            IndicatorWaveform(levels: (0..<bars).map { CGFloat(0.2 + 0.1 * Double($0 % 3)) })
+        } else {
+            TimelineView(.animation) { context in
+                IndicatorWaveform(levels: Self.levels(bars: bars, at: context.date.timeIntervalSinceReferenceDate))
+            }
+        }
     }
 }
 
 struct CancelConfirmationBar: View {
     @State private var progress: CGFloat = 1
-    
+    @WFReduceMotion private var reduceMotion
+
     var body: some View {
         GeometryReader { geo in
             Capsule()
-                .fill(Color.orange)
+                .fill(BrandPalette.amber)
                 .frame(width: geo.size.width * progress, height: 2)
                 .frame(maxWidth: .infinity, alignment: .leading)
         }
         .frame(height: 2)
-        .padding(.horizontal, 12)
+        .padding(.horizontal, 18)
         .padding(.bottom, 3)
         .onAppear {
+            // The bar is the countdown; with Reduce Motion it stays full and
+            // the words carry the meaning.
+            guard !reduceMotion else { return }
             withAnimation(.linear(duration: IndicatorViewModel.cancelConfirmationWindow)) {
                 progress = 0
             }
@@ -537,217 +605,156 @@ struct CancelConfirmationBar: View {
     }
 }
 
+/// The capsule beside the caret. It is always charcoal with ivory type,
+/// so it reads the same over any document, in light or dark mode.
 struct IndicatorWindow: View {
     /// Geometry shared with IndicatorWindowManager. The panel must be larger
     /// than the card: everything drawn outside the window bounds is cut off,
     /// so the appear offset (moves the card down) and the spring overshoot
     /// need margins, otherwise the card edges are visibly clipped mid-animation.
-    static let cardSize = CGSize(width: 200, height: 36)
+    static let cardSize = CGSize(width: 224, height: 40)
     static let windowSize = CGSize(width: 256, height: 96)
     static let appearOffset: CGFloat = 20
     static let appearInitialScale: CGFloat = 0.5
-    
+    /// Room for words beside the leading glyph and the trailing clock.
+    static let horizontalPadding: CGFloat = 16
+
     @ObservedObject var viewModel: IndicatorViewModel
-    @Environment(\.colorScheme) private var colorScheme
-    
-    private var backgroundColor: Color {
-        BrandPalette.charcoal.opacity(colorScheme == .dark ? 0.82 : 0.9)
+
+    private static let ivory = BrandPalette.ivory
+    private static let secondaryIvory = BrandPalette.ivory.opacity(0.62)
+
+    /// What the capsule says for each message state; nil while recording,
+    /// connecting, or transcribing, which draw live content instead.
+    static func message(for state: RecordingState) -> (symbol: String, text: String)? {
+        switch state {
+        case .busy: ("hourglass", "Processing…")
+        case .noMicrophone: ("mic.slash", "No microphone")
+        case .recordingFailed: ("exclamationmark.triangle", "Recording failed")
+        case .recordingCutShort: ("exclamationmark.triangle", "Recording cut short")
+        case .transcriptionFailed: ("exclamationmark.triangle", "Transcription failed")
+        case .pasteFailed: ("doc.on.clipboard", "Copied, not pasted")
+        case .clipboardFailed: ("tray.full", "Not pasted, in History")
+        case .idle, .connecting, .recording, .decoding: nil
+        }
     }
-    
+
     var body: some View {
+        let shape = Capsule(style: .continuous)
 
-        let rect = RoundedRectangle(cornerRadius: 24)
-        
-        VStack(spacing: 12) {
-            switch viewModel.state {
-            case .connecting:
-                HStack(spacing: 8) {
-                    ProgressView()
-                        .tint(BrandPalette.ivory)
-                        .scaleEffect(0.7)
-                        .frame(width: 24)
-                    
-                    Text("Connecting...")
-                        .font(.system(size: 13, weight: .medium))
-                        .foregroundColor(.white)
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.85)
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                
-            case .recording:
-                HStack(spacing: 8) {
-                    RecordingIndicator(isBlinking: viewModel.isBlinking)
-                        .frame(width: 24)
-                    
-                    if viewModel.isConfirmingCancel {
-                        Text("Press Esc to cancel")
-                            .font(.system(size: 12, weight: .semibold))
-                            .foregroundColor(.orange)
-                            .transition(.opacity)
-                            .lineLimit(1)
-                            .minimumScaleFactor(0.85)
-                    } else {
-                        Text("Recording...")
-                            .font(.system(size: 13, weight: .medium))
-                            .foregroundColor(.white)
-                            .transition(.opacity)
-                            .lineLimit(1)
-                            .minimumScaleFactor(0.85)
-                    }
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .animation(.easeInOut(duration: 0.2), value: viewModel.isConfirmingCancel)
-                
-            case .decoding:
-                HStack(spacing: 8) {
-                    ProgressView()
-                        .tint(BrandPalette.ivory)
-                        .scaleEffect(0.7)
-                        .frame(width: 24)
-                    
-                    Text(viewModel.isFinalizing ? "Refining..." : "Transcribing...")
-                        .font(.system(size: 13, weight: .medium))
-                        .foregroundColor(.white)
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.85)
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                
-            case .busy:
-                HStack(spacing: 8) {
-                    Image(systemName: "hourglass")
-                        .foregroundColor(.orange)
-                        .frame(width: 24)
-
-                    Text("Processing...")
-                        .font(.system(size: 13, weight: .semibold))
-                        .foregroundColor(.orange)
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.85)
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-
-            case .noMicrophone:
-                HStack(spacing: 8) {
-                    Image(systemName: "mic.slash")
-                        .foregroundColor(.orange)
-                        .frame(width: 24)
-
-                    Text("No microphone")
-                        .font(.system(size: 13, weight: .semibold))
-                        .foregroundColor(.orange)
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.85)
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-
-            case .recordingFailed:
-                HStack(spacing: 8) {
-                    Image(systemName: "exclamationmark.triangle")
-                        .foregroundColor(.orange)
-                        .frame(width: 24)
-
-                    Text("Recording failed")
-                        .font(.system(size: 13, weight: .semibold))
-                        .foregroundColor(.orange)
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.85)
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-
-            case .recordingCutShort:
-                HStack(spacing: 8) {
-                    Image(systemName: "exclamationmark.triangle")
-                        .foregroundColor(.orange)
-                        .frame(width: 24)
-
-                    Text("Recording cut short")
-                        .font(.system(size: 13, weight: .semibold))
-                        .foregroundColor(.orange)
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.85)
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-
-            case .transcriptionFailed:
-                HStack(spacing: 8) {
-                    Image(systemName: "exclamationmark.triangle")
-                        .foregroundColor(.orange)
-                        .frame(width: 24)
-
-                    Text("Transcription failed")
-                        .font(.system(size: 13, weight: .semibold))
-                        .foregroundColor(.orange)
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.85)
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-
-            case .pasteFailed:
-                HStack(spacing: 8) {
-                    Image(systemName: "doc.on.clipboard")
-                        .foregroundColor(.orange)
-                        .frame(width: 24)
-
-                    Text("Copied, not pasted")
-                        .font(.system(size: 13, weight: .semibold))
-                        .foregroundColor(.orange)
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.85)
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-
-            case .clipboardFailed:
-                HStack(spacing: 8) {
-                    Image(systemName: "exclamationmark.triangle")
-                        .foregroundColor(.orange)
-                        .frame(width: 24)
-
-                    Text("Not pasted, in History")
-                        .font(.system(size: 13, weight: .semibold))
-                        .foregroundColor(.orange)
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.85)
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-
-            case .idle:
-                EmptyView()
+        content
+            .padding(.horizontal, Self.horizontalPadding)
+            .frame(width: Self.cardSize.width, height: Self.cardSize.height)
+            .background {
+                shape
+                    .fill(BrandPalette.charcoal.opacity(0.92))
+                    .background { shape.fill(Material.thinMaterial) }
             }
-        }
-        .padding(.horizontal, 16)
-        .frame(height: Self.cardSize.height)
-        .background {
-            rect
-                .fill(backgroundColor)
-                .background {
-                    rect
-                        .fill(Material.thinMaterial)
-                }
-        }
-        .overlay {
-            rect
-                .strokeBorder(Color.white.opacity(0.10), lineWidth: 1)
-        }
-        .overlay(alignment: .bottom) {
-            if viewModel.isConfirmingCancel {
-                CancelConfirmationBar()
+            .overlay {
+                // Lit from above, like the record disc.
+                shape.strokeBorder(
+                    LinearGradient(colors: [Color.white.opacity(0.20), Color.white.opacity(0.06)],
+                                   startPoint: .top, endPoint: .bottom),
+                    lineWidth: 1
+                )
             }
-        }
-        .clipShape(rect)
-        .frame(width: Self.cardSize.width)
-        // The ideal size of the root view must match the panel: NSHostingView
-        // resizes the window down to SwiftUI's ideal size, and a window sized
-        // to the bare card clips the appear offset, bounce overshoot and shadow.
-        .frame(width: Self.windowSize.width, height: Self.windowSize.height)
+            .overlay(alignment: .bottom) {
+                if viewModel.isConfirmingCancel {
+                    CancelConfirmationBar()
+                }
+            }
+            .clipShape(shape)
+            .environment(\.colorScheme, .dark)
+            .accessibilityElement(children: .combine)
+            // The ideal size of the root view must match the panel: NSHostingView
+            // resizes the window down to SwiftUI's ideal size, and a window sized
+            // to the bare card clips the appear offset, bounce overshoot and shadow.
+            .frame(width: Self.windowSize.width, height: Self.windowSize.height)
         // The appear/hide animation is NOT done in SwiftUI on purpose:
         // animating scaleEffect/offset/opacity re-rasterizes the card (material
         // + gradients + shadow) on the CPU every frame and stalls the main
         // thread in CABackingStoreUpdate/wait_for_synchronize (20-60 ms per
         // frame in traces). IndicatorWindowManager animates the hosting view's
         // layer with CASpringAnimation instead: content is drawn once and the
-        // spring runs entirely in the render server on the GPU.
+        // spring runs entirely in the render server on the GPU. Only the small
+        // waveform redraws while recording.
+    }
+
+    @ViewBuilder
+    private var content: some View {
+        switch viewModel.state {
+        case .connecting:
+            HStack(spacing: 10) {
+                ProgressView()
+                    .controlSize(.small)
+                    .tint(Self.ivory)
+                    .frame(width: 16)
+                label("Connecting microphone…", color: Self.ivory)
+                Spacer(minLength: 0)
+            }
+
+        case .recording:
+            HStack(spacing: 10) {
+                RecordingIndicator(isBlinking: viewModel.isBlinking)
+                if viewModel.isConfirmingCancel {
+                    label("Press Esc to cancel", color: BrandPalette.amber)
+                        .transition(.opacity)
+                    Spacer(minLength: 0)
+                } else {
+                    LiveIndicatorWaveform()
+                    label("Listening", color: Self.ivory)
+                        .transition(.opacity)
+                    Spacer(minLength: 0)
+                    elapsed
+                }
+            }
+            .animation(.easeInOut(duration: 0.2), value: viewModel.isConfirmingCancel)
+
+        case .decoding:
+            HStack(spacing: 10) {
+                IndicatorProcessingWave()
+                label(viewModel.isFinalizing ? "Refining…" : "Transcribing…", color: Self.ivory)
+                Spacer(minLength: 0)
+            }
+
+        case .idle:
+            EmptyView()
+
+        default:
+            if let message = Self.message(for: viewModel.state) {
+                HStack(spacing: 10) {
+                    Image(systemName: message.symbol)
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(BrandPalette.amber)
+                        .frame(width: 16)
+                        .accessibilityHidden(true)
+                    label(message.text, color: BrandPalette.amber)
+                    Spacer(minLength: 0)
+                }
+            }
+        }
+    }
+
+    private func label(_ text: String, color: Color) -> some View {
+        Text(text)
+            .font(.system(size: 13, weight: .semibold))
+            .foregroundStyle(color)
+            .lineLimit(1)
+            .minimumScaleFactor(0.85)
+    }
+
+    /// The running length, ticking once a second; absent until the
+    /// recording has a start time.
+    @ViewBuilder
+    private var elapsed: some View {
+        if let startedAt = viewModel.recordingStartedAt {
+            TimelineView(.periodic(from: startedAt, by: 1)) { context in
+                Text(WFTime.clock(context.date.timeIntervalSince(startedAt)))
+                    .font(.system(size: 12, weight: .medium).monospacedDigit())
+                    .foregroundStyle(Self.secondaryIvory)
+                    .fixedSize()
+            }
+        }
     }
 }
 

@@ -254,6 +254,7 @@ final class VoiceProcessedCapture {
     private let writer: SpeechFileWriter
     private var engine: VoiceCaptureEngine?
     private var restarts = 0
+    private let levelProbe = InputLevelProbe()
     /// Called on the work queue when the engine stopped and couldn't restart.
     var onStopped: ((String) -> Void)?
 
@@ -265,6 +266,11 @@ final class VoiceProcessedCapture {
 
     var recordedDuration: TimeInterval {
         writer.recordedDuration
+    }
+
+    /// The loudness of the latest processed buffer, 0...1.
+    func currentLevel() -> CGFloat {
+        levelProbe.level
     }
 
     /// Voice processing is switched on before the engine starts, and the tap
@@ -305,8 +311,11 @@ final class VoiceProcessedCapture {
                 throw Failure.unavailable("The microphone reported no audio format.")
             }
             try writer.begin(from: format)
-            engine.installTap(format: format) { [writer] buffer in
+            engine.installTap(format: format) { [writer, levelProbe] buffer in
                 writer.append(buffer)
+                if let samples = buffer.floatChannelData?[0] {
+                    levelProbe.record(decibels: InputLevelMeter.decibels(samples: samples, count: Int(buffer.frameLength)))
+                }
             }
             engine.onConfigurationChange = { [weak self, weak engine] in
                 self?.queue.async {

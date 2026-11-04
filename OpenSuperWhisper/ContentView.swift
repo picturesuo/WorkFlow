@@ -499,7 +499,8 @@ struct ContentView: View {
                 } else if let error = viewModel.historyError {
                     HistoryLoadError(message: error, onRetry: viewModel.retryLoading)
                 } else {
-                    HistoryEmptyState(isSearching: !debouncedSearchText.isEmpty, query: debouncedSearchText)
+                    HistoryEmptyState(isSearching: !debouncedSearchText.isEmpty, query: debouncedSearchText,
+                                      shortcut: currentShortcutDescription)
                 }
             }
             .padding(WFSpace.xl)
@@ -573,8 +574,12 @@ struct ContentView: View {
                         searchText: $searchText,
                         meetingLabel: meetingController.statusLabel,
                         isMeetingRecording: meetingController.isRecording,
-                        isMeetingAvailable: meetingController.isRecording
-                            || !(meetingController.isBusy || viewModel.state != .idle),
+                        isMeetingInProgress: meetingController.isBusy,
+                        isMeetingAvailable: MainToolbar.meetingAvailable(
+                            isMeetingRecording: meetingController.isRecording,
+                            isMeetingBusy: meetingController.isBusy,
+                            dictationState: viewModel.state
+                        ),
                         canDeleteAll: !(viewModel.recordings.isEmpty && debouncedSearchText.isEmpty),
                         onMeeting: {
                             if meetingController.isRecording {
@@ -713,16 +718,39 @@ struct ContentView: View {
 
 
 /// One row in the title bar band: the window title, search, and the
-/// window's actions, the way a unified macOS toolbar reads.
+/// window's actions, the way a unified macOS toolbar reads. Meeting
+/// recording is occasional, so it starts from More; while a meeting records
+/// or saves, its stop button joins the toolbar.
 struct MainToolbar: View {
     @Binding var searchText: String
     let meetingLabel: String
     let isMeetingRecording: Bool
+    /// A meeting is recording or saving, so its button shows.
+    var isMeetingInProgress = false
     let isMeetingAvailable: Bool
     let canDeleteAll: Bool
     let onMeeting: () -> Void
     let onDeleteAll: () -> Void
     let onSettings: () -> Void
+
+    struct MenuItem: Equatable {
+        let title: String
+        let isEnabled: Bool
+    }
+
+    /// A meeting can stop while it records, and start only when neither a
+    /// meeting nor a dictation is using the microphone.
+    static func meetingAvailable(isMeetingRecording: Bool, isMeetingBusy: Bool, dictationState: RecordingState) -> Bool {
+        isMeetingRecording || !(isMeetingBusy || dictationState != .idle)
+    }
+
+    /// The More menu, in order; the menu draws exactly these.
+    var moreMenuItems: [MenuItem] {
+        [
+            MenuItem(title: "Start Meeting Recording…", isEnabled: !isMeetingInProgress && isMeetingAvailable),
+            MenuItem(title: "Delete All Recordings…", isEnabled: canDeleteAll),
+        ]
+    }
 
     var body: some View {
         HStack(spacing: WFSpace.sm) {
@@ -742,18 +770,24 @@ struct MainToolbar: View {
                 .frame(minWidth: 110, idealWidth: 220, maxWidth: 240)
 
             HStack(spacing: 2) {
-                ToolbarIconButton(
-                    systemImage: isMeetingRecording ? "stop.circle.fill" : "person.2.wave.2",
-                    help: meetingLabel,
-                    accessibilityLabel: meetingLabel,
-                    tint: isMeetingRecording ? .red : .secondary,
-                    action: onMeeting
-                )
-                .disabled(!isMeetingAvailable)
+                if isMeetingInProgress {
+                    ToolbarIconButton(
+                        systemImage: "stop.circle.fill",
+                        help: meetingLabel,
+                        accessibilityLabel: meetingLabel,
+                        tint: .red,
+                        action: onMeeting
+                    )
+                    .disabled(!isMeetingRecording)
+                }
 
                 Menu {
-                    Button("Delete All Recordings…", role: .destructive, action: onDeleteAll)
-                        .disabled(!canDeleteAll)
+                    let items = moreMenuItems
+                    Button(items[0].title, action: onMeeting)
+                        .disabled(!items[0].isEnabled)
+                    Divider()
+                    Button(items[1].title, role: .destructive, action: onDeleteAll)
+                        .disabled(!items[1].isEnabled)
                 } label: {
                     ToolbarGlyph(systemImage: "ellipsis.circle")
                 }
@@ -871,6 +905,15 @@ struct HistoryLoadError: View {
 struct HistoryEmptyState: View {
     let isSearching: Bool
     var query = ""
+    /// The saved dictation shortcut, so the first thing the window teaches
+    /// is the one thing to do.
+    var shortcut = ""
+
+    static func guidance(shortcut: String) -> String {
+        shortcut.isEmpty
+            ? "Click the record button below and start talking.\nYou can also drop an audio file here."
+            : "Press \(shortcut) in any app and start talking.\nYou can also drop an audio file here."
+    }
 
     var body: some View {
         if isSearching {
@@ -878,12 +921,12 @@ struct HistoryEmptyState: View {
         } else {
             ContentUnavailableView {
                 Label {
-                    Text("Make room for your next thought")
+                    Text("Your dictations will appear here")
                 } icon: {
                     WorkFlowMark(size: 48)
                 }
             } description: {
-                Text("Record a dictation, or drop an audio file here.\nYour transcripts will appear in this history.")
+                Text(Self.guidance(shortcut: shortcut))
             }
         }
     }
@@ -900,7 +943,7 @@ private struct DictationControls: View {
 
     private var status: DictationDockStatus {
         if meetingController.isSaving { return .savingMeeting }
-        if meetingController.isRecording { return .meeting }
+        if meetingController.isRecording { return .meeting(0) }
         if viewModel.state == .decoding { return .transcribing }
         // Stopping dictation must remain available even when another service becomes busy.
         if viewModel.isRecording { return .recording(0) }
@@ -916,6 +959,10 @@ private struct DictationControls: View {
             // Only the dock ticks. The history does not depend on elapsed time.
             TimelineView(.periodic(from: startedAt, by: 1)) { context in
                 dock(status: .recording(max(0, context.date.timeIntervalSince(startedAt))))
+            }
+        } else if case .meeting = status, let startedAt = meetingController.startedAt {
+            TimelineView(.periodic(from: startedAt, by: 1)) { context in
+                dock(status: .meeting(max(0, context.date.timeIntervalSince(startedAt))))
             }
         } else {
             dock(status: status)
@@ -936,7 +983,9 @@ private struct DictationControls: View {
             currentMicrophoneID: microphoneService.currentMicrophone?.id,
             onSelectMicrophone: { microphoneService.selectMicrophone($0) }
         ) {
-            if viewModel.isRecording {
+            if meetingController.isRecording {
+                Task { await meetingController.stop() }
+            } else if viewModel.isRecording {
                 viewModel.startDecoding()
             } else {
                 viewModel.startRecording()
@@ -946,14 +995,29 @@ private struct DictationControls: View {
 }
 
 enum DictationDockStatus: Equatable {
-    case ready, connecting, transcribing, loadingModel, processingQueue, meeting, savingMeeting, noMicrophone
+    case ready, connecting, transcribing, loadingModel, processingQueue, savingMeeting, noMicrophone
     case recording(TimeInterval)
+    case meeting(TimeInterval)
 
     var isRecording: Bool {
         if case .recording = self { return true }
         return false
     }
-    var canActivate: Bool { self == .ready || isRecording }
+    var canActivate: Bool { recordPhase.isEnabled }
+
+    /// What the record control draws. Listening needs a recorder-owned
+    /// session; an optimistic start shows Connecting until audio arrives.
+    var recordPhase: RecordButtonPhase {
+        switch self {
+        case .ready: .ready
+        case .recording: .listening
+        case .meeting: .meeting
+        case .connecting: .connecting
+        case .transcribing, .loadingModel, .processingQueue, .savingMeeting: .working
+        case .noMicrophone: .unavailable
+        }
+    }
+
     var title: String {
         switch self {
         case .ready: return "Ready to dictate"
@@ -962,26 +1026,42 @@ enum DictationDockStatus: Equatable {
         case .transcribing: return "Transcribing your dictation…"
         case .loadingModel: return "Loading speech model…"
         case .processingQueue: return "Processing audio…"
-        case .meeting: return "Meeting recording in progress"
+        case .meeting: return "Recording meeting"
         case .savingMeeting: return "Saving meeting…"
         case .noMicrophone: return "No microphone available"
         }
     }
     func detail(shortcut: String) -> String {
         switch self {
-        case .recording(let duration): return "\(TextUtil.formatDuration(duration)) · Stop when you’re finished"
+        case .recording(let duration): return "\(WFTime.clock(duration)) · Stop when you’re finished"
+        case .meeting(let duration): return "\(WFTime.clock(duration)) · Stop to save it to History"
         case .ready: return shortcut.isEmpty ? "Click the microphone to start" : "Press \(shortcut) to dictate anywhere"
         case .connecting: return "Your microphone is getting ready"
         case .transcribing, .loadingModel, .processingQueue, .savingMeeting: return "You can keep browsing your history"
-        case .meeting: return "Use the meeting button above to stop"
         case .noMicrophone: return "Connect a microphone to start dictating"
+        }
+    }
+
+    var recordAccessibilityLabel: String {
+        switch self {
+        case .recording: "Stop recording"
+        case .meeting: "Stop & save meeting"
+        default: "Start recording"
+        }
+    }
+
+    func recordAccessibilityHint(shortcut: String) -> String {
+        switch self {
+        case .recording: "Stops recording and begins transcription"
+        case .meeting: "Stops the meeting recording and adds it to History"
+        default: detail(shortcut: shortcut)
         }
     }
 }
 
 /// The window's command bar: how future dictations are written, what the
-/// dictation is doing now, and the in-window record control. Its height
-/// stays the same in every state, so History never jumps.
+/// dictation is doing now, and the record control. Its height stays the
+/// same in every state, so History never jumps.
 struct DictationDock: View {
     let status: DictationDockStatus
     let shortcut: String
@@ -1000,7 +1080,7 @@ struct DictationDock: View {
     let onRecord: () -> Void
     @Environment(\.colorScheme) private var colorScheme
 
-    static let statusHeight: CGFloat = 32
+    static let statusHeight: CGFloat = WFRecordControl.size
 
     var body: some View {
         VStack(spacing: 10) {
@@ -1016,7 +1096,8 @@ struct DictationDock: View {
             .frame(height: Self.statusHeight)
         }
         .padding(.horizontal, WFSpace.lg)
-        .padding(.vertical, WFSpace.md)
+        .padding(.top, WFSpace.md)
+        .padding(.bottom, 10)
         .overlay(alignment: .top) { WFHairline() }
     }
 
@@ -1063,30 +1144,31 @@ struct DictationDock: View {
         }
     }
 
-    /// Title and detail on one line when they fit, stacked otherwise; either
-    /// way the line keeps the bar's height.
+    /// The state in words: a title in the state's color over one line of
+    /// detail. Two lines in every state, so nothing shifts.
     private var statusLine: some View {
-        HStack(spacing: WFSpace.sm) {
-            statusIndicator
-            ViewThatFits(in: .horizontal) {
-                HStack(alignment: .firstTextBaseline, spacing: 6) {
-                    statusTitle
-                    statusDetail
+        VStack(alignment: .leading, spacing: 2) {
+            HStack(spacing: 6) {
+                if status == .noMicrophone {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .font(.system(size: 12))
+                        .foregroundStyle(ThemePalette.caution(colorScheme))
+                        .accessibilityHidden(true)
                 }
-                .fixedSize()
-                VStack(alignment: .leading, spacing: 1) {
-                    statusTitle
-                    statusDetail
-                }
+                Text(status.title)
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundStyle(titleColor)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
             }
+            Text(detailText)
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+                .monospacedDigit()
+                .lineLimit(1)
+                .truncationMode(.middle)
         }
         .accessibilityElement(children: .combine)
-    }
-
-    private var statusTitle: some View {
-        Text(status.title)
-            .font(.headline)
-            .lineLimit(1)
     }
 
     /// While recording under Auto, the filter is not known yet: it is chosen
@@ -1097,17 +1179,15 @@ struct DictationDock: View {
         return "\(detail) · Auto picks the filter after"
     }
 
-    private var statusDetail: some View {
-        Text(detailText)
-            .font(.subheadline)
-            .foregroundStyle(.secondary)
-            .monospacedDigit()
-            .lineLimit(1)
-            .truncationMode(.middle)
+    private var titleColor: Color {
+        switch status.recordPhase {
+        case .listening, .meeting: ThemePalette.signalText(colorScheme)
+        default: .primary
+        }
     }
 
     private var recordControls: some View {
-        HStack(spacing: 2) {
+        HStack(spacing: 4) {
             if let onSelectMicrophone {
                 MicrophoneMenu(
                     microphones: microphones,
@@ -1115,34 +1195,13 @@ struct DictationDock: View {
                     onSelect: onSelectMicrophone
                 )
             }
-            Button(action: onRecord) { MainRecordButton(isRecording: status.isRecording) }
+            Button(action: onRecord) { LiveRecordButtonFace(phase: status.recordPhase) }
                 .buttonStyle(.borderless)
                 .disabled(!status.canActivate)
-                .opacity(status.canActivate ? 1 : 0.4)
-                .help(status.isRecording ? "Stop recording" : "Start recording")
-                .accessibilityLabel(status.isRecording ? "Stop recording" : "Start recording")
-                .accessibilityHint(status.isRecording ? "Stops recording and begins transcription" : status.detail(shortcut: shortcut))
+                .help(status.recordAccessibilityLabel)
+                .accessibilityLabel(status.recordAccessibilityLabel)
+                .accessibilityHint(status.recordAccessibilityHint(shortcut: shortcut))
         }
-    }
-
-    /// Ready shows the brand ink, live recording is red, work in progress
-    /// spins, and a missing microphone warns, so each state reads at a glance.
-    private var statusIndicator: some View {
-        Group {
-            switch status {
-            case .ready:
-                Circle().fill(ThemePalette.ink(colorScheme)).frame(width: 7, height: 7)
-            case .recording, .meeting:
-                Circle().fill(Color.red).frame(width: 7, height: 7)
-            case .connecting, .transcribing, .loadingModel, .processingQueue, .savingMeeting:
-                ProgressView().controlSize(.small).scaleEffect(0.6)
-            case .noMicrophone:
-                Image(systemName: "exclamationmark.triangle.fill")
-                    .font(.system(size: 11))
-                    .foregroundStyle(.orange)
-            }
-        }
-        .frame(width: 12, height: 12)
     }
 }
 
@@ -1404,6 +1463,7 @@ struct HistoryRow: View {
     var regenerationFilters: [CustomCleanupFilter] = []
     @State private var showTranscription = false
     @AppStorage(SpeakingEfficiency.typingWPMKey) private var typingWPM = SpeakingEfficiency.defaultTypingWPM
+    @Environment(\.colorScheme) private var colorScheme
 
     static let horizontalPadding: CGFloat = 20
 
@@ -1539,10 +1599,12 @@ struct HistoryRow: View {
         }
     }
 
+    /// System orange is 2.2:1 on the light History background, too faint
+    /// for words; the caution token keeps AA contrast in both appearances.
     private var cleanupBadgeColor: Color {
         switch recording.cleanupSource {
         case .rawFallback, .budgetLimited:
-            return .orange
+            return ThemePalette.caution(colorScheme)
         case .bedrock, .ollama, .openAICompatible, .azureOpenAI, .disabled, nil:
             return .secondary
         }
@@ -1737,7 +1799,7 @@ struct HistoryRow: View {
                     Label("Transcription failed", systemImage: "exclamationmark.triangle.fill")
                         .labelStyle(CompactLabelStyle(spacing: 4))
                         .font(.body.weight(.medium))
-                        .foregroundStyle(.red)
+                        .foregroundStyle(ThemePalette.signalText(colorScheme))
                     if !recording.transcription.isEmpty {
                         Text(recording.transcription)
                             .font(.callout)
@@ -1904,21 +1966,6 @@ struct TranscriptionView: View {
         .onDisappear {
             computeTask?.cancel()
         }
-    }
-}
-
-/// Ink disc with an inverse glyph, like the mark itself; red while recording.
-struct MainRecordButton: View {
-    let isRecording: Bool
-    @Environment(\.colorScheme) private var colorScheme
-
-    var body: some View {
-        Image(systemName: isRecording ? "stop.fill" : "mic.fill")
-            .font(.system(size: 13, weight: .semibold))
-            .foregroundStyle(isRecording ? Color.white : ThemePalette.onInk(colorScheme))
-            .frame(width: 30, height: 30)
-            .background(isRecording ? Color.red : ThemePalette.ink(colorScheme), in: Circle())
-            .contentShape(Circle())
     }
 }
 
