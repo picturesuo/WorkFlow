@@ -337,6 +337,31 @@ final class PreferenceLearningFlowTests: PreferenceLearningTestCase {
         XCTAssertTrue(h.vocabulary.isEmpty)
     }
 
+    /// Regression: in one Learn, an already-known proposal reads "already
+    /// learned", not "over the limit", when a different proposal in the same
+    /// batch is the one skipped for the rule limit.
+    func testDetailsSeparatesAlreadyLearnedFromOverLimitInOneLearn() {
+        let h = harness
+        let limit = LearnedPreferenceStore.maximumRulesPerMode
+        let filling = (0..<limit).map { preference(.spelling, from: "word\($0) part", to: "word\($0)part") }
+        LearnedPreferenceStore.merge(filling, into: .everyday, in: h.defaults)
+
+        let known = preference(.spelling, from: "word0 part", to: "word0part")
+        let overflow = preference(.spelling, from: "fresh word", to: "freshword")
+        let merge = LearnedPreferenceStore.merge([known, overflow], into: .everyday, in: h.defaults)
+        XCTAssertEqual(merge.unchanged, 1)
+        XCTAssertEqual(merge.skippedForLimit, 1)
+        XCTAssertTrue(merge.skippedForLimitKeys.contains(overflow.key))
+        XCTAssertFalse(merge.skippedForLimitKeys.contains(known.key))
+
+        let resolved = CorrectionLearningSession.resolve(
+            [ProposalOutcome(description: "known", key: known.key, status: .learned),
+             ProposalOutcome(description: "overflow", key: overflow.key, status: .learned)],
+            with: merge
+        )
+        XCTAssertEqual(resolved.map(\.status), [.alreadyLearned, .overLimit])
+    }
+
     // MARK: A2: content-ambiguous fillers
 
     /// P2: literal removal of "like", "right", "just"... deleted content and

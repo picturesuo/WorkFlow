@@ -193,14 +193,14 @@ final class CorrectionLearningSession: ObservableObject {
     }
 
     /// Marks merged proposals learned, reinforced, already learned, or over the limit.
-    private static func resolve(_ outcomes: [ProposalOutcome], with merge: LearnedPreferenceStore.MergeResult) -> [ProposalOutcome] {
+    static func resolve(_ outcomes: [ProposalOutcome], with merge: LearnedPreferenceStore.MergeResult) -> [ProposalOutcome] {
         let added = Set(merge.added.map(\.key))
         let reinforced = Set(merge.reinforced.map(\.key))
         return outcomes.map { outcome in
             guard outcome.status == .learned, let key = outcome.key else { return outcome }
             var value = outcome
             value.status = added.contains(key) ? .learned : reinforced.contains(key) ? .reinforced
-                : merge.skippedForLimit > 0 ? .overLimit : .alreadyLearned
+                : merge.skippedForLimitKeys.contains(key) ? .overLimit : .alreadyLearned
             return value
         }
     }

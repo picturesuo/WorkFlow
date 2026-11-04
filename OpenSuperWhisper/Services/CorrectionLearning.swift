@@ -360,6 +360,7 @@ enum LearnedPreferenceStore {
         var reinforced: [LearnedPreference] = []
         var replaced: [LearnedPreference] = []
         var skippedForLimit = 0
+        var skippedForLimitKeys: Set<String> = []
         var unchanged = 0
     }
 
@@ -520,6 +521,7 @@ enum LearnedPreferenceStore {
             }
             guard values.filter({ $0.target == target }).count < maximumRulesPerMode else {
                 result.skippedForLimit += 1
+                result.skippedForLimitKeys.insert(preference.key)
                 continue
             }
             var added = preference
