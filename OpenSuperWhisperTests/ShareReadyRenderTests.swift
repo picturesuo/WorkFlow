@@ -235,8 +235,9 @@ final class RecordControlTests: XCTestCase {
 
     // MARK: Pixels
 
-    /// Ink when ready, vermilion when listening, faded when nothing can be
-    /// recorded, read straight from rendered pixels in both appearances.
+    /// Ink when ready and when listening, with only the small stop square in
+    /// vermilion while recording, faded when nothing can be recorded, read
+    /// straight from rendered pixels in both appearances.
     func testRecordControlColorsComeFromTheirTokens() throws {
         for scheme in [ColorScheme.light, .dark] {
             let background = ThemePalette.chromeBackground(scheme)
@@ -258,7 +259,13 @@ final class RecordControlTests: XCTestCase {
             let listening = try discColor(.listening)
             let unavailable = try discColor(.unavailable)
             assertClose(ready, try swatch(ThemePalette.ink(scheme)), "\(scheme) ready disc is ink")
-            assertClose(listening, try swatch(ThemePalette.signal(scheme)), "\(scheme) listening disc is the signal color")
+            assertClose(listening, try swatch(ThemePalette.ink(scheme)), "\(scheme) listening keeps the calm ink disc")
+            let stopBitmap = try ShareReadyRenders.render(
+                AnyView(RecordButtonFace(phase: .listening).background(background)),
+                size: CGSize(width: WFRecordControl.size, height: WFRecordControl.size), scheme: scheme
+            )
+            let stop = try XCTUnwrap(ShareReadyRenders.pixel(in: stopBitmap, at: CGPoint(x: 26, y: 26), viewSize: WFRecordControl.size))
+            assertClose(stop, try swatch(ThemePalette.signal(scheme)), "\(scheme) only the small stop square is vermilion")
             let backdrop = try swatch(background)
             XCTAssertLessThan(distance(unavailable, backdrop), distance(ready, backdrop) * 0.5,
                               "\(scheme) unavailable fades toward the window so it never looks ready")
@@ -351,24 +358,53 @@ final class RecordControlTests: XCTestCase {
         }
     }
 
-    /// Every message fits the capsule at full size, so none is clipped or
-    /// shrunk past legibility.
-    func testIndicatorWordsFitTheCapsule() {
-        let budget = IndicatorWindow.cardSize.width - 2 * IndicatorWindow.horizontalPadding
-        func width(_ text: String, size: CGFloat = 13) -> CGFloat {
-            NSHostingView(rootView: Text(text).font(.system(size: size, weight: .semibold)).fixedSize()).fittingSize.width
-        }
-        let states: [RecordingState] = [.busy, .noMicrophone, .recordingFailed, .recordingCutShort, .transcriptionFailed, .pasteFailed, .clipboardFailed]
+    /// Every state fits the capsule's widest size, so no message is clipped,
+    /// and listening stays a small pill: a dot, the waveform, and the clock.
+    func testIndicatorWordsFitTheCapsule() throws {
+        let viewModel = IndicatorViewModel(
+            latestDictationGate: LatestDictationGate(),
+            transcriptionService: TranscriptionService(engine: ControlledTranscriptionEngine { _ in })
+        )
+        defer { viewModel.cleanup() }
+        viewModel.recordingStartedAt = Date().addingTimeInterval(-3_599)
+        let states: [RecordingState] = [
+            .connecting, .recording, .decoding, .busy, .noMicrophone, .recordingFailed, .recordingCutShort,
+            .transcriptionFailed, .pasteFailed, .clipboardFailed,
+        ]
+        var widths: [RecordingState: CGFloat] = [:]
         for state in states {
-            let message = IndicatorWindow.message(for: state)!
-            XCTAssertLessThanOrEqual(16 + 10 + width(message.text), budget, "\(state): \(message.text)")
+            viewModel.state = state
+            var measured: CGFloat = 0
+            let host = NSHostingView(rootView: IndicatorWindow(viewModel: viewModel) { measured = $0 })
+            host.frame = NSRect(origin: .zero, size: IndicatorWindow.windowSize)
+            host.layoutSubtreeIfNeeded()
+            RunLoop.main.run(until: Date().addingTimeInterval(0.05))
+            XCTAssertGreaterThan(measured, 0, "\(state) reports its width")
+            XCTAssertLessThanOrEqual(measured, IndicatorWindow.cardSize.width, "\(state) fits the capsule")
+            widths[state] = measured
         }
-        XCTAssertLessThanOrEqual(16 + 10 + width("Connecting microphone…"), budget)
-        XCTAssertLessThanOrEqual(16 + 10 + width("Transcribing…") + IndicatorWaveform.width(bars: 5) - 16, budget)
-        let clock = NSHostingView(rootView: Text("59:59").font(.system(size: 12, weight: .medium).monospacedDigit()).fixedSize()).fittingSize.width
-        let listening = 8 + 10 + IndicatorWaveform.width(bars: InputLevelMeter.historyLength) + 10 + width("Listening") + 10 + clock
-        XCTAssertLessThanOrEqual(listening, budget, "Listening, its waveform, and a long clock fit together")
-        XCTAssertLessThanOrEqual(8 + 10 + width("Press Esc to cancel"), budget)
+        let listening = try XCTUnwrap(widths[.recording])
+        XCTAssertLessThanOrEqual(listening, 120, "Listening is a small pill, even with a long clock")
+        XCTAssertLessThan(listening, try XCTUnwrap(widths[.clipboardFailed]), "Only states with words grow")
+        let messageWidth = NSHostingView(rootView: Text("Not pasted, in History").font(IndicatorWindow.font).fixedSize()).fittingSize.width
+        XCTAssertGreaterThanOrEqual(try XCTUnwrap(widths[.clipboardFailed]), messageWidth + 2 * IndicatorWindow.horizontalPadding,
+                                    "The longest message is drawn whole, never shrunk")
+    }
+
+    /// Listening is quiet: no word, no blinking, one small dot, a short
+    /// waveform, and a capsule shorter than before.
+    func testListeningCapsuleIsQuiet() {
+        XCTAssertLessThanOrEqual(IndicatorWindow.cardSize.height, 32)
+        XCTAssertLessThanOrEqual(RecordingIndicator.diameter, 6)
+        XCTAssertLessThanOrEqual(IndicatorWaveform.maxHeight, 12)
+        XCTAssertNil(IndicatorWindow.message(for: .recording), "Listening draws no words")
+        XCTAssertEqual(IndicatorWindow.accessibilityLabel(for: .recording, isFinalizing: false, isConfirmingCancel: false), "Listening",
+                       "but VoiceOver still names it")
+        XCTAssertEqual(IndicatorWindow.accessibilityLabel(for: .recording, isFinalizing: false, isConfirmingCancel: true),
+                       "Press Escape to cancel")
+        XCTAssertEqual(IndicatorWindow.accessibilityLabel(for: .decoding, isFinalizing: true, isConfirmingCancel: false), "Refining")
+        XCTAssertEqual(IndicatorWindow.accessibilityLabel(for: .transcriptionFailed, isFinalizing: false, isConfirmingCancel: false),
+                       "Transcription failed", "Failures are still spoken")
     }
 
     // MARK: Contrast
@@ -378,7 +414,8 @@ final class RecordControlTests: XCTestCase {
             let signal = resolved(ThemePalette.signal(scheme), scheme)
             let signalText = resolved(ThemePalette.signalText(scheme), scheme)
             let caution = resolved(ThemePalette.caution(scheme), scheme)
-            XCTAssertGreaterThanOrEqual(contrast(.white, signal), 4.5, "stop glyph on the listening disc \(scheme)")
+            XCTAssertGreaterThanOrEqual(contrast(signal, resolved(ThemePalette.ink(scheme), scheme)), 3,
+                                        "stop square on the listening disc \(scheme)")
             for (name, surface) in [("chrome", ThemePalette.chromeBackground(scheme)), ("content", ThemePalette.contentBackground(scheme)),
                                     ("card", ThemePalette.cardBackground(scheme)), ("window", ThemePalette.windowBackground(scheme))] {
                 let surface = resolved(surface, scheme)
@@ -387,13 +424,17 @@ final class RecordControlTests: XCTestCase {
                 XCTAssertGreaterThanOrEqual(contrast(signalText, surface), 4.5, "listening and failure words on \(name) \(scheme)")
             }
         }
-        // The capsule is charcoal at 92% over whatever is behind it.
+        // The capsule is charcoal over whatever is behind it; the worst case
+        // is a white document, which shows through the most.
         for backdrop in [NSColor.white, NSColor.black] {
-            let capsule = blend(resolved(BrandPalette.charcoal, .dark), over: backdrop, alpha: 0.92)
-            XCTAssertGreaterThanOrEqual(contrast(resolved(BrandPalette.ivory, .dark), capsule), 7, "capsule words")
+            let capsule = blend(resolved(BrandPalette.charcoal, .dark), over: backdrop, alpha: IndicatorWindow.fillOpacity)
+            let words = blend(resolved(BrandPalette.ivory, .dark), over: capsule, alpha: IndicatorWindow.textOpacity)
+            XCTAssertGreaterThanOrEqual(contrast(words, capsule), 7, "capsule words")
             XCTAssertGreaterThanOrEqual(contrast(resolved(BrandPalette.amber, .dark), capsule), 4.5, "capsule warnings")
-            let clock = blend(resolved(BrandPalette.ivory, .dark), over: capsule, alpha: 0.62)
+            let clock = blend(resolved(BrandPalette.ivory, .dark), over: capsule, alpha: IndicatorWindow.clockOpacity)
             XCTAssertGreaterThanOrEqual(contrast(clock, capsule), 4.5, "capsule clock")
+            let dot = resolved(ThemePalette.signalText(.dark), .dark)
+            XCTAssertGreaterThanOrEqual(contrast(dot, capsule), 3, "the listening dot stays visible")
         }
     }
 

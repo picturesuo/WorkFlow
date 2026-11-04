@@ -1144,11 +1144,18 @@ struct DictationDock: View {
         }
     }
 
-    /// The state in words: a title in the state's color over one line of
-    /// detail. Two lines in every state, so nothing shifts.
+    /// The state in words: a quiet title over one line of detail. Two lines
+    /// in every state, so nothing shifts. Recording adds only a small
+    /// vermilion dot; a missing microphone keeps its warning glyph.
     private var statusLine: some View {
         VStack(alignment: .leading, spacing: 2) {
             HStack(spacing: 6) {
+                if status.recordPhase.isLive {
+                    Circle()
+                        .fill(ThemePalette.signal(colorScheme))
+                        .frame(width: 7, height: 7)
+                        .accessibilityHidden(true)
+                }
                 if status == .noMicrophone {
                     Image(systemName: "exclamationmark.triangle.fill")
                         .font(.system(size: 12))
@@ -1156,8 +1163,8 @@ struct DictationDock: View {
                         .accessibilityHidden(true)
                 }
                 Text(status.title)
-                    .font(.system(size: 15, weight: .semibold))
-                    .foregroundStyle(titleColor)
+                    .font(.system(size: 14, weight: .medium))
+                    .foregroundStyle(.primary)
                     .lineLimit(1)
                     .truncationMode(.tail)
             }
@@ -1177,13 +1184,6 @@ struct DictationDock: View {
         let detail = status.detail(shortcut: shortcut)
         guard status.isRecording, writingAuto?.wrappedValue == true else { return detail }
         return "\(detail) · Auto picks the filter after"
-    }
-
-    private var titleColor: Color {
-        switch status.recordPhase {
-        case .listening, .meeting: ThemePalette.signalText(colorScheme)
-        default: .primary
-        }
     }
 
     private var recordControls: some View {

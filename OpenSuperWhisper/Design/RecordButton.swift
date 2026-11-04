@@ -26,15 +26,19 @@ enum WFRecordControl {
     static let size: CGFloat = 52
     /// The disc inside it; the ring and the live halo use the space around it.
     static let disc: CGFloat = 40
+    /// The stop square shown while recording.
+    static let stopSquare: CGFloat = 12
     /// One turn of the progress arc.
     static let spinPeriod: TimeInterval = 1.1
 }
 
 /// The record control: an ink disc inside a hairline ring, like a camera
-/// shutter. Listening turns it vermilion with a stop square, and a halo
-/// grows with the microphone's real level, so it moves only when the
-/// microphone hears you. Working states trace an arc around the ring.
-/// Reduce Motion keeps the halo still and replaces the arc with a steady ring.
+/// shutter. Listening keeps the same calm disc and swaps the microphone for
+/// a small vermilion stop square, the one accent while recording. A faint
+/// neutral halo grows with the microphone's real level, so it moves only
+/// when the microphone hears you. Working states trace an arc around the
+/// ring. Reduce Motion keeps the halo still and replaces the arc with a
+/// steady ring.
 struct RecordButtonFace: View {
     let phase: RecordButtonPhase
     /// Microphone level, 0...1; read only while live.
@@ -45,7 +49,6 @@ struct RecordButtonFace: View {
 
     private var ink: Color { ThemePalette.ink(colorScheme) }
     private var signal: Color { ThemePalette.signal(colorScheme) }
-    private var baseColor: Color { phase.isLive ? signal : ink }
     private var clampedLevel: CGFloat { min(max(level, 0), 1) }
     private var isLifted: Bool { isHovered && phase.isEnabled }
 
@@ -71,17 +74,18 @@ struct RecordButtonFace: View {
 
     static func haloOpacity(level: CGFloat, reduceMotion: Bool) -> Double {
         let level = Double(min(max(level, 0), 1))
-        return reduceMotion ? 0.12 + 0.30 * level : 0.16 + 0.14 * level
+        return reduceMotion ? 0.05 + 0.12 * level : 0.06 + 0.10 * level
     }
 
     // MARK: Layers
 
-    /// Grows from the disc to the frame edge with the voice. With Reduce
-    /// Motion it keeps its size and the level changes only its strength.
+    /// A faint ink wash that grows from the disc to the frame edge with the
+    /// voice. With Reduce Motion it keeps its size and the level changes only
+    /// its strength.
     private var halo: some View {
         let diameter = Self.haloDiameter(level: clampedLevel, reduceMotion: reduceMotion)
         return Circle()
-            .fill(signal.opacity(Self.haloOpacity(level: clampedLevel, reduceMotion: reduceMotion)))
+            .fill(ink.opacity(Self.haloOpacity(level: clampedLevel, reduceMotion: reduceMotion)))
             .frame(width: diameter, height: diameter)
             .animation(WFMotion.unlessReduced(WFMotion.level, reduceMotion), value: clampedLevel)
             .accessibilityHidden(true)
@@ -94,7 +98,7 @@ struct RecordButtonFace: View {
         case .ready:
             base.foregroundStyle(ink.opacity(isLifted ? 0.34 : 0.18))
         case .listening, .meeting:
-            base.foregroundStyle(signal.opacity(0.5))
+            base.foregroundStyle(ink.opacity(0.18))
         case .connecting, .working:
             if reduceMotion {
                 base.foregroundStyle(ink.opacity(0.42))
@@ -111,7 +115,7 @@ struct RecordButtonFace: View {
 
     private var disc: some View {
         Circle()
-            .fill(baseColor)
+            .fill(ink)
             // A soft top light and a darker foot give the disc some depth;
             // the middle band stays the pure token color.
             .overlay(
@@ -139,7 +143,7 @@ struct RecordButtonFace: View {
 
     private var shadowColor: Color {
         guard phase.isEnabled else { return .clear }
-        return phase.isLive ? signal.opacity(0.35) : Color.black.opacity(colorScheme == .dark ? 0.0 : 0.22)
+        return Color.black.opacity(colorScheme == .dark ? 0.0 : 0.22)
     }
 
     private var discOpacity: Double {
@@ -153,12 +157,12 @@ struct RecordButtonFace: View {
 
     @ViewBuilder
     private var glyph: some View {
-        let onDisc = phase.isLive ? Color.white : ThemePalette.onInk(colorScheme)
+        let onDisc = ThemePalette.onInk(colorScheme)
         Group {
             if phase.isLive {
-                RoundedRectangle(cornerRadius: 3.5, style: .continuous)
-                    .fill(onDisc)
-                    .frame(width: 13, height: 13)
+                RoundedRectangle(cornerRadius: 3, style: .continuous)
+                    .fill(signal)
+                    .frame(width: WFRecordControl.stopSquare, height: WFRecordControl.stopSquare)
                     .transition(.scale(scale: 0.4).combined(with: .opacity))
             } else {
                 Image(systemName: symbol)

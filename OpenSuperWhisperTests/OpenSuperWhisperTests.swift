@@ -1526,6 +1526,12 @@ final class IndicatorWindowGeometryTests: XCTestCase {
     // animation the card moves 20 pt down, and everything outside the window
     // bounds is cut off, so the bottom rounded corners were visibly clipped.
     func testPanelFitsCardAtWorstAnimationPhase() {
+        XCTAssertLessThanOrEqual(IndicatorWindow.shadowRadius + IndicatorWindow.shadowOffset, IndicatorWindow.panelPadding,
+                                 "The shadow fits the panel margin")
+        // Every pill width keeps its overshoot inside its own panel.
+        for width in [CGFloat(80), 120, IndicatorWindow.cardSize.width] {
+            XCTAssertLessThanOrEqual(width / 2 * 1.1, IndicatorWindow.windowSize(forCardWidth: width).width / 2, "\(width)")
+        }
         let halfWindow = IndicatorWindow.windowSize.height / 2
         // Animation start: the card is scaled down and pushed fully down.
         let worstBottomExtent = IndicatorWindow.cardSize.height / 2 * IndicatorWindow.appearInitialScale
@@ -1574,8 +1580,8 @@ final class IndicatorWindowGeometryTests: XCTestCase {
         // Give AppKit a runloop turn to apply any pending autosizing.
         try await Task.sleep(nanoseconds: 300_000_000)
 
-        XCTAssertEqual(manager.window?.frame.size, IndicatorWindow.windowSize,
-                       "The panel must keep its size; SwiftUI content must not resize the window")
+        XCTAssertEqual(manager.window?.frame.size, IndicatorWindow.windowSize(forCardWidth: manager.cardSize.width),
+                       "The panel keeps the pill's size; SwiftUI content must not resize the window")
 
         manager.hide()
         try await Task.sleep(nanoseconds: 700_000_000)
