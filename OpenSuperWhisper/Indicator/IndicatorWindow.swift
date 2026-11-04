@@ -28,7 +28,6 @@ class IndicatorViewModel: ObservableObject {
     static let cancelConfirmationWindow: TimeInterval = 5.0
     
     @Published var state: RecordingState = .idle
-    @Published var isBlinking = false
     @Published var isConfirmingCancel = false
     @Published private(set) var isFinalizing = false
     @Published var recorder: AudioRecorder = .shared
@@ -36,7 +35,6 @@ class IndicatorViewModel: ObservableObject {
     var recordingStartedAt: Date?
     
     var delegate: IndicatorViewDelegate?
-    private var blinkTimer: Timer?
     private var hideTimer: Timer?
     private var confirmCancelTimer: Timer?
     private var cancellables = Set<AnyCancellable>()
@@ -78,7 +76,6 @@ class IndicatorViewModel: ObservableObject {
                       self.recorder.ownsRecordingSession(sessionID) else { return }
                 if isConnecting {
                     self.state = .connecting
-                    self.stopBlinking()
                 }
             }
             .store(in: &cancellables)
@@ -90,7 +87,6 @@ class IndicatorViewModel: ObservableObject {
                       self.recorder.ownsRecordingSession(sessionID) else { return }
                 if isRecording {
                     self.state = .recording
-                    self.startBlinking()
                 }
             }
             .store(in: &cancellables)
@@ -154,7 +150,6 @@ class IndicatorViewModel: ObservableObject {
             Task { @MainActor in
                 guard let self, self.recorderSessionID == sessionID else { return }
                 self.recorderSessionID = nil
-                self.stopBlinking()
                 self.showAutoDismissingMessage(.recordingFailed)
             }
         }) else {
@@ -168,7 +163,6 @@ class IndicatorViewModel: ObservableObject {
         isCaptureCutShort = false
         dictationGeneration = latestDictationGate.begin()
         state = .recording
-        startBlinking()
         recordingStartedAt = Date()
     }
     
@@ -211,7 +205,6 @@ class IndicatorViewModel: ObservableObject {
         resetCancelConfirmation()
         guard let sessionID = recorderSessionID else { return }
         recorderSessionID = nil
-        stopBlinking()
         
         if transcriptionQueue.isProcessing {
             // Queue work (imports, meetings, regenerations) can hold the engine
@@ -458,25 +451,7 @@ class IndicatorViewModel: ObservableObject {
         return text + " "
     }
     
-    private func startBlinking() {
-        blinkTimer?.invalidate()
-        blinkTimer = Timer.scheduledTimer(withTimeInterval: 0.8, repeats: true) { [weak self] _ in
-            // Update UI on the main thread
-            Task { @MainActor in
-                guard let self = self else { return }
-                self.isBlinking.toggle()
-            }
-        }
-    }
-    
-    private func stopBlinking() {
-        blinkTimer?.invalidate()
-        blinkTimer = nil
-        isBlinking = false
-    }
-
     func cleanup() {
-        stopBlinking()
         resetCancelConfirmation()
         recordingStartedAt = nil
         hideTimer?.invalidate()
@@ -497,36 +472,28 @@ class IndicatorViewModel: ObservableObject {
     }
 }
 
-/// The live dot: vermilion with a soft glow, still when Reduce Motion is on.
+/// The live dot: a small steady vermilion point, the capsule's only accent.
+/// It does not pulse; the waveform beside it is what moves with the voice.
 struct RecordingIndicator: View {
-    let isBlinking: Bool
-    @WFReduceMotion private var reduceMotion
+    static let diameter: CGFloat = 6
 
     var body: some View {
         Circle()
-            .fill(ThemePalette.signal(.dark))
-            .frame(width: 8, height: 8)
-            .background(
-                Circle()
-                    .fill(ThemePalette.signal(.dark).opacity(0.4))
-                    .frame(width: 13, height: 13)
-                    .blur(radius: 2)
-                    .opacity(isBlinking && !reduceMotion ? 0.2 : 1)
-            )
-            .animation(reduceMotion ? nil : .easeInOut(duration: 0.6), value: isBlinking)
+            .fill(ThemePalette.signalText(.dark))
+            .frame(width: Self.diameter, height: Self.diameter)
             .accessibilityHidden(true)
     }
 }
 
-/// Recent microphone levels as rounded bars, newest on the right, so the
-/// capsule shows the voice it hears. Silence leaves short, even bars.
+/// Recent microphone levels as thin rounded bars, newest on the right, so
+/// the capsule shows the voice it hears. Silence leaves short, even bars.
 struct IndicatorWaveform: View {
     let levels: [CGFloat]
     var color: Color = BrandPalette.ivory
-    static let barWidth: CGFloat = 3
-    static let spacing: CGFloat = 2.5
-    static let minHeight: CGFloat = 3
-    static let maxHeight: CGFloat = 18
+    static let barWidth: CGFloat = 2
+    static let spacing: CGFloat = 2
+    static let minHeight: CGFloat = 2
+    static let maxHeight: CGFloat = 12
     @WFReduceMotion private var reduceMotion
 
     static func width(bars: Int) -> CGFloat {
@@ -537,7 +504,7 @@ struct IndicatorWaveform: View {
         HStack(alignment: .center, spacing: Self.spacing) {
             ForEach(Array(levels.enumerated()), id: \.offset) { index, level in
                 Capsule()
-                    .fill(color.opacity(0.55 + 0.45 * Double(index + 1) / Double(max(levels.count, 1))))
+                    .fill(color.opacity(0.4 + 0.3 * Double(index + 1) / Double(max(levels.count, 1))))
                     .frame(width: Self.barWidth,
                            height: Self.minHeight + (Self.maxHeight - Self.minHeight) * min(max(level, 0), 1))
             }
@@ -594,8 +561,8 @@ struct CancelConfirmationBar: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
         }
         .frame(height: 2)
-        .padding(.horizontal, 18)
-        .padding(.bottom, 3)
+        .padding(.horizontal, 14)
+        .padding(.bottom, 2)
         .onAppear {
             // The bar is the countdown; with Reduce Motion it stays full and
             // the words carry the meaning.
@@ -607,24 +574,49 @@ struct CancelConfirmationBar: View {
     }
 }
 
-/// The capsule beside the caret. It is always charcoal with ivory type,
-/// so it reads the same over any document, in light or dark mode.
+/// The small capsule beside the caret: a quiet charcoal pill with ivory
+/// type, so it reads the same over any document in light or dark mode.
+/// Listening is only a steady dot, a thin waveform, and the clock; words
+/// appear only for states that need them. It hugs its content, and the user
+/// can drag it anywhere (IndicatorWindowManager keeps where they put it).
 struct IndicatorWindow: View {
-    /// Geometry shared with IndicatorWindowManager. The panel must be larger
-    /// than the card: everything drawn outside the window bounds is cut off,
-    /// so the appear offset (moves the card down) and the spring overshoot
-    /// need margins, otherwise the card edges are visibly clipped mid-animation.
-    static let cardSize = CGSize(width: 224, height: 40)
-    static let windowSize = CGSize(width: 256, height: 96)
-    static let appearOffset: CGFloat = 20
-    static let appearInitialScale: CGFloat = 0.5
-    /// Room for words beside the leading glyph and the trailing clock.
-    static let horizontalPadding: CGFloat = 16
+    /// Geometry shared with IndicatorWindowManager. `cardSize` is the widest
+    /// the capsule may grow and its fixed height. The panel is only the
+    /// capsule plus `panelPadding` on every side: enough for the soft shadow
+    /// and the small appear rise, so the clickable panel stays as close to
+    /// the visible pill as the drawing allows. The manager resizes the panel
+    /// to the capsule's width as it changes.
+    static let cardSize = CGSize(width: 224, height: 32)
+    static let panelPadding: CGFloat = 12
+    static let shadowRadius: CGFloat = 6
+    static let shadowOffset: CGFloat = 2
+    /// The panel at the capsule's widest.
+    static let windowSize = windowSize(forCardWidth: cardSize.width)
+    static let appearOffset: CGFloat = 4
+    static let appearInitialScale: CGFloat = 0.92
+
+    static func windowSize(forCardWidth width: CGFloat) -> CGSize {
+        CGSize(width: min(width, cardSize.width) + 2 * panelPadding, height: cardSize.height + 2 * panelPadding)
+    }
+    /// Room inside the pill before the first and after the last element.
+    static let horizontalPadding: CGFloat = 12
+    /// Between the elements inside the pill.
+    static let spacing: CGFloat = 8
+    static let font = Font.system(size: 12, weight: .medium)
+    static let clockFont = Font.system(size: 11.5, weight: .regular).monospacedDigit()
+    /// The pill's fill over whatever is behind it.
+    static let fillOpacity: Double = 0.82
+    /// Words and their quieter companion, the clock.
+    static let textOpacity: Double = 0.88
+    static let clockOpacity: Double = 0.62
+    static let dragHint = "Drag to move. Double-click to return it beside the cursor."
 
     @ObservedObject var viewModel: IndicatorViewModel
+    /// Told the capsule's drawn width whenever it changes.
+    var onCardWidthChange: ((CGFloat) -> Void)? = nil
 
-    private static let ivory = BrandPalette.ivory
-    private static let secondaryIvory = BrandPalette.ivory.opacity(0.62)
+    private static let ivory = BrandPalette.ivory.opacity(textOpacity)
+    private static let secondaryIvory = BrandPalette.ivory.opacity(clockOpacity)
 
     /// What the capsule says for each message state; nil while recording,
     /// connecting, or transcribing, which draw live content instead.
@@ -641,24 +633,32 @@ struct IndicatorWindow: View {
         }
     }
 
+    /// What VoiceOver reads for the capsule in each state.
+    static func accessibilityLabel(for state: RecordingState, isFinalizing: Bool, isConfirmingCancel: Bool) -> String {
+        switch state {
+        case .connecting: "Connecting microphone"
+        case .recording: isConfirmingCancel ? "Press Escape to cancel" : "Listening"
+        case .decoding: isFinalizing ? "Refining" : "Transcribing"
+        case .idle: ""
+        default: message(for: state)?.text ?? ""
+        }
+    }
+
     var body: some View {
         let shape = Capsule(style: .continuous)
 
         content
             .padding(.horizontal, Self.horizontalPadding)
-            .frame(width: Self.cardSize.width, height: Self.cardSize.height)
+            .frame(height: Self.cardSize.height)
+            .frame(maxWidth: Self.cardSize.width)
+            .fixedSize(horizontal: true, vertical: false)
             .background {
                 shape
-                    .fill(BrandPalette.charcoal.opacity(0.92))
+                    .fill(BrandPalette.charcoal.opacity(Self.fillOpacity))
                     .background { shape.fill(Material.thinMaterial) }
             }
             .overlay {
-                // Lit from above, like the record disc.
-                shape.strokeBorder(
-                    LinearGradient(colors: [Color.white.opacity(0.20), Color.white.opacity(0.06)],
-                                   startPoint: .top, endPoint: .bottom),
-                    lineWidth: 1
-                )
+                shape.strokeBorder(Color.white.opacity(0.10), lineWidth: 0.5)
             }
             .overlay(alignment: .bottom) {
                 if viewModel.isConfirmingCancel {
@@ -666,12 +666,19 @@ struct IndicatorWindow: View {
                 }
             }
             .clipShape(shape)
+            .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { width in
+                onCardWidthChange?(width)
+            }
+            .shadow(color: Color.black.opacity(0.18), radius: Self.shadowRadius, y: Self.shadowOffset)
             .environment(\.colorScheme, .dark)
-            .accessibilityElement(children: .combine)
-            // The ideal size of the root view must match the panel: NSHostingView
-            // resizes the window down to SwiftUI's ideal size, and a window sized
-            // to the bare card clips the appear offset, bounce overshoot and shadow.
-            .frame(width: Self.windowSize.width, height: Self.windowSize.height)
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel(Self.accessibilityLabel(
+                for: viewModel.state, isFinalizing: viewModel.isFinalizing, isConfirmingCancel: viewModel.isConfirmingCancel
+            ))
+            .accessibilityHint(Self.dragHint)
+            // Fills the panel, whose size the manager sets from the reported
+            // width; the capsule is always centered in it.
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
         // The appear/hide animation is NOT done in SwiftUI on purpose:
         // animating scaleEffect/offset/opacity re-rasterizes the card (material
         // + gradients + shadow) on the CPU every frame and stalls the main
@@ -686,37 +693,32 @@ struct IndicatorWindow: View {
     private var content: some View {
         switch viewModel.state {
         case .connecting:
-            HStack(spacing: 10) {
+            HStack(spacing: Self.spacing) {
                 ProgressView()
-                    .controlSize(.small)
+                    .controlSize(.mini)
                     .tint(Self.ivory)
-                    .frame(width: 16)
-                label("Connecting microphone…", color: Self.ivory)
-                Spacer(minLength: 0)
+                    .frame(width: 12)
+                label("Connecting…", color: Self.ivory)
             }
 
         case .recording:
-            HStack(spacing: 10) {
-                RecordingIndicator(isBlinking: viewModel.isBlinking)
+            HStack(spacing: Self.spacing) {
+                RecordingIndicator()
                 if viewModel.isConfirmingCancel {
                     label("Press Esc to cancel", color: BrandPalette.amber)
                         .transition(.opacity)
-                    Spacer(minLength: 0)
                 } else {
                     LiveIndicatorWaveform()
-                    label("Listening", color: Self.ivory)
                         .transition(.opacity)
-                    Spacer(minLength: 0)
                     elapsed
                 }
             }
             .animation(.easeInOut(duration: 0.2), value: viewModel.isConfirmingCancel)
 
         case .decoding:
-            HStack(spacing: 10) {
+            HStack(spacing: Self.spacing) {
                 IndicatorProcessingWave()
                 label(viewModel.isFinalizing ? "Refining…" : "Transcribing…", color: Self.ivory)
-                Spacer(minLength: 0)
             }
 
         case .idle:
@@ -724,14 +726,13 @@ struct IndicatorWindow: View {
 
         default:
             if let message = Self.message(for: viewModel.state) {
-                HStack(spacing: 10) {
+                HStack(spacing: Self.spacing) {
                     Image(systemName: message.symbol)
-                        .font(.system(size: 13, weight: .semibold))
+                        .font(.system(size: 11, weight: .medium))
                         .foregroundStyle(BrandPalette.amber)
-                        .frame(width: 16)
+                        .frame(width: 14)
                         .accessibilityHidden(true)
                     label(message.text, color: BrandPalette.amber)
-                    Spacer(minLength: 0)
                 }
             }
         }
@@ -739,10 +740,10 @@ struct IndicatorWindow: View {
 
     private func label(_ text: String, color: Color) -> some View {
         Text(text)
-            .font(.system(size: 13, weight: .semibold))
+            .font(Self.font)
             .foregroundStyle(color)
             .lineLimit(1)
-            .minimumScaleFactor(0.85)
+            .fixedSize()
     }
 
     /// The running length, ticking once a second; absent until the
@@ -752,7 +753,7 @@ struct IndicatorWindow: View {
         if let startedAt = viewModel.recordingStartedAt {
             TimelineView(.periodic(from: startedAt, by: 1)) { context in
                 Text(WFTime.clock(context.date.timeIntervalSince(startedAt)))
-                    .font(.system(size: 12, weight: .medium).monospacedDigit())
+                    .font(Self.clockFont)
                     .foregroundStyle(Self.secondaryIvory)
                     .fixedSize()
             }
