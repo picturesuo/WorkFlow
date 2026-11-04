@@ -389,7 +389,8 @@ class ContentViewModel: ObservableObject {
                     fallbackFilter: cleanupPipeline.selectedFilter(),
                     disposition: .notInserted,
                     captureOrigin: .live,
-                    processingSeconds: processingSeconds
+                    processingSeconds: processingSeconds,
+                    speechActivity: .measuring
                 )
 
                 do {
@@ -399,6 +400,7 @@ class ContentViewModel: ObservableObject {
                     if let audioURL { try? FileManager.default.removeItem(at: audioURL) }
                     throw error
                 }
+                self.recordingStore.measureSpeechActivityInBackground(for: recordingId)
 
             }
         } catch {
@@ -1561,16 +1563,12 @@ struct HistoryRow: View {
         }
     }
 
-    /// Time saved against the assumed typing speed when processing was
-    /// measured, else only the speaking pace; nothing for rows not compared.
+    /// Minutes saved and how many times faster than the assumed typing
+    /// speed, by active speech; nothing for rows not compared.
     var speakingBadgeLabel: String? {
         // A row being regenerated shows its progress, not stale figures.
         guard recording.status == .completed, let sample = recording.speaking?.sample else { return nil }
-        let totals = SpeakingTotals(sample)
-        if sample.processingSeconds != nil {
-            return SpeakingFormat.saved(totals.savedSeconds(atWPM: typingWPM))
-        }
-        return totals.speakingWPM.map { "\(SpeakingFormat.wpm($0)) spoken" }
+        return SpeakingFormat.headline(SpeakingTotals(sample), typingWPM: typingWPM)
     }
 
     var speakingBadgeHelp: String {

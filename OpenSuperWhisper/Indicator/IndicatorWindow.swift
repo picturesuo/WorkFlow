@@ -341,8 +341,11 @@ class IndicatorViewModel: ObservableObject {
                     disposition: disposition,
                     insertedText: attemptedDelivery ? Self.applyPostProcessing(text) : nil,
                     captureOrigin: .live,
-                    processingSeconds: processingSeconds
+                    processingSeconds: processingSeconds,
+                    speechActivity: .measuring
                 )
+                // Saving then measures active speech in the background;
+                // delivery never waits for it.
                 await MainActor.run {
                     self.recordingStore.addRecording(newRecording, source: source)
                 }

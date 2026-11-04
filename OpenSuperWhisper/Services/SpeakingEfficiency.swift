@@ -10,14 +10,19 @@ enum CaptureOrigin: String, Codable, Equatable {
 /// The non-content numbers behind one dictation's speaking-versus-typing
 /// comparison. Every figure WorkFlow shows is computed from these.
 struct SpeakingSample: Equatable {
-    /// The recorded audio's length, pauses included.
+    /// The recorded audio's length, pauses and silence included. Shown for
+    /// context; never compared with typing.
     let recordingSeconds: TimeInterval
-    /// Words the speech recognizer heard.
+    /// Seconds the speech detector heard speech: the time compared with typing.
+    let activeSpeechSeconds: TimeInterval
+    /// Words the speech recognizer heard in the original capture: what
+    /// typing is estimated from.
     let spokenWords: Int
-    /// Words in the text WorkFlow produced for this dictation.
+    /// Words in the text WorkFlow first produced, kept apart: cleanup that
+    /// lengthens or shortens the text never changes the estimate.
     let producedWords: Int
-    /// Measured time from stopping the recording to the text being ready,
-    /// or nil when it was not measured.
+    /// Measured time from stopping the recording to the text being ready, or
+    /// nil when it was not measured. Shown on its own; never counted.
     let processingSeconds: TimeInterval?
 }
 
@@ -32,6 +37,12 @@ enum SpeakingExclusion: String, CaseIterable, Equatable {
     case pending
     /// Recorded before WorkFlow kept the counts or the audio's origin.
     case legacy
+    /// Saved before WorkFlow measured active speech; never guessed.
+    case speechNotMeasured
+    /// Saved moments ago; the speech detector is still measuring it.
+    case measuringSpeech
+    /// The speech detector couldn't measure it or heard no speech.
+    case speechUnavailable
     /// A zero, negative, or unreadable recording length.
     case invalidDuration
     /// The recognizer heard no words or the produced text has none.
@@ -78,8 +89,8 @@ enum SpeakingEfficiency {
     }
 
     /// Decides whether one History row is a comparable dictation. A
-    /// regenerated row counts once, by the text and timing of its original
-    /// capture, so a later retry never changes or doubles its figures.
+    /// regenerated row counts once, by the text and active speech of its
+    /// original capture, so a later retry never changes or doubles its figures.
     static func classify(_ recording: Recording, source: DictationSource?) -> SpeakingEligibility {
         if recording.mode == .meeting { return .excluded(.meeting) }
         if recording.isPending { return .excluded(.pending) }
@@ -96,9 +107,22 @@ enum SpeakingEfficiency {
         let spoken = wordCount(recognizerText)
         let produced = wordCount(emittedText)
         guard spoken > 0, produced > 0 else { return .excluded(.emptyText) }
+        let active: TimeInterval
+        switch source.speechActivity {
+        case nil: return .excluded(.speechNotMeasured)
+        case .measuring: return .excluded(.measuringSpeech)
+        case .unavailable: return .excluded(.speechUnavailable)
+        case .measured:
+            // A measured row without a positive figure is unusable, never zero.
+            guard let seconds = source.activeSpeechSeconds, seconds.isFinite, seconds > 0 else {
+                return .excluded(.speechUnavailable)
+            }
+            active = seconds
+        }
         let processing = source.processingSeconds.flatMap { $0.isFinite && $0 >= 0 ? $0 : nil }
         return .eligible(SpeakingSample(
             recordingSeconds: recording.duration,
+            activeSpeechSeconds: active,
             spokenWords: spoken,
             producedWords: produced,
             processingSeconds: processing
@@ -110,11 +134,7 @@ enum SpeakingEfficiency {
         for item in eligibility {
             switch item {
             case .eligible(let sample):
-                if sample.processingSeconds != nil {
-                    summary.measured.add(sample)
-                } else {
-                    summary.recordingOnly.add(sample)
-                }
+                summary.counted.add(sample)
             case .excluded(let reason):
                 summary.exclusions[reason, default: 0] += 1
             }
@@ -123,13 +143,13 @@ enum SpeakingEfficiency {
     }
 }
 
-/// Totals for a set of dictations. Rates are ratios of sums (duration
-/// weighted), never averages of each dictation's rate.
+/// Totals for a set of dictations. Rates are ratios of sums, never averages
+/// of each dictation's rate.
 struct SpeakingTotals: Equatable {
     var count = 0
+    /// Recorded length, pauses included; shown for context only.
     var recordingSeconds: TimeInterval = 0
-    /// Measured processing time; zero for a recording-only cohort.
-    var processingSeconds: TimeInterval = 0
+    var activeSpeechSeconds: TimeInterval = 0
     var spokenWords = 0
     var producedWords = 0
 
@@ -142,69 +162,44 @@ struct SpeakingTotals: Equatable {
     mutating func add(_ sample: SpeakingSample) {
         count += 1
         recordingSeconds += sample.recordingSeconds
-        processingSeconds += sample.processingSeconds ?? 0
+        activeSpeechSeconds += sample.activeSpeechSeconds
         spokenWords += sample.spokenWords
         producedWords += sample.producedWords
     }
 
-    mutating func add(_ other: SpeakingTotals) {
-        count += other.count
-        recordingSeconds += other.recordingSeconds
-        processingSeconds += other.processingSeconds
-        spokenWords += other.spokenWords
-        producedWords += other.producedWords
-    }
-
     var isEmpty: Bool { count == 0 }
 
-    /// Spoken words per minute of recording, pauses included.
+    /// Spoken words per minute of active speech.
     var speakingWPM: Double? {
-        guard recordingSeconds > 0, spokenWords > 0 else { return nil }
-        return Double(spokenWords) / recordingSeconds * 60
+        guard activeSpeechSeconds > 0, spokenWords > 0 else { return nil }
+        return Double(spokenWords) / activeSpeechSeconds * 60
     }
 
-    /// Recording plus measured processing: the time to ready text.
-    var dictationSeconds: TimeInterval { recordingSeconds + processingSeconds }
-
-    /// Produced words per minute of dictation time.
-    var producedWPM: Double? {
-        guard dictationSeconds > 0, producedWords > 0 else { return nil }
-        return Double(producedWords) / dictationSeconds * 60
-    }
-
-    /// How long typing the produced words would take at an assumed speed.
+    /// How long typing the words heard would take at an assumed speed. The
+    /// recognizer's words, not cleanup's output, so expanding the text
+    /// never inflates the estimate.
     func typingSeconds(atWPM wpm: Double) -> TimeInterval {
-        Double(producedWords) / SpeakingEfficiency.clampedTypingWPM(wpm) * 60
+        Double(spokenWords) / SpeakingEfficiency.clampedTypingWPM(wpm) * 60
     }
 
-    /// Estimated typing time minus dictation time; negative when dictating was slower.
+    /// Estimated typing time minus active speech; negative when speaking took longer.
     func savedSeconds(atWPM wpm: Double) -> TimeInterval {
-        typingSeconds(atWPM: wpm) - dictationSeconds
+        typingSeconds(atWPM: wpm) - activeSpeechSeconds
     }
 
-    /// Estimated typing time divided by dictation time.
+    /// Estimated typing time divided by active speech, for these same dictations.
     func speedup(atWPM wpm: Double) -> Double? {
-        guard dictationSeconds > 0, producedWords > 0 else { return nil }
-        return typingSeconds(atWPM: wpm) / dictationSeconds
+        guard activeSpeechSeconds > 0, spokenWords > 0 else { return nil }
+        return typingSeconds(atWPM: wpm) / activeSpeechSeconds
     }
 }
 
 struct SpeakingSummary: Equatable {
-    /// Dictations whose processing time was measured: savings include it.
-    var measured = SpeakingTotals()
-    /// Dictations without measured processing: compared on recording time
-    /// alone, so their savings are overstated by the unmeasured time.
-    var recordingOnly = SpeakingTotals()
+    /// Every dictation in the comparison: the totals behind each figure.
+    var counted = SpeakingTotals()
     var exclusions: [SpeakingExclusion: Int] = [:]
 
     static let empty = SpeakingSummary()
-
-    /// Every comparable dictation, for speaking pace, which needs no processing time.
-    var allEligible: SpeakingTotals {
-        var all = measured
-        all.add(recordingOnly)
-        return all
-    }
 
     var excludedCount: Int { exclusions.values.reduce(0, +) }
 }
@@ -226,8 +221,37 @@ enum SpeakingFormat {
         return "\(secs)s"
     }
 
-    static func speedup(_ value: Double) -> String {
-        String(format: "%.1f×", value)
+    /// "0.4 min", "2.5 min", "12 min", "−1.5 min": tenths under ten minutes,
+    /// whole minutes from ten, and the sign kept.
+    static func minutes(_ seconds: TimeInterval) -> String {
+        let tenths = (abs(seconds) / 60 * 10).rounded() / 10
+        let magnitude: String
+        if tenths >= 10 {
+            magnitude = "\(Int((abs(seconds) / 60).rounded()))"
+        } else if tenths == 0 {
+            return "0 min"
+        } else {
+            magnitude = String(format: "%.1f", tenths)
+        }
+        return "\(seconds < 0 ? "−" : "")\(magnitude) min"
+    }
+
+    /// "≈12 min saved", or "≈−1.5 min saved" when speaking took longer.
+    static func saved(_ seconds: TimeInterval) -> String {
+        "≈\(minutes(seconds)) saved"
+    }
+
+    /// "3.1× faster", or "0.7× as fast" when speaking was slower.
+    static func speedup(_ ratio: Double) -> String {
+        let value = ratio >= 9.95 ? "\(Int(ratio.rounded()))" : String(format: "%.1f", ratio)
+        return ratio >= 1.05 ? "\(value)× faster" : "\(value)× as fast"
+    }
+
+    /// "≈12 min saved · 3.1× faster" against the assumed typing speed, or nil
+    /// when nothing can be compared.
+    static func headline(_ totals: SpeakingTotals, typingWPM: Double) -> String? {
+        guard let ratio = totals.speedup(atWPM: typingWPM) else { return nil }
+        return "\(saved(totals.savedSeconds(atWPM: typingWPM))) · \(speedup(ratio))"
     }
 
     static func words(_ count: Int) -> String {
@@ -238,14 +262,6 @@ enum SpeakingFormat {
         "\(count.formatted()) \(count == 1 ? "dictation" : "dictations")"
     }
 
-    /// "≈1m 50s saved" or "≈20s slower than typing".
-    static func saved(_ seconds: TimeInterval) -> String {
-        let rounded = seconds.rounded()
-        if rounded > 0 { return "≈\(duration(rounded)) saved" }
-        if rounded < 0 { return "≈\(duration(rounded)) slower than typing" }
-        return "About the same as typing"
-    }
-
     static func exclusion(_ reason: SpeakingExclusion) -> String {
         switch reason {
         case .meeting: "Meetings"
@@ -253,6 +269,9 @@ enum SpeakingFormat {
         case .failed: "Failed transcriptions"
         case .pending: "Still processing"
         case .legacy: "Recorded before timing was kept"
+        case .speechNotMeasured: "Recorded before active speech was measured"
+        case .measuringSpeech: "Measuring active speech"
+        case .speechUnavailable: "Active speech couldn’t be measured"
         case .invalidDuration: "No readable recording length"
         case .emptyText: "No words"
         }
@@ -262,17 +281,16 @@ enum SpeakingFormat {
     static func explanation(_ sample: SpeakingSample, typingWPM: Double) -> String {
         let totals = SpeakingTotals(sample)
         let wpm = SpeakingEfficiency.clampedTypingWPM(typingWPM)
-        var parts = ["Spoke \(words(sample.spokenWords)) in \(duration(sample.recordingSeconds))"]
-        if let pace = totals.speakingWPM { parts[0] += " (\(self.wpm(pace)), pauses included)." }
-        parts.append("Typing the \(words(sample.producedWords)) produced at an assumed \(self.wpm(wpm)) would take about \(duration(totals.typingSeconds(atWPM: wpm))).")
-        if let processing = sample.processingSeconds {
-            let difference = totals.savedSeconds(atWPM: wpm).rounded()
-            let outcome = difference > 0 ? "saving about \(duration(difference))"
-                : difference < 0 ? "about \(duration(difference)) slower than typing"
-                : "about the same as typing"
-            parts.append("Recording plus \(duration(processing)) of measured processing took \(duration(totals.dictationSeconds)), \(outcome).")
+        var parts = ["About \(duration(sample.activeSpeechSeconds)) of active speech in \(duration(sample.recordingSeconds)) recorded, as estimated by the speech detector on this Mac; pauses aren’t counted."]
+        var typing = "Typing the \(words(sample.spokenWords)) you said at an assumed \(self.wpm(wpm)) would take about \(duration(totals.typingSeconds(atWPM: wpm)))"
+        if let headline = headline(totals, typingWPM: wpm) {
+            typing += ": \(headline)."
         } else {
-            parts.append("Processing time wasn’t measured for this dictation, so no time saved is claimed.")
+            typing += "."
+        }
+        parts.append(typing)
+        if let processing = sample.processingSeconds {
+            parts.append("The text was ready \(duration(processing)) after you stopped; that wait isn’t counted.")
         }
         parts.append("Editing time isn’t measured. Change the assumed typing speed in Settings → Dictation.")
         return parts.joined(separator: " ")

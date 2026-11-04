@@ -182,6 +182,8 @@ class RecordingStore: ObservableObject {
     private let recordingsDirectory: URL
     private let cancelQueuedRecording: (UUID) -> Void
     private let stopPlayback: ([URL]) -> Void
+    /// Measures each new live dictation's active speech on this Mac.
+    private nonisolated let speechDetector: any SpeechDetecting
 
     private convenience init() {
         let applicationSupport = FileManager.default.urls(
@@ -218,12 +220,14 @@ class RecordingStore: ObservableObject {
         database: DatabaseQueue,
         recordingsDirectory: URL,
         cancelQueuedRecording: @escaping (UUID) -> Void,
-        stopPlayback: @escaping ([URL]) -> Void
+        stopPlayback: @escaping ([URL]) -> Void,
+        speechDetector: any SpeechDetecting = SileroSpeechDetector.shared
     ) throws {
         self.dbQueue = database
         self.recordingsDirectory = recordingsDirectory.standardizedFileURL
         self.cancelQueuedRecording = cancelQueuedRecording
         self.stopPlayback = stopPlayback
+        self.speechDetector = speechDetector
         try setupDatabase()
     }
 
@@ -435,6 +439,17 @@ class RecordingStore: ObservableObject {
                 try db.alter(table: DictationSource.databaseTableName) { t in
                     t.add(column: "filterReason", .text)
                 }
+            }
+        }
+
+        // Active speech is measured once for each new live dictation. Older
+        // rows keep no value: they stay unknown and are never backfilled.
+        migrator.registerMigration("v13_add_speech_activity") { db in
+            let columnNames = try db.columns(in: DictationSource.databaseTableName).map(\.name)
+            try db.alter(table: DictationSource.databaseTableName) { t in
+                if !columnNames.contains("speechActivity") { t.add(column: "speechActivity", .text) }
+                if !columnNames.contains("activeSpeechSeconds") { t.add(column: "activeSpeechSeconds", .double) }
+                if !columnNames.contains("speechDetector") { t.add(column: "speechDetector", .text) }
             }
         }
 
@@ -657,9 +672,12 @@ class RecordingStore: ObservableObject {
                     recordingStartedAt: recordingStartedAt,
                     disposition: .pending,
                     filter: selectedFilter,
-                    captureOrigin: .live
+                    captureOrigin: .live,
+                    speechActivity: .measuring
                 )
             )
+            // Its audio is settled, so Regenerate later keeps this figure.
+            measureSpeechActivityInBackground(for: id)
             return true
         } catch {
             // No History row owns this audio.
@@ -669,13 +687,17 @@ class RecordingStore: ObservableObject {
         }
     }
 
-    /// Saves a dictation with its original evidence in one transaction.
+    /// Saves a dictation with its original evidence in one transaction, then
+    /// measures its active speech in the background when the evidence asks.
     func addRecording(_ recording: Recording, source: DictationSource) {
         Task {
             do {
                 try await insertRecording(recording, source: source)
                 await MainActor.run {
                     NotificationCenter.default.post(name: Self.recordingsDidUpdateNotification, object: nil)
+                }
+                if source.speechActivity == .measuring {
+                    measureSpeechActivityInBackground(for: recording.id)
                 }
             } catch {
                 print("Failed to add recording.")
@@ -687,6 +709,83 @@ class RecordingStore: ObservableObject {
         try await insertRecording(recording, source: source)
         await MainActor.run {
             NotificationCenter.default.post(name: Self.recordingsDidUpdateNotification, object: nil)
+        }
+    }
+
+    /// Measures a saved live dictation's active speech once, from its audio
+    /// in History, and stores the result on its evidence. Rows that are not
+    /// waiting for a measurement, including every row from before WorkFlow
+    /// measured it and every row already measured, are left alone, so
+    /// Regenerate never changes the figure and History is never backfilled.
+    /// The audio and transcript are only read.
+    nonisolated func measureSpeechActivity(for id: UUID) async {
+        let audioURL: URL?
+        do {
+            let target = try await dbQueue.read { db -> Recording? in
+                guard let source = try DictationSource.fetchOne(db, key: id),
+                      source.speechActivity == .measuring,
+                      let recording = try Recording.fetchOne(db, key: id),
+                      !recording.isPending else { return nil }
+                return recording
+            }
+            guard let target else { return }
+            audioURL = target.playableAudioURL
+        } catch {
+            print("Failed to read the dictation to measure.")
+            return
+        }
+        let measurement: SpeechActivityMeasurement = if let audioURL {
+            await SpeechActivity.measure(audioURL, with: speechDetector)
+        } else {
+            .unavailable(speechDetector.detectorID)
+        }
+        do {
+            // Only the three measurement columns of a row still waiting, so a
+            // regeneration that finished meanwhile keeps all of its evidence.
+            let changed = try await dbQueue.write { db in
+                try DictationSource
+                    .filter(key: id)
+                    .filter(DictationSource.Columns.speechActivity == SpeechActivityStatus.measuring.rawValue)
+                    .updateAll(db, [
+                        DictationSource.Columns.speechActivity.set(to: measurement.status.rawValue),
+                        DictationSource.Columns.activeSpeechSeconds.set(to: measurement.activeSeconds),
+                        DictationSource.Columns.speechDetector.set(to: measurement.detectorID),
+                    ])
+            }
+            guard changed > 0 else { return }
+            await MainActor.run {
+                NotificationCenter.default.post(name: Self.recordingsDidUpdateNotification, object: nil)
+            }
+        } catch {
+            print("Failed to save the dictation's active speech.")
+        }
+    }
+
+    /// Measures at low priority, off the caller's path.
+    nonisolated func measureSpeechActivityInBackground(for id: UUID) {
+        Task.detached(priority: .utility) { [self] in
+            await measureSpeechActivity(for: id)
+        }
+    }
+
+    /// Finishes measurements the app quit before saving. Only rows this
+    /// feature marked as measuring are read; History is not scanned.
+    nonisolated func measureInterruptedSpeechActivity() async {
+        let ids: [UUID]
+        do {
+            ids = try await dbQueue.read { db in
+                try UUID.fetchAll(
+                    db,
+                    DictationSource
+                        .select(Column("recordingID"))
+                        .filter(DictationSource.Columns.speechActivity == SpeechActivityStatus.measuring.rawValue)
+                )
+            }
+        } catch {
+            return
+        }
+        for id in ids {
+            await measureSpeechActivity(for: id)
         }
     }
 
