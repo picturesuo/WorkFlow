@@ -148,8 +148,10 @@ enum FilterAssistantPrompt {
 
     /// Accepts only a strict reply object. Overlong or invalid values are
     /// rejected rather than truncated, so a saved filter is exactly what the
-    /// user reviewed.
-    static func parse(_ raw: String) throws -> FilterAssistantReply {
+    /// user reviewed. `baseline` is the draft or saved filter being refined:
+    /// a reply that leaves out "digits" or "triggers" keeps its values, while
+    /// an explicit value, including an empty list, replaces them for review.
+    static func parse(_ raw: String, keeping baseline: FilterAssistantProposal? = nil) throws -> FilterAssistantReply {
         let text = raw.trimmingCharacters(in: .whitespacesAndNewlines)
         guard text.first == "{", text.last == "}",
               let data = text.data(using: .utf8),
@@ -164,7 +166,8 @@ enum FilterAssistantPrompt {
         guard let filterValue = object["filter"], !(filterValue is NSNull) else {
             return FilterAssistantReply(message: message, proposal: nil)
         }
-        // "digits" and "triggers" may be left out, which means false and none.
+        // "digits" and "triggers" may be left out: a refinement keeps the
+        // baseline's values, and a new filter gets false and none.
         guard let filter = filterValue as? [String: Any],
               Set(filter.keys).subtracting(["digits", "triggers"]) == ["name", "base_mode", "instructions"],
               let rawName = filter["name"] as? String,
@@ -174,8 +177,8 @@ enum FilterAssistantPrompt {
         else {
             throw FilterAssistantError.malformedResponse
         }
-        let writesDigits = (filter["digits"] as? Bool) ?? false
-        let triggers = try parseTriggers(filter["triggers"])
+        let writesDigits = (filter["digits"] as? Bool) ?? baseline?.writesDigits ?? false
+        let triggers = try parseTriggers(filter["triggers"]) ?? baseline?.triggers ?? []
         let name = rawName.trimmingCharacters(in: .whitespacesAndNewlines)
         let instructions = rawInstructions.trimmingCharacters(in: .whitespacesAndNewlines)
         guard let mode = CleanupMode(rawValue: rawMode.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()) else {
@@ -204,8 +207,9 @@ enum FilterAssistantPrompt {
     /// Trigger phrases follow the editor's own rules; an unusable list is
     /// rejected whole, never trimmed, so the draft is what was reviewed.
     /// Whether another saved filter already uses a phrase is checked on Save.
-    private static func parseTriggers(_ value: Any?) throws -> [String] {
-        guard let value, !(value is NSNull) else { return [] }
+    /// Nil means the reply did not state any phrases.
+    private static func parseTriggers(_ value: Any?) throws -> [String]? {
+        guard let value, !(value is NSNull) else { return nil }
         guard let phrases = value as? [String] else { throw FilterAssistantError.malformedResponse }
         do {
             return try FilterTriggers.validated(phrases, others: [])

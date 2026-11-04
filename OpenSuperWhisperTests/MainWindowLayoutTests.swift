@@ -154,6 +154,34 @@ final class MainWindowLayoutTests: XCTestCase {
         XCTAssertEqual(Set(historyHeights.values).count, 1, "The dictation bar must not grow over History: \(historyHeights)")
     }
 
+    /// The README preview: the window listening under Auto, with three
+    /// successful synthetic dictations and their time saved. It is rendered
+    /// from the real view like every other state here; nothing is recorded.
+    func testReadmePreviewListensUnderAutoAboveSuccessfulDictations() throws {
+        try CustomCleanupFilterStore.upsert(MainWindowFixtures.calculus, in: appStorage)
+        try CustomCleanupFilterStore.upsert(MainWindowFixtures.standup, in: appStorage)
+        FilterAutoSettings.setEnabled(true, in: appStorage)
+        let history = MainWindowFixtures.readmeHistory()
+        for scheme in [ColorScheme.light, .dark] {
+            let window = try MainWindowHost(
+                recordings: history.recordings, sources: history.sources, size: CGSize(width: 560, height: 460), scheme: scheme,
+                appStorage: appStorage, pasteboard: pasteboard.name
+            ) { ScriptedRecordingViewModel(transcriptionService: $0, transcriptionQueue: $1, recordingStore: $2) }
+            let model = try XCTUnwrap(window.viewModel as? ScriptedRecordingViewModel)
+            model.scriptedRecording = true
+            model.updateRecorderState(isRecording: true, isConnecting: false)
+            window.settle { model.speakingSummary.measured.count == 3 }
+            XCTAssertEqual(model.speakingSummary.measured.count, 3, "Every row is a measured live dictation")
+            XCTAssertTrue(model.recordings.allSatisfy { $0.speaking?.sample != nil })
+            save(try window.render(), name: "readme-listening-\(scheme.label)")
+            window.assertHistoryStaysBelowTheToolbar()
+            window.assertControlsFitWithoutOverlapping()
+            XCTAssertTrue(try XCTUnwrap(window.recordButton).isEnabled, "Stop stays available while listening")
+            XCTAssertFalse(window.window.isVisible, "Visual verification must stay offscreen")
+            window.close()
+        }
+    }
+
     func testEmptySearchAndNoResultStates() throws {
         for scheme in [ColorScheme.light, .dark] {
             let empty = try host([], scheme: scheme)
@@ -518,6 +546,7 @@ final class MainWindowHost: HostedControls {
 
     init(
         recordings: [Recording],
+        sources: [DictationSource] = [],
         size: CGSize,
         scheme: ColorScheme,
         appStorage: UserDefaults,
@@ -532,7 +561,11 @@ final class MainWindowHost: HostedControls {
             stopPlayback: { _ in }
         )
         for recording in recordings {
-            store.addRecording(recording)
+            if let source = sources.first(where: { $0.recordingID == recording.id }) {
+                store.addRecording(recording, source: source)
+            } else {
+                store.addRecording(recording)
+            }
         }
         let transcription = TranscriptionService(engine: ControlledTranscriptionEngine { _ in })
         let queue = TranscriptionQueue(
@@ -772,6 +805,51 @@ enum MainWindowFixtures {
                       cleanupModelID: "us.amazon.nova-micro-v1:0", cleanupRequested: true, cleanupMode: .writing,
                       rawTokenEstimate: 61, finalTokenEstimate: 44, tokenEstimatorID: LocalTokenEstimator.identifier),
         ]
+    }
+
+    /// Three successful live dictations with their evidence, for the README
+    /// preview: a Writing semicolon, a Technical request, and a saved filter
+    /// Auto picked from two of its phrases. Every word is synthetic.
+    static let calculus = CustomCleanupFilter(
+        name: "Calculus", baseMode: .homework, instructions: "Write math notation compactly.", writesDigits: true,
+        triggers: ["derivative", "integral", "limit"]
+    )
+    static let standup = CustomCleanupFilter(
+        name: "Standup notes", baseMode: .writing, instructions: "Write short standup sentences."
+    )
+
+    static func readmeHistory(now: Date = Date()) -> (recordings: [Recording], sources: [DictationSource]) {
+        let rows: [(seconds: TimeInterval, ago: TimeInterval, spoken: String, emitted: String, mode: CleanupMode,
+                    filter: CustomCleanupFilter?, reason: FilterChoiceReason?, source: TranscriptCleanupOutcome.Source)] = [
+            (6, 60, "the derivative of three x squared is six x and the integral brings it back",
+             "The derivative of 3x² is 6x, and the integral brings it back.", .homework, calculus,
+             .triggers(["derivative", "integral"]), .anthropic),
+            (7, 300, "um add a retry with backoff to the upload client and uh cover it with a unit test",
+             "Add a retry with backoff to the upload client and cover it with a unit test.", .technical, nil, nil, .openAI),
+            (8, 900, "the draft is due friday i will send the outline tonight so we can review it together",
+             "The draft is due Friday; I'll send the outline tonight so we can review it together.", .writing, nil, nil, .bedrock),
+        ]
+        var recordings: [Recording] = []
+        var sources: [DictationSource] = []
+        for row in rows {
+            let id = UUID()
+            let snapshot = row.filter.map { CleanupFilterSnapshot(filter: $0) } ?? .builtIn(row.mode)
+            recordings.append(Recording(
+                id: id, timestamp: now.addingTimeInterval(-row.ago), fileName: "fixture-readme-\(id.uuidString).wav",
+                transcription: row.emitted, duration: row.seconds, status: .completed, progress: 1,
+                cleanupSource: row.source, cleanupInputTokens: row.source == .bedrock ? 212 : nil,
+                cleanupOutputTokens: row.source == .bedrock ? 31 : nil,
+                cleanupModelID: row.source == .bedrock ? "us.amazon.nova-micro-v1:0" : nil, cleanupRequested: true,
+                cleanupMode: row.mode, cleanupFilterName: row.filter?.name, cleanupFilterInstructions: row.filter?.instructions,
+                cleanupFilterWritesDigits: row.filter?.writesDigits ?? false, cleanupFilterReason: row.reason
+            ))
+            sources.append(DictationSource(
+                recordingID: id, recordingStartedAt: now.addingTimeInterval(-row.ago - row.seconds),
+                recognizerText: row.spoken, emittedText: row.emitted, insertedText: row.emitted, disposition: .pasteSent,
+                filter: snapshot, filterReason: row.reason, cleanupSource: row.source, captureOrigin: .live, processingSeconds: 0.9
+            ))
+        }
+        return (recordings, sources)
     }
 
     /// A failed dictation whose audio was kept, so Regenerate is offered.

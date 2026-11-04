@@ -1241,4 +1241,107 @@ final class FilterAssistantTriggerTests: XCTestCase {
         XCTAssertNil(conflicting.save())
         XCTAssertEqual(conflicting.errorMessage, "“stack trace” already picks “Code review”. Each phrase can pick only one filter.")
     }
+
+    /// Replies the assistant gives in order; each is the raw reply text.
+    private final class ScriptedDrafter: CleanupChatCompleting {
+        let providerID = CleanupProviderID.ollama
+        var replies: [String]
+        private(set) var requests: [ProviderChatRequest] = []
+        init(_ replies: [String]) { self.replies = replies }
+        func complete(_ request: ProviderChatRequest) async throws -> CleanupProviderResult {
+            requests.append(request)
+            return CleanupProviderResult(text: replies.removeFirst(), inputTokens: 10, outputTokens: 10, modelID: "local")
+        }
+    }
+
+    private func rawReply(_ filter: [String: Any]) throws -> String {
+        let data = try JSONSerialization.data(withJSONObject: ["message": "Updated.", "filter": filter], options: [.sortedKeys])
+        return String(decoding: data, as: UTF8.self)
+    }
+
+    private func refine(
+        _ saved: CustomCleanupFilter, replies: [String], defaults: UserDefaults,
+        editDraft: ((inout FilterAssistantProposal) -> Void)? = nil
+    ) async throws -> (FilterAssistantSession, ScriptedDrafter) {
+        let drafter = ScriptedDrafter(replies)
+        let session = FilterAssistantSession(
+            target: .existing(saved),
+            destination: CleanupProviderDestination(providerID: .ollama, model: "m", isOnThisMac: true),
+            chatResolver: { drafter }, budgetProvider: { nil }, defaults: defaults
+        )
+        for index in replies.indices {
+            if index > 0, let editDraft, var draft = session.proposal {
+                editDraft(&draft)
+                session.proposal = draft
+            }
+            session.request = "Also hyphenate compound adjectives."
+            session.send()
+            for _ in 0..<400 where session.isGenerating { try await Task.sleep(nanoseconds: 5_000_000) }
+            XCTAssertFalse(session.isGenerating)
+            XCTAssertNil(session.errorMessage)
+        }
+        return (session, drafter)
+    }
+
+    /// A refinement reply that leaves out "triggers" or "digits" did not ask to
+    /// change them, so the saved filter's Auto phrases and digit setting stay.
+    func testRefiningWithAReplyThatOmitsPhrasesOrDigitsKeepsTheSavedOnes() async throws {
+        let suite = "FilterAssistantTriggerTests-\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let saved = Fixtures.calculus
+        try CustomCleanupFilterStore.upsert(saved, in: defaults)
+        let omitted: [String: Any] = [
+            "name": "Calculus", "base_mode": "homework", "instructions": "Write math compactly. Hyphenate compound adjectives."
+        ]
+        for filter in [omitted, omitted.merging(["triggers": NSNull()]) { $1 }] {
+            let (session, drafter) = try await refine(saved, replies: [try rawReply(filter)], defaults: defaults)
+            XCTAssertTrue(drafter.requests[0].messages[0].content.contains("ITS TRIGGER PHRASES"))
+            XCTAssertEqual(session.proposal?.triggers, saved.triggers, "The reviewed draft shows the phrases it will save")
+            XCTAssertEqual(session.proposal?.writesDigits, true)
+            let updated = try XCTUnwrap(session.save())
+            XCTAssertEqual(updated.id, saved.id)
+            XCTAssertEqual(updated.triggers, saved.triggers)
+            XCTAssertTrue(updated.writesDigits)
+            XCTAssertEqual(updated.instructions, "Write math compactly. Hyphenate compound adjectives.")
+            XCTAssertEqual(CustomCleanupFilterStore.load(from: defaults).first?.triggers, saved.triggers)
+            // Restore the original so the next variant refines the same saved filter.
+            try CustomCleanupFilterStore.upsert(saved, in: defaults)
+        }
+    }
+
+    /// On a later turn the baseline is the draft as the person last edited it,
+    /// and an explicit list (even an empty one) is a deliberate, reviewable change.
+    func testLaterTurnsKeepTheEditedDraftAndHonorAnExplicitList() async throws {
+        let suite = "FilterAssistantTriggerTests-\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let saved = Fixtures.calculus
+        try CustomCleanupFilterStore.upsert(saved, in: defaults)
+        let base: [String: Any] = ["name": "Calculus", "base_mode": "homework", "instructions": "Write math compactly."]
+
+        let (kept, keptDrafter) = try await refine(
+            saved, replies: [try rawReply(base), try rawReply(base)], defaults: defaults,
+            editDraft: { draft in
+                draft.triggers = ["derivative", "antiderivative"]
+                draft.writesDigits = false
+            }
+        )
+        XCTAssertTrue(keptDrafter.requests[1].messages[2].content.contains("derivative, antiderivative"))
+        XCTAssertEqual(kept.proposal?.triggers, ["derivative", "antiderivative"])
+        XCTAssertEqual(kept.proposal?.writesDigits, false)
+
+        var cleared = base
+        cleared["triggers"] = [String]()
+        cleared["digits"] = false
+        let (explicit, _) = try await refine(saved, replies: [try rawReply(cleared)], defaults: defaults)
+        XCTAssertEqual(explicit.proposal?.triggers, [], "An explicit empty list is shown for review, then saved")
+        XCTAssertEqual(explicit.proposal?.writesDigits, false)
+        XCTAssertEqual(try XCTUnwrap(explicit.save()).triggers, [])
+
+        // A new filter has nothing to keep: omission still means none and false.
+        let parsed = try FilterAssistantPrompt.parse(try rawReply(base))
+        XCTAssertEqual(parsed.proposal?.triggers, [])
+        XCTAssertEqual(parsed.proposal?.writesDigits, false)
+    }
 }
