@@ -109,9 +109,16 @@ final class FilterAssistantSession: ObservableObject {
             minimumTimeout: FilterAssistantPrompt.minimumTimeout
         )
         let summary = request.isEmpty ? "Match the style of my example." : request
+        // What a reply that leaves out digits or trigger phrases keeps.
+        let baseline = proposal ?? existing.map {
+            FilterAssistantProposal(
+                name: $0.name, baseMode: $0.baseMode, instructions: $0.instructions,
+                writesDigits: $0.writesDigits, triggers: $0.triggers
+            )
+        }
         generationTask = Task { [weak self] in
             guard let self else { return }
-            let outcome = await self.generate(chatRequest)
+            let outcome = await self.generate(chatRequest, keeping: baseline)
             guard self.generationID == id, !Task.isCancelled else { return }
             self.generationID = nil
             self.generationTask = nil
@@ -139,7 +146,7 @@ final class FilterAssistantSession: ObservableObject {
         case failure(String)
     }
 
-    private func generate(_ chatRequest: ProviderChatRequest) async -> Outcome {
+    private func generate(_ chatRequest: ProviderChatRequest, keeping baseline: FilterAssistantProposal?) async -> Outcome {
         do {
             let provider = try chatResolver()
             if provider.providerID == .bedrock, let budget = await budgetProvider(), budget.isExhausted {
@@ -158,7 +165,7 @@ final class FilterAssistantSession: ObservableObject {
             guard !result.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
                 throw FilterAssistantError.malformedResponse
             }
-            return .success((result.text, try FilterAssistantPrompt.parse(result.text)))
+            return .success((result.text, try FilterAssistantPrompt.parse(result.text, keeping: baseline)))
         } catch is CancellationError {
             return .failure("Cancelled.")
         } catch let error as URLError where error.code == .timedOut {
