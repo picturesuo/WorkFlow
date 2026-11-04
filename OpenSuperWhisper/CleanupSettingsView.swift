@@ -368,7 +368,7 @@ struct ProviderCostSettingsView: View {
         .onChange(of: anthropicModelID) { _, value in AppPreferences.shared.anthropicModelID = value }
         .onChange(of: anthropicTimeout) { _, value in AppPreferences.shared.anthropicTimeoutSeconds = value }
         .confirmationDialog(
-            "Remove the \(keyPendingRemoval?.displayName ?? "") key from Keychain?",
+            removeKeyDialogTitle,
             isPresented: Binding(
                 get: { keyPendingRemoval != nil },
                 set: { if !$0 { keyPendingRemoval = nil } }
@@ -381,6 +381,13 @@ struct ProviderCostSettingsView: View {
         } message: { _ in
             Text("Cleanup with this provider stops until you add a key again. Dictations keep their original transcript.")
         }
+    }
+
+    /// Built outside the view body so the long modifier chain above stays
+    /// within the Swift type-checker's budget.
+    private var removeKeyDialogTitle: String {
+        let provider = keyPendingRemoval?.displayName ?? ""
+        return "Remove the \(provider) key from Keychain?"
     }
 
     // MARK: Provider
