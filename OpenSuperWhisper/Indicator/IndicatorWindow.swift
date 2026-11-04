@@ -565,7 +565,9 @@ struct IndicatorProcessingWave: View {
 
     static func levels(bars: Int, at time: TimeInterval) -> [CGFloat] {
         (0..<bars).map { index in
-            CGFloat(0.35 + 0.3 * sin(time * 2 * .pi * 0.8 - Double(index) * 0.75))
+            let phase: Double = time * 2 * .pi * 0.8 - Double(index) * 0.75
+            let level: Double = 0.35 + 0.3 * sin(phase)
+            return CGFloat(level)
         }
     }
 
