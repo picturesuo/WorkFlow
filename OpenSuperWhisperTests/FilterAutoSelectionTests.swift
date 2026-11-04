@@ -424,7 +424,7 @@ final class FilterAutoPipelineTests: XCTestCase {
         super.setUp()
         suiteName = "FilterAutoPipelineTests-\(UUID().uuidString)"
         defaults = UserDefaults(suiteName: suiteName)
-        for filter in Fixtures.all { try? CustomCleanupFilterStore.upsert(filter, in: defaults) }
+        for filter in Fixtures.all { _ = try? CustomCleanupFilterStore.upsert(filter, in: defaults) }
     }
 
     override func tearDown() {

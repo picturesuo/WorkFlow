@@ -1521,9 +1521,10 @@ struct HistoryRow: View {
         case .openAICompatible:
             let tokenCount = (recording.cleanupInputTokens ?? 0) + (recording.cleanupOutputTokens ?? 0)
             return tokenCount > 0 ? "Custom API · \(tokenCount) tokens" : "Custom API"
-        case .azureOpenAI:
+        case .azureOpenAI, .openAI, .anthropic:
+            let name = source == .azureOpenAI ? "Azure OpenAI" : source == .openAI ? "OpenAI" : "Anthropic"
             let tokenCount = (recording.cleanupInputTokens ?? 0) + (recording.cleanupOutputTokens ?? 0)
-            return tokenCount > 0 ? "Azure OpenAI · \(tokenCount) tokens" : "Azure OpenAI"
+            return tokenCount > 0 ? "\(name) · \(tokenCount) tokens" : name
         case .rawFallback:
             return "Original transcript"
         case .budgetLimited:
@@ -1545,6 +1546,10 @@ struct HistoryRow: View {
             return "Transcript cleaned by the configured OpenAI-compatible API. Audio stayed on this Mac."
         case .azureOpenAI:
             return "Transcript cleaned by your Azure OpenAI deployment. Audio stayed on this Mac."
+        case .openAI:
+            return "Transcript cleaned by OpenAI with your API key. Audio stayed on this Mac."
+        case .anthropic:
+            return "Transcript cleaned by Anthropic with your API key. Audio stayed on this Mac."
         case .rawFallback:
             return "AI cleanup didn’t finish, so \(AppIdentity.productName) kept the original transcript.\(hasAudio ? " Regenerate tries cleanup again." : "")"
         case .budgetLimited:
@@ -1605,7 +1610,7 @@ struct HistoryRow: View {
         switch recording.cleanupSource {
         case .rawFallback, .budgetLimited:
             return ThemePalette.caution(colorScheme)
-        case .bedrock, .ollama, .openAICompatible, .azureOpenAI, .disabled, nil:
+        case .bedrock, .ollama, .openAICompatible, .azureOpenAI, .openAI, .anthropic, .disabled, nil:
             return .secondary
         }
     }

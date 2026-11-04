@@ -90,6 +90,15 @@ Amazon models are available by default in commercial AWS regions when the key ha
 
 At AWS's US Nova Micro price ($0.035 per million input tokens and $0.14 per million output tokens, unchanged in AWS's price list on November 4, 2026), the maintainer's September 2026 cleanups averaged about 319 input and 55 output tokens, an estimated $0.000019 each; 100 a day would be about $0.06 a month. These are estimates; AWS billing is authoritative.
 
+## Optional OpenAI or Anthropic cleanup
+
+1. Create an API key in the [OpenAI dashboard](https://platform.openai.com/api-keys) or the [Claude Console](https://platform.claude.com/settings/keys).
+2. Open WorkFlow → Settings → **Provider & Cost** and choose **OpenAI** or **Anthropic**.
+3. Paste the key into the secure field and select **Save & Test**. The key is saved to Keychain only after the test succeeds, and each provider keeps its own key.
+4. Keep the recommended model (`gpt-6-luna` for OpenAI, `claude-haiku-5-5` for Anthropic) or enter another model ID. For OpenAI, keep **Reasoning effort** at **None** unless the model needs another value; older models such as GPT-4.1 need **Don't send**.
+
+If the key is rejected, the account is out of quota or rate limited, or the reply is late or would change your meaning, the dictation keeps its original transcript. Usage bills to your OpenAI or Anthropic account; WorkFlow reports tokens but doesn't estimate their prices, and the monthly stop applies only to Amazon Bedrock.
+
 ## Optional Azure OpenAI cleanup
 
 1. Deploy a small chat model in [Microsoft Foundry](https://ai.azure.com) and note its deployment name.

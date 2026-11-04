@@ -513,7 +513,7 @@ class RecordingStore: ObservableObject {
                 summary.localCleanedDictations += 1
                 summary.inputTokens += recording.cleanupInputTokens ?? 0
                 summary.outputTokens += recording.cleanupOutputTokens ?? 0
-            case .openAICompatible, .azureOpenAI:
+            case .openAICompatible, .azureOpenAI, .openAI, .anthropic:
                 summary.cleanedDictations += 1
                 summary.unpricedDictations += 1
                 summary.inputTokens += recording.cleanupInputTokens ?? 0

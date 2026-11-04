@@ -44,12 +44,8 @@ struct CleanupSettingsView: View {
     }
 
     private var hasKeyForSelectedProvider: Bool {
-        switch destination.providerID {
-        case .bedrock: viewModel.hasBedrockAPIKey
-        case .ollama: true
-        case .openAICompatible: viewModel.hasCompatibleAPIKey || destination.isOnThisMac
-        case .azureOpenAI: viewModel.hasAzureAPIKey
-        }
+        viewModel.hasStoredKey(for: destination.providerID)
+            || (destination.providerID == .openAICompatible && destination.isOnThisMac)
     }
 
     private var cleanupSwitch: some View {
@@ -286,12 +282,17 @@ struct ProviderCostSettingsView: View {
     @State private var compatibleBaseURL: String
     @State private var compatibleModelID: String
     @State private var compatibleTimeout: Double
-    @State private var compatibleAPIKey = ""
     @State private var azureEndpoint: String
     @State private var azureDeployment: String
     @State private var azureTimeout: Double
     @State private var azureReasoningDeployment: Bool
-    @State private var azureAPIKey = ""
+    @State private var openAIModelID: String
+    @State private var openAIReasoningEffort: OpenAIReasoningEffort
+    @State private var openAITimeout: Double
+    @State private var anthropicModelID: String
+    @State private var anthropicTimeout: Double
+    /// Keys typed but not yet saved; each is saved only after its test passes.
+    @State private var enteredKeys: [CleanupCredentialAccount: String] = [:]
     @State private var providerStatus = ""
     @State private var isTesting = false
     @State private var showsUsage = false
@@ -312,6 +313,11 @@ struct ProviderCostSettingsView: View {
         _azureDeployment = State(initialValue: prefs.azureOpenAIDeployment)
         _azureTimeout = State(initialValue: prefs.azureOpenAITimeoutSeconds)
         _azureReasoningDeployment = State(initialValue: prefs.azureOpenAIReasoningDeployment)
+        _openAIModelID = State(initialValue: prefs.openAIModelID)
+        _openAIReasoningEffort = State(initialValue: OpenAIReasoningEffort(rawValue: prefs.openAIReasoningEffort) ?? .none)
+        _openAITimeout = State(initialValue: prefs.openAITimeoutSeconds)
+        _anthropicModelID = State(initialValue: prefs.anthropicModelID)
+        _anthropicTimeout = State(initialValue: prefs.anthropicTimeoutSeconds)
     }
 
     /// "Amazon Bedrock · Nova Micro", naming the priced model plainly.
@@ -323,6 +329,35 @@ struct ProviderCostSettingsView: View {
     }
 
     var body: some View {
+        providerContent
+            .confirmationDialog(
+                removeKeyDialogTitle,
+                isPresented: removeKeyBinding,
+                titleVisibility: .visible,
+                presenting: keyPendingRemoval
+            ) { provider in
+                Button("Remove Key", role: .destructive) { removeKey(for: provider) }
+                Button("Cancel", role: .cancel) {}
+            } message: { _ in
+                Text("Cleanup with this provider stops until you add a key again. Dictations keep their original transcript.")
+            }
+    }
+
+    /// The pane contents plus preference-persistence modifiers. Split across
+    /// `providerContent` / `providerPersistence` and kept out of `body` so no
+    /// single view expression exceeds the Swift type-checker's budget - the CI
+    /// toolchain's solver (Xcode 26.6) is stricter than a local one, and the
+    /// full chain as one expression timed it out.
+    private var providerContent: some View {
+        providerPersistence
+            .onChange(of: openAIModelID) { _, value in AppPreferences.shared.openAIModelID = value }
+            .onChange(of: openAIReasoningEffort) { _, value in AppPreferences.shared.openAIReasoningEffort = value.rawValue }
+            .onChange(of: openAITimeout) { _, value in AppPreferences.shared.openAITimeoutSeconds = value }
+            .onChange(of: anthropicModelID) { _, value in AppPreferences.shared.anthropicModelID = value }
+            .onChange(of: anthropicTimeout) { _, value in AppPreferences.shared.anthropicTimeoutSeconds = value }
+    }
+
+    private var providerPersistence: some View {
         VStack(alignment: .leading, spacing: 22) {
             SettingsPaneHeader(
                 title: "Provider & Cost",
@@ -352,20 +387,23 @@ struct ProviderCostSettingsView: View {
         .onChange(of: azureDeployment) { _, value in AppPreferences.shared.azureOpenAIDeployment = value }
         .onChange(of: azureTimeout) { _, value in AppPreferences.shared.azureOpenAITimeoutSeconds = value }
         .onChange(of: azureReasoningDeployment) { _, value in AppPreferences.shared.azureOpenAIReasoningDeployment = value }
-        .confirmationDialog(
-            "Remove the \(keyPendingRemoval?.displayName ?? "") key from Keychain?",
-            isPresented: Binding(
-                get: { keyPendingRemoval != nil },
-                set: { if !$0 { keyPendingRemoval = nil } }
-            ),
-            titleVisibility: .visible,
-            presenting: keyPendingRemoval
-        ) { provider in
-            Button("Remove Key", role: .destructive) { removeKey(for: provider) }
-            Button("Cancel", role: .cancel) {}
-        } message: { _ in
-            Text("Cleanup with this provider stops until you add a key again. Dictations keep their original transcript.")
-        }
+    }
+
+    /// Hoisted out of the `.confirmationDialog` call so the dialog argument is a
+    /// simple reference rather than an inline `Binding(get:set:)` the solver
+    /// must unify inside the larger view expression.
+    private var removeKeyBinding: Binding<Bool> {
+        Binding(
+            get: { keyPendingRemoval != nil },
+            set: { if !$0 { keyPendingRemoval = nil } }
+        )
+    }
+
+    /// Built outside the view body so the modifier chain above stays within the
+    /// Swift type-checker's budget.
+    private var removeKeyDialogTitle: String {
+        let provider = keyPendingRemoval?.displayName ?? ""
+        return "Remove the \(provider) key from Keychain?"
     }
 
     // MARK: Provider
@@ -377,7 +415,7 @@ struct ProviderCostSettingsView: View {
         ) {
             SettingsRow(title: "Cleanup provider", detail: providerDetail) {
                 Picker("Cleanup provider", selection: $providerID) {
-                    ForEach(CleanupProviderID.allCases) { provider in
+                    ForEach(CleanupProviderID.pickerOrder) { provider in
                         Text(provider.displayName).tag(provider)
                     }
                 }
@@ -400,6 +438,8 @@ struct ProviderCostSettingsView: View {
             case .ollama: ollamaFields
             case .openAICompatible: compatibleFields
             case .azureOpenAI: azureFields
+            case .openAI: openAIFields
+            case .anthropic: anthropicFields
             }
             if !currentStatus.isEmpty {
                 Text(currentStatus)
@@ -418,8 +458,10 @@ struct ProviderCostSettingsView: View {
         switch providerID {
         case .bedrock: "Pay as you go on your AWS account. Nova Micro is the recommended low-cost model."
         case .ollama: "Runs on this Mac. No account, key, or API bill."
-        case .openAICompatible: "OpenAI, OpenRouter, LM Studio, or any chat-completions service."
+        case .openAICompatible: "OpenRouter, LM Studio, or any other chat-completions service."
         case .azureOpenAI: "A chat deployment in your Azure OpenAI or Microsoft Foundry resource."
+        case .openAI: "Your own OpenAI API key, billed to your OpenAI account."
+        case .anthropic: "Your own Anthropic API key, billed to your Anthropic account."
         }
     }
 
@@ -485,13 +527,20 @@ struct ProviderCostSettingsView: View {
         Group {
             textRow("Base URL", prompt: "https://api.example.com/v1", text: $compatibleBaseURL, width: 240)
             SettingsDivider()
-            textRow("Model", prompt: "Provider model ID", text: $compatibleModelID, width: 240)
+            textRow(
+                "Model",
+                detail: "Required: the model ID your service lists. For OpenAI itself, choose OpenAI above for a checked setup.",
+                prompt: "Provider model ID",
+                text: $compatibleModelID,
+                width: 240,
+                accessibilityLabel: "OpenAI-compatible model"
+            )
             SettingsDivider()
             keyRow(
                 title: "API key",
                 prompt: "API key",
-                text: $compatibleAPIKey,
-                isStored: viewModel.hasCompatibleAPIKey,
+                text: enteredKey(for: .openAICompatible),
+                isStored: viewModel.hasStoredKey(for: .openAICompatible),
                 accessibilityLabel: "OpenAI-compatible API key",
                 link: nil
             )
@@ -503,7 +552,7 @@ struct ProviderCostSettingsView: View {
                 isTesting: isTesting,
                 testAccessibility: isTesting ? "Testing the OpenAI-compatible connection" : "Save API key and test the OpenAI-compatible connection",
                 test: { Task { await testProvider() } },
-                canRemoveKey: viewModel.hasCompatibleAPIKey
+                canRemoveKey: viewModel.hasStoredKey(for: .openAICompatible)
             ) { EmptyView() }
         }
     }
@@ -516,13 +565,13 @@ struct ProviderCostSettingsView: View {
             SettingsDivider()
             textRow("Endpoint", prompt: "https://YOUR-RESOURCE.openai.azure.com", text: $azureEndpoint, width: 240, accessibilityLabel: "Azure OpenAI endpoint")
             SettingsDivider()
-            textRow("Deployment", prompt: "e.g. gpt-4.1-nano", text: $azureDeployment, width: 240, accessibilityLabel: "Azure OpenAI deployment name")
+            textRow("Deployment", prompt: "Your deployment name", text: $azureDeployment, width: 240, accessibilityLabel: "Azure OpenAI deployment name")
             SettingsDivider()
             keyRow(
                 title: "API key",
                 prompt: "Azure OpenAI API key",
-                text: $azureAPIKey,
-                isStored: viewModel.hasAzureAPIKey,
+                text: enteredKey(for: .azureOpenAI),
+                isStored: viewModel.hasStoredKey(for: .azureOpenAI),
                 accessibilityLabel: "Azure OpenAI API key",
                 link: nil
             )
@@ -540,9 +589,108 @@ struct ProviderCostSettingsView: View {
                 isTesting: isTesting,
                 testAccessibility: isTesting ? "Testing Azure OpenAI connection" : "Save API key and test Azure OpenAI",
                 test: { Task { await testProvider() } },
-                canRemoveKey: viewModel.hasAzureAPIKey
+                canRemoveKey: viewModel.hasStoredKey(for: .azureOpenAI)
             ) { EmptyView() }
         }
+    }
+
+    private var openAIFields: some View {
+        Group {
+            keyRow(
+                title: "API key",
+                prompt: "OpenAI API key",
+                text: enteredKey(for: .openAI),
+                isStored: viewModel.hasStoredKey(for: .openAI),
+                accessibilityLabel: "OpenAI API key",
+                link: ("Create a key", URL(string: "https://platform.openai.com/api-keys")!)
+            )
+            SettingsDivider()
+            textRow(
+                "Model",
+                detail: "Any Chat Completions model ID.",
+                prompt: OpenAIChatCleanupService.recommendedOpenAIModelID,
+                text: $openAIModelID,
+                width: 240,
+                accessibilityLabel: "OpenAI model"
+            )
+            SettingsDivider()
+            SettingsRow(
+                title: "Reasoning effort",
+                detail: "None answers fastest. Older models such as GPT-4.1 reject it; choose Don’t send."
+            ) {
+                Picker("Reasoning effort", selection: $openAIReasoningEffort) {
+                    ForEach(OpenAIReasoningEffort.allCases) { effort in
+                        Text(effort.displayName).tag(effort)
+                    }
+                }
+                .pickerStyle(.menu)
+                .labelsHidden()
+                .fixedSize()
+                .accessibilityLabel("OpenAI reasoning effort")
+            }
+            SettingsDivider()
+            timeoutRow(value: $openAITimeout, range: 1...60)
+            SettingsDivider()
+            actionsRow(
+                testTitle: "Save & Test",
+                isTesting: isTesting,
+                testAccessibility: isTesting ? "Testing OpenAI connection" : "Save API key and test OpenAI",
+                test: { Task { await testProvider() } },
+                canRemoveKey: viewModel.hasStoredKey(for: .openAI)
+            ) {
+                Button("Recommended Defaults") {
+                    openAIModelID = OpenAIChatCleanupService.recommendedOpenAIModelID
+                    openAIReasoningEffort = .none
+                    openAITimeout = 10
+                }
+                .help("\(OpenAIChatCleanupService.recommendedOpenAIModelID) with no reasoning and a 10-second timeout")
+            }
+        }
+    }
+
+    private var anthropicFields: some View {
+        Group {
+            keyRow(
+                title: "API key",
+                prompt: "Anthropic API key",
+                text: enteredKey(for: .anthropic),
+                isStored: viewModel.hasStoredKey(for: .anthropic),
+                accessibilityLabel: "Anthropic API key",
+                link: ("Create a key", URL(string: "https://platform.claude.com/settings/keys")!)
+            )
+            SettingsDivider()
+            textRow(
+                "Model",
+                detail: "Any Messages API model ID. Extended thinking is turned off for cleanup.",
+                prompt: AnthropicCleanupService.recommendedModelID,
+                text: $anthropicModelID,
+                width: 240,
+                accessibilityLabel: "Anthropic model"
+            )
+            SettingsDivider()
+            timeoutRow(value: $anthropicTimeout, range: 1...60)
+            SettingsDivider()
+            actionsRow(
+                testTitle: "Save & Test",
+                isTesting: isTesting,
+                testAccessibility: isTesting ? "Testing Anthropic connection" : "Save API key and test Anthropic",
+                test: { Task { await testProvider() } },
+                canRemoveKey: viewModel.hasStoredKey(for: .anthropic)
+            ) {
+                Button("Recommended Defaults") {
+                    anthropicModelID = AnthropicCleanupService.recommendedModelID
+                    anthropicTimeout = 10
+                }
+                .help("\(AnthropicCleanupService.recommendedModelID) with a 10-second timeout")
+            }
+        }
+    }
+
+    private func enteredKey(for account: CleanupCredentialAccount) -> Binding<String> {
+        Binding(
+            get: { enteredKeys[account] ?? "" },
+            set: { enteredKeys[account] = $0 }
+        )
     }
 
     private func keyRow(
@@ -763,7 +911,7 @@ struct ProviderCostSettingsView: View {
             "Estimated from token counts at the AWS price checked \(BedrockPricing.asOfDate). Your AWS bill is authoritative."
         case .ollama:
             "Ollama runs on this Mac, so cleanup has no API cost. The stop applies only to Amazon Bedrock."
-        case .openAICompatible, .azureOpenAI:
+        case .openAICompatible, .azureOpenAI, .openAI, .anthropic:
             "WorkFlow counts tokens for \(providerID.displayName) but doesn’t estimate its prices; usage bills to your account. The stop applies only to Amazon Bedrock."
         }
     }
@@ -809,60 +957,27 @@ struct ProviderCostSettingsView: View {
     private func testProvider() async {
         isTesting = true
         defer { isTesting = false }
-        let account: CleanupCredentialAccount? = switch providerID {
-        case .openAICompatible: .openAICompatible
-        case .azureOpenAI: .azureOpenAI
-        case .bedrock, .ollama: nil
-        }
-        let enteredKey = (providerID == .azureOpenAI ? azureAPIKey : compatibleAPIKey)
-            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let account = providerID.credentialAccount
+        let enteredKey = account.map { (enteredKeys[$0] ?? "").trimmingCharacters(in: .whitespacesAndNewlines) } ?? ""
         do {
-            let provider: OpenAIChatCleanupService
-            switch providerID {
-            case .ollama:
-                provider = OpenAIChatCleanupService(
-                    providerID: .ollama,
-                    baseURL: ollamaBaseURL,
-                    modelID: ollamaModelID,
-                    apiKey: nil,
-                    timeout: ollamaTimeout
-                )
-            case .openAICompatible:
-                let stored = try CleanupCredentialStore.loadAPIKey(for: .openAICompatible)
-                let key = enteredKey.isEmpty ? stored : enteredKey
-                guard (key?.isEmpty == false) || OpenAIChatCleanupService.isLocalBaseURL(compatibleBaseURL) else {
-                    providerStatus = "Enter an API key first."
-                    return
-                }
-                provider = OpenAIChatCleanupService(
-                    providerID: .openAICompatible,
-                    baseURL: compatibleBaseURL,
-                    modelID: compatibleModelID,
-                    apiKey: key,
-                    timeout: compatibleTimeout
-                )
-            case .azureOpenAI:
-                let stored = try CleanupCredentialStore.loadAPIKey(for: .azureOpenAI)
-                let key = enteredKey.isEmpty ? stored : enteredKey
-                guard key?.isEmpty == false else {
-                    providerStatus = "Enter an API key first."
-                    return
-                }
-                provider = OpenAIChatCleanupService(
-                    providerID: .azureOpenAI,
-                    baseURL: azureEndpoint,
-                    modelID: azureDeployment,
-                    apiKey: key,
-                    timeout: azureTimeout,
-                    usesReasoningParameters: azureReasoningDeployment
-                )
-            case .bedrock:
+            // The same factory dictation uses, offered the key being tested.
+            // The fields above write their preferences as they change.
+            var environment = CleanupProviderFactory.Environment.keychain
+            if !enteredKey.isEmpty {
+                environment.loadCleanupKey = { _ in enteredKey }
+            }
+            let provider: any TranscriptCleanupProviding
+            do {
+                provider = try CleanupProviderFactory.make(providerID, environment: environment)
+            } catch CleanupProviderError.missingCredential {
+                providerStatus = "Enter an API key first."
                 return
             }
 
             let result = try await provider.clean(
                 transcript: "Um, this is a \(AppIdentity.productName) connection test.",
-                systemPrompt: CleanupPromptBuilder.baseSystemPrompt
+                systemPrompt: CleanupPromptBuilder.baseSystemPrompt,
+                filter: .builtIn(.everyday)
             )
             if let account, !enteredKey.isEmpty {
                 do {
@@ -876,41 +991,44 @@ struct ProviderCostSettingsView: View {
             let tokenCount = (result.inputTokens ?? 0) + (result.outputTokens ?? 0)
             providerStatus = tokenCount > 0 ? "Connected · \(tokenCount) tokens for this test." : "Connected successfully."
         } catch {
+            let reason = Self.connectionFailureReason(error)
             if account != nil, !enteredKey.isEmpty {
-                providerStatus = "Connection failed; the new key was not saved: \(error.localizedDescription)"
+                providerStatus = "Connection failed; the new key was not saved: \(reason)"
             } else {
-                providerStatus = "Connection failed: \(error.localizedDescription)"
+                providerStatus = "Connection failed: \(reason)"
             }
         }
     }
 
+    static func connectionFailureReason(_ error: Error) -> String {
+        if let error = error as? URLError, error.code == .timedOut {
+            return "No reply within the timeout. Dictations would keep their original transcript."
+        }
+        return (error as? LocalizedError)?.errorDescription ?? "The request failed."
+    }
+
     private func removeKey(for provider: CleanupProviderID) {
-        switch provider {
-        case .bedrock:
+        if provider == .bedrock {
             viewModel.clearBedrockCredential()
-        case .openAICompatible, .azureOpenAI:
-            let account: CleanupCredentialAccount = provider == .azureOpenAI ? .azureOpenAI : .openAICompatible
-            do {
-                try CleanupCredentialStore.deleteAPIKey(for: account)
-                setKeyState(stored: false, for: account)
-                providerStatus = "API key removed from Keychain."
-            } catch {
-                providerStatus = error.localizedDescription
-            }
-        case .ollama:
-            break
+            return
+        }
+        guard let account = provider.credentialAccount else { return }
+        do {
+            try CleanupCredentialStore.deleteAPIKey(for: account)
+            setKeyState(stored: false, for: account)
+            providerStatus = "API key removed from Keychain."
+        } catch {
+            providerStatus = error.localizedDescription
         }
     }
 
     /// Clears the entry field and records whether a key is stored.
     private func setKeyState(stored: Bool, for account: CleanupCredentialAccount) {
-        switch account {
-        case .openAICompatible:
-            compatibleAPIKey = ""
-            viewModel.hasCompatibleAPIKey = stored
-        case .azureOpenAI:
-            azureAPIKey = ""
-            viewModel.hasAzureAPIKey = stored
+        enteredKeys[account] = nil
+        if stored {
+            viewModel.storedCleanupKeys.insert(account)
+        } else {
+            viewModel.storedCleanupKeys.remove(account)
         }
     }
 }

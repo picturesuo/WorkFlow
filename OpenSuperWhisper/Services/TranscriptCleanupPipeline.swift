@@ -6,6 +6,8 @@ struct TranscriptCleanupOutcome: Equatable {
         case ollama
         case openAICompatible = "openai_compatible"
         case azureOpenAI = "azure_openai"
+        case openAI = "openai"
+        case anthropic
         case rawFallback
         case budgetLimited = "budget_limited"
         case disabled
