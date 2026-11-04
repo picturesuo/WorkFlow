@@ -609,7 +609,7 @@ struct IndicatorWindow: View {
     /// Words and their quieter companion, the clock.
     static let textOpacity: Double = 0.88
     static let clockOpacity: Double = 0.62
-    static let dragHint = "Drag to move. Double-click to return it beside the cursor."
+    static let dragHint = "Drag to move. Double-click to reset its position for the next dictation."
 
     @ObservedObject var viewModel: IndicatorViewModel
     /// Told the capsule's drawn width whenever it changes.
