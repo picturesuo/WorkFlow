@@ -37,7 +37,7 @@ With **Create with AI**, nothing leaves your Mac until you press **Send**. You c
 
 Already turned some dictations into a finished essay, post, or doc? WorkFlow can look back at them. Paste or drop the finished document into **Settings → Personalize → Learn from finished writing**, or choose **Learn…** in the dictation bar, pick a mode, and choose **Learn**. PDF, Word, RTF, OpenDocument, Markdown, and plain text work, up to 100,000 characters.
 
-WorkFlow matches the document to the dictations in your History it came from and keeps only small style edits it can confirm, such as a spelling, a dropped filler, semicolon joins, or digits. Edits that change values, negations, or meaning are left out. What it learns is a short list of preferences per mode, not a trained model: each one is checked against your edits, applied to that mode automatically, and can be switched off or deleted. Custom filters are never changed.
+WorkFlow matches the document to the dictations in your History it came from and keeps small style edits that pass its checks, such as a spelling, a dropped filler, semicolon joins, or digits. The checks reject edits that clearly change values, negations, or meaning, but they can miss a change that only context reveals, so review what it learned. What it learns is a short list of preferences per mode, not a trained model: each one applies to that mode automatically and can be switched off or deleted. Custom filters are never changed.
 
 It can only match dictations that are still in History, and History saved before WorkFlow kept the original transcript is compared by its final text only. Learn uses your cleanup provider and sends only the short matched edits with a few words around each, never the whole document.
 
@@ -49,7 +49,7 @@ If the reply drops a question you asked, or is made of material you didn't say, 
 
 ## What it costs
 
-There's no WorkFlow subscription or server, and it costs **$0 when you're not dictating**. Transcription runs on your Mac, so it has no API fees (electricity and hardware not included). AI cleanup is optional and bills only when WorkFlow sends text to the provider you chose, under your own account.
+There's no WorkFlow subscription, server, or recurring WorkFlow charge. Transcription runs on your Mac, so it has no API fees (electricity and hardware not included). AI cleanup is optional, and provider charges happen only when WorkFlow sends a request to the provider you chose, under your own account: cleaning up a dictation, **Send** in Create with AI, **Learn**, or **Save & Test**.
 
 **One real month, estimated.** In September 2026 the maintainer made about 260 dictations, roughly 2.8 hours of recording. 253 of them went through cleanup with Amazon Nova Micro on Bedrock: 80,712 input and 14,035 output tokens. At AWS's US on-demand price of $0.035 per million input tokens and $0.14 per million output tokens, that's **an estimated $0.0048**, about half a cent for the month.
 
@@ -68,7 +68,9 @@ A Claude or ChatGPT chat subscription isn't an API key, and API use is billed se
 - **Claude** Max ($100 a month), Ultra ($200), and Team ($20 or $100 per seat, pooled up to $500). Free, Pro, and Enterprise aren't eligible. See [Anthropic's terms](https://support.claude.com/en/articles/17154008-monthly-api-credits-for-max-ultra-and-team-plans).
 - **ChatGPT** Pro ($100, $200, or $500, matching the Pro tier) and Business ($20 or $100 per paid seat, pooled up to $500 a month, or $6,000 a year when paid annually). Free, Go, Plus, and Enterprise aren't eligible. See [OpenAI's terms](https://developers.openai.com/api/docs/guides/chatgpt-api-credits).
 
-Both need at least seven days on the plan, and unused credits expire instead of rolling over. When they run out and the organization has no purchased credits, API requests stop until more credits arrive. These are Anthropic's and OpenAI's offers and can change, so check the linked pages. WorkFlow connects with an API key you type into its secure settings field, never a chat sign-in, and its cost estimate and monthly stop cover only Amazon Bedrock.
+Both need at least seven days on the plan, and unused credits expire instead of rolling over. When they run out and the organization has no purchased credits, API requests stop until more credits arrive. These are Anthropic's and OpenAI's offers and can change, so check the linked pages.
+
+What that means for WorkFlow today: Claude's credits don't cover Claude on Amazon Bedrock, and WorkFlow doesn't connect to Anthropic's API directly, so they don't pay for WorkFlow cleanup. WorkFlow's OpenAI-compatible provider can point at OpenAI's API, but it hasn't been tested with current OpenAI models. WorkFlow connects with an API key you type into its secure settings field, never a chat sign-in, and its cost estimate and monthly stop cover only Amazon Bedrock.
 
 ## Music while you dictate
 
