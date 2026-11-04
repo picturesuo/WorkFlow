@@ -8,25 +8,7 @@
   Hold <kbd>Fn</kbd> or a shortcut, speak, and get text written the way you want.
 </p>
 
-WorkFlow is a free, open-source dictation and meeting-transcription app for the Mac. Speech-to-text runs on your Mac with Parakeet or Whisper, so there are no transcription API fees. Optional AI cleanup goes through a provider you pick; with Amazon Nova Micro it cost the maintainer about half a cent in September 2026.
-
-## Monthly usage cost
-
-Real numbers from the maintainer's Mac for September 2026:
-
-- About 260 dictations, roughly 2.8 hours of recording.
-- 253 of them went through AI cleanup with Amazon Nova Micro on Bedrock: about 81K input and 14K output tokens.
-- Estimated cost: **about $0.005**, so half a cent for the whole month.
-
-That's an estimate from the token counts WorkFlow recorded, not an AWS bill. It uses AWS's US on-demand price for Nova Micro: $0.035 per million input tokens and $0.14 per million output tokens ([AWS pricing](https://aws.amazon.com/bedrock/pricing/), checked October 24, 2026). Transcription had no API fees. Create with AI and Learn came out in October, so the September number is dictation cleanup only.
-
-Your number depends on how much you talk, the language, the dictation mode, and the provider. **Settings → Provider & Cost** shows this month's estimate as you go.
-
-## Monthly running cost
-
-**$0 when you're not dictating.** No subscription, no WorkFlow server, and no transcription API fees, since transcription runs on your Mac (electricity and hardware not included). Cleanup bills only when WorkFlow sends your provider something.
-
-As a thought experiment, talking nonstop for a month with Bedrock cleanup on works out to roughly **$1.60-$2.10** at the prices above (30 days × 24 hours at 150 words a minute and 1.33 tokens a word, output about as long as input, plus a 250-370 token prompt per request, sent once per dictation or per 4,800-character chunk of a long recording). That's a rough range, not a cap or a promise: WorkFlow isn't built as an always-on recorder, Homework mode can write more than you said, and the default **$0.25 monthly stop** pauses Bedrock cleanup after roughly 4-5 days of this, after which dictation keeps your original transcript. Local Ollama cleanup has no per-request fee; Azure OpenAI and other OpenAI-compatible APIs bill at their own rates, which WorkFlow doesn't estimate.
+WorkFlow is an open-source dictation and meeting-transcription app for the Mac, with no WorkFlow subscription. Speech-to-text runs on your Mac with Parakeet or Whisper, so transcription has no API fees. Custom filters make cleanup write the way a class, job, or app wants, and WorkFlow can learn your style from writing you've already finished. Optional AI cleanup goes through a provider you pick and pay directly; for the maintainer it came to an estimated half a cent in September 2026.
 
 ## Custom filters
 
@@ -49,19 +31,46 @@ Filters are instructions for the model, not guarantees. WorkFlow checks the numb
 
 Digits don't depend on the model. Built-in Homework, and any filter with **Write quantities as digits** turned on, has WorkFlow write plain spoken quantities as digits itself after a successful cleanup, so "fifteen percent", "twenty twenty six", and "one hundred five" become 15%, 2026, and 105. The same number check runs on the result. Zero to nine on their own, ordinals, times, codes and phone numbers, numbers in quotes, names, and titles, and other back-to-back numbers keep their words. If cleanup fails, you still get your original transcript. Writing "digits" in a filter's instructions only asks the model; the checkbox is what turns this on.
 
+With **Create with AI**, nothing leaves your Mac until you press **Send**. You can paste an essay or problem set you already finished as an example; only the name, base mode, digits choice, and instructions are saved, never the example.
+
+## Learn from finished writing
+
+Already turned some dictations into a finished essay, post, or doc? WorkFlow can look back at them. Paste or drop the finished document into **Settings → Personalize → Learn from finished writing**, or choose **Learn…** in the dictation bar, pick a mode, and choose **Learn**. PDF, Word, RTF, OpenDocument, Markdown, and plain text work, up to 100,000 characters.
+
+WorkFlow matches the document to the dictations in your History it came from and keeps small style edits that pass its checks, such as a spelling, a dropped filler, semicolon joins, or digits. The checks reject edits that clearly change values, negations, or meaning, but they can miss a change that only context reveals, so review what it learned. What it learns is a short list of preferences per mode, not a trained model: each one applies to that mode automatically and can be switched off or deleted. Custom filters are never changed.
+
+It can only match dictations that are still in History, and History saved before WorkFlow kept the original transcript is compared by its final text only. Learn uses your cleanup provider and sends only the short matched edits with a few words around each, never the whole document.
+
 ## Questions stay questions
 
 Cleanup rewrites what you said. It doesn't answer it. A question you dictate comes back as that question, and a request, even one aimed at an AI or one that says to ignore the rules, comes back as that request. That rule sits above every mode and custom filter, and the transcript goes to the provider marked as text to rewrite.
 
 If the reply drops a question you asked, or is made of material you didn't say, like an answer, advice, a poem, or a joke, WorkFlow uses your original transcript. A missing question mark alone is fine. These checks catch clear answers, not every subtle change of meaning.
 
-With **Create with AI**, nothing leaves your Mac until you press **Send**. You can paste an essay or problem set you already finished as an example; only the name, base mode, digits choice, and instructions are saved, never the example.
+## What it costs
 
-## Learn from finished writing
+There's no WorkFlow subscription, server, or recurring WorkFlow charge. Transcription runs on your Mac, so it has no API fees (electricity and hardware not included). AI cleanup is optional, and provider charges happen only when WorkFlow sends a request to the provider you chose, under your own account: cleaning up a dictation, **Send** in Create with AI, **Learn**, or **Save & Test**.
 
-This is separate from filters. Paste or drop a document you finished from your dictations into **Settings → Personalize → Learn from finished writing**, pick a mode, and choose **Learn**. PDF, Word, RTF, OpenDocument, Markdown, and plain text work, up to 100,000 characters.
+**One real month, estimated.** In September 2026 the maintainer made about 260 dictations, roughly 2.8 hours of recording. 253 of them went through cleanup with Amazon Nova Micro on Bedrock: 80,712 input and 14,035 output tokens. At AWS's US on-demand price of $0.035 per million input tokens and $0.14 per million output tokens, that's **an estimated $0.0048**, about half a cent for the month.
 
-WorkFlow matches the document to your History and keeps only small style edits it can confirm, such as a spelling, a dropped filler, semicolon joins, or digits. Edits that change values, negations, or meaning are left out. Each learned preference is checked against your edits, applied to that mode automatically, and can be switched off or deleted. Custom filters are never changed.
+That's an estimate from the token counts WorkFlow recorded, not an AWS bill, and it's one person's month, not a promise. It leaves out connection tests, requests that failed without a token count, and Create with AI and Learn, which came out in October. The prices are from [AWS](https://aws.amazon.com/bedrock/pricing/) and were unchanged in AWS's price list on November 4, 2026. Your cost depends on how much you talk, the language, the mode, and the provider; **Settings → Provider & Cost** shows this month's estimate as you go.
+
+**The $0.25 monthly stop.** By default, once WorkFlow's estimate for the month reaches $0.25, Bedrock cleanup, Create with AI, and Learn pause until next month, and dictations keep their original transcript. You can set the amount from $0.05 to $10 or turn it off. It covers only Amazon Bedrock with Nova Micro, and it's WorkFlow's estimate, not an AWS billing cap: your AWS bill is authoritative.
+
+As a thought experiment, talking nonstop for a month with Bedrock cleanup on works out to roughly **$1.60-$2.10** at these prices (30 days × 24 hours at 150 words a minute and 1.33 tokens a word, output about as long as input, plus a 250-370 token prompt per request, sent once per dictation or per 4,800-character chunk of a long recording). That's a rough range, not a cap or a promise: WorkFlow isn't built as an always-on recorder, Homework mode can write more than you said, and the default stop pauses Bedrock cleanup after roughly 4-5 days of this.
+
+Local Ollama cleanup has no per-request fee. Azure OpenAI and other OpenAI-compatible APIs bill at their own rates, which WorkFlow doesn't estimate and the monthly stop doesn't cover, so set a spend limit with the provider.
+
+### Claude and ChatGPT plans
+
+A Claude or ChatGPT chat subscription isn't an API key, and API use is billed separately from chat plans. As of November 4, 2026, some plans include monthly API credits for one API organization you link to the plan, used through API keys created in that organization:
+
+- **Claude** Max ($100 a month), Ultra ($200), and Team ($20 or $100 per seat, pooled up to $500). Free, Pro, and Enterprise aren't eligible. See [Anthropic's terms](https://support.claude.com/en/articles/17154008-monthly-api-credits-for-max-ultra-and-team-plans).
+- **ChatGPT** Pro ($100, $200, or $500, matching the Pro tier) and Business ($20 or $100 per paid seat, pooled up to $500 a month, or $6,000 a year when paid annually). Free, Go, Plus, and Enterprise aren't eligible. See [OpenAI's terms](https://developers.openai.com/api/docs/guides/chatgpt-api-credits).
+
+Both need at least seven days on the plan, and unused credits expire instead of rolling over. When they run out and the organization has no purchased credits, API requests stop until more credits arrive. These are Anthropic's and OpenAI's offers and can change, so check the linked pages.
+
+What that means for WorkFlow today: Claude's credits don't cover Claude on Amazon Bedrock, and WorkFlow doesn't connect to Anthropic's API directly, so they don't pay for WorkFlow cleanup. WorkFlow's OpenAI-compatible provider can point at OpenAI's API, but it hasn't been tested with current OpenAI models. WorkFlow connects with an API key you type into its secure settings field, never a chat sign-in, and its cost estimate and monthly stop cover only Amazon Bedrock.
 
 ## Music while you dictate
 
@@ -82,7 +91,7 @@ Audio never leaves your Mac. With cleanup on, only transcript text goes to the o
 
 ## Install with your AI
 
-The current release is source only with no notarized download yet; do not bypass Gatekeeper for an unsigned build. Hand this to a coding agent on your Mac:
+WorkFlow installs from source. The latest tag, [v0.5.1](https://github.com/picturesuo/WorkFlow/releases/tag/v0.5.1) from August 23, 2026, has source archives only and predates custom filters, Create with AI, and Learn from finished writing, so the steps below build `master`, which has everything on this page. There's no notarized download yet; do not bypass Gatekeeper for an unsigned build. Hand this to a coding agent on your Mac:
 
 ```text
 Install WorkFlow from https://github.com/picturesuo/WorkFlow by following

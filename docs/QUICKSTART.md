@@ -4,7 +4,7 @@
 
 ### Public release status
 
-The current v0.5.1 release contains source archives only. A notarized `WorkFlow-…-macOS-arm64.zip` is not attached yet, so use the local source build below. Do not bypass Gatekeeper for an unsigned or unnotarized build. Future signed builds will appear on [WorkFlow Releases](https://github.com/picturesuo/WorkFlow/releases/latest).
+The latest tag, v0.5.1 (August 23, 2026), contains source archives only and predates custom filters, Create with AI, and Learn from finished writing. A notarized `WorkFlow-…-macOS-arm64.zip` is not attached yet, so use the local source build below, which builds `master`. Do not bypass Gatekeeper for an unsigned or unnotarized build. Future signed builds will appear on [WorkFlow Releases](https://github.com/picturesuo/WorkFlow/releases/latest).
 
 ### Local source build
 
@@ -18,7 +18,7 @@ brew install cmake libomp rust
 open /Applications/WorkFlow.app
 ```
 
-The first build downloads dependencies and can take several minutes. WorkFlow now uses its own `com.picturesuo.WorkFlow` identity. When upgrading from Chat or GlowScribe, it copies preferences and History/models forward without deleting the old data and moves provider credentials into WorkFlow's Keychain identity. macOS privacy grants cannot be copied, so approve WorkFlow once under Microphone, Accessibility, and—if selected—Input Monitoring. On macOS 26 or newer, the installer can reuse the exact trusted signer from a working installation. Otherwise, if it reports that no Apple-issued signing identity exists:
+The first build downloads dependencies and can take several minutes. WorkFlow now uses its own `com.picturesuo.WorkFlow` identity. When upgrading from Chat or GlowScribe, it copies preferences and History/models forward without deleting the old data and moves provider credentials into WorkFlow's Keychain identity. macOS privacy grants cannot be copied, so approve WorkFlow once under Microphone, Accessibility, and, if selected, Input Monitoring. On macOS 26 or newer, the installer can reuse the exact trusted signer from a working installation. Otherwise, if it reports that no Apple-issued signing identity exists:
 
 1. Open Xcode → Settings → Accounts.
 2. Add an Apple Account and select **Manage Certificates**.
@@ -31,9 +31,9 @@ An agent can handle the terminal steps, but the user should complete Apple-accou
 
 When WorkFlow opens, allow:
 
-1. **Microphone** — records speech locally.
-2. **Accessibility** — pastes into the app that was focused when recording began.
-3. **Input Monitoring** — needed only when you choose `Fn`/globe, another single-modifier shortcut, or `Control`+`Fn`.
+1. **Microphone**: records speech locally.
+2. **Accessibility**: pastes into the app that was focused when recording began.
+3. **Input Monitoring**: needed only when you choose `Fn`/globe, another single-modifier shortcut, or `Control`+`Fn`.
 
 If a prompt is missed, open System Settings → Privacy & Security and enable the missing permission. WorkFlow detects a newly granted Input Monitoring permission and activates the selected shortcut automatically.
 
@@ -80,7 +80,7 @@ If you sometimes press Escape accidentally, enable **Settings → Dictation → 
 
 Amazon models are available by default in commercial AWS regions when the key has the required Bedrock permissions. If the test reports `AccessDeniedException`, confirm that the key can invoke Nova Micro in `us-east-1`; an organization policy or restricted account may require an administrator to grant model access.
 
-At the August 21, 2026 US price, a typical 200-input/40-output-token cleanup is about $0.0000126, and 100 daily dictations are about $0.04/month. AWS billing is authoritative.
+At AWS's US Nova Micro price ($0.035 per million input tokens and $0.14 per million output tokens, unchanged in AWS's price list on November 4, 2026), the maintainer's September 2026 cleanups averaged about 319 input and 55 output tokens, an estimated $0.000019 each; 100 a day would be about $0.06 a month. These are estimates; AWS billing is authoritative.
 
 ## Optional Azure OpenAI cleanup
 
