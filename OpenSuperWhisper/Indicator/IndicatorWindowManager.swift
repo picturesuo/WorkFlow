@@ -185,7 +185,9 @@ class IndicatorWindowManager: IndicatorViewDelegate {
     func warmUp() {
         guard window == nil else { return }
         ensureWindowContent(for: IndicatorViewModel())
-        guard let window = window else { return }
+        // Ordering the panel in, even transparent, puts windows from the test
+        // host on the user's screen; tests only need the panel built.
+        guard !OpenSuperWhisperApp.isRunningTests, let window = window else { return }
         
         window.alphaValue = 0
         window.orderFront(nil)
