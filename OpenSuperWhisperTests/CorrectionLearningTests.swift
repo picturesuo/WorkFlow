@@ -694,16 +694,18 @@ final class LearnedPreferenceScopeTests: XCTestCase {
     }
 
     func testWritingKeepsTheSpeakersLongConnectedFlow() throws {
-        // A synthetic sample in the spirit of the user's blog: numbered clauses,
-        // a semicolon join, vocabulary kept, only stutters and filler removed.
-        let spoken = "Starting my third year of school, I realized that um first that cheap pens were not a good long term plan, and second that I missed I missed the sketching I did as a kid. So I decided to make a few notebooks for my friends and before choosing paper I wanted to read what people said."
-        let written = "Starting my third year of school, I realized that (1) cheap pens were not a good long term plan, and (2) that I missed the sketching I did as a kid. So I decided to make a few notebooks for my friends; and before choosing paper, I wanted to read what people said."
+        // An invented sample with the features Writing must keep: spoken
+        // "first ... second ..." clauses marked inline, a semicolon join, a
+        // comma added, the speaker's own words, and only a filler and a
+        // stutter removed.
+        let spoken = "When the cold months came back, we noticed that um first that the cedar frame had warped near the door, and second that we we had never sealed the vents along the roof. So we ordered fresh hinges for the frame and before replacing any glass we wanted to check how much light the panels let through."
+        let written = "When the cold months came back, we noticed that (1) the cedar frame had warped near the door, and (2) that we had never sealed the vents along the roof. So we ordered fresh hinges for the frame; and before replacing any glass, we wanted to check how much light the panels let through."
         XCTAssertEqual(try CleanupGuard.postprocess(written, source: spoken, mode: .writing, allowsNumberFormatting: true), written)
         XCTAssertThrowsError(
             try CleanupGuard.postprocess(written, source: spoken, mode: .everyday),
             "Everyday does not inherit Writing's inline markers"
         )
-        let shortened = "I needed better pens. I missed sketching. I made notebooks."
+        let shortened = "The frame warped. The vents leaked. We bought hinges."
         XCTAssertThrowsError(try CleanupGuard.postprocess(shortened, source: spoken + " " + spoken, mode: .writing, allowsNumberFormatting: true),
                              "Writing may not compress the speaker into short sentences")
     }
