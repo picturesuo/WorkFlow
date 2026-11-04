@@ -172,38 +172,13 @@ final class VocabularyAndRulesTests: XCTestCase {
     }
 }
 
-final class TokenEfficiencyTests: XCTestCase {
+/// The local token estimate stays a cost diagnostic stored with each cleanup;
+/// productivity is measured in time and words (SpeakingEfficiencyTests).
+final class LocalTokenEstimatorTests: XCTestCase {
     func testEstimatorIsDeterministicAndCountsTechnicalSyntax() {
         let text = "Run xcodebuild -scheme WorkFlow && git status --short"
         XCTAssertEqual(LocalTokenEstimator.estimate(text), LocalTokenEstimator.estimate(text))
         XCTAssertGreaterThan(LocalTokenEstimator.estimate(text), 8)
-    }
-
-    func testSummaryUsesGeometricMeanAndComparesModes() throws {
-        let summary = TokenEfficiencyCalculator.summarize([
-            TokenEfficiencySample(mode: .technical, sourceTokens: 20, finalTokens: 10),
-            TokenEfficiencySample(mode: .technical, sourceTokens: 8, finalTokens: 4),
-            TokenEfficiencySample(mode: .homework, sourceTokens: 10, finalTokens: 20),
-            TokenEfficiencySample(mode: .everyday, sourceTokens: 10, finalTokens: 10)
-        ])
-
-        let technical = try XCTUnwrap(summary[.technical])
-        XCTAssertEqual(technical.sampleCount, 2)
-        XCTAssertEqual(technical.geometricMeanRatio, 2, accuracy: 0.0001)
-        let homeworkAdvantage = try XCTUnwrap(summary.advantage(of: .technical, over: .homework))
-        let everydayAdvantage = try XCTUnwrap(summary.advantage(of: .technical, over: .everyday))
-        XCTAssertEqual(homeworkAdvantage, 4, accuracy: 0.0001)
-        XCTAssertEqual(everydayAdvantage, 2, accuracy: 0.0001)
-    }
-
-    func testSummaryRejectsInvalidSamples() {
-        let summary = TokenEfficiencyCalculator.summarize([
-            TokenEfficiencySample(mode: .technical, sourceTokens: 0, finalTokens: 4),
-            TokenEfficiencySample(mode: .homework, sourceTokens: 10, finalTokens: 0)
-        ])
-
-        XCTAssertNil(summary[.technical])
-        XCTAssertNil(summary[.homework])
     }
 }
 

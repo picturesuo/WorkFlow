@@ -279,7 +279,18 @@ class SettingsViewModel: ObservableObject {
     @Published private(set) var bedrockStatus = ""
     @Published private(set) var isTestingBedrock = false
     @Published private(set) var bedrockUsageSummary = BedrockUsageSummary()
-    @Published private(set) var tokenEfficiencySummary = TokenEfficiencySummary.empty
+    /// This month's speaking-versus-typing totals; Settings → Dictation shows them.
+    @Published private(set) var speakingSummary = SpeakingSummary.empty
+    @Published var typingBaselineWPM: Double {
+        didSet {
+            let clamped = SpeakingEfficiency.clampedTypingWPM(typingBaselineWPM)
+            guard clamped == typingBaselineWPM else {
+                typingBaselineWPM = clamped
+                return
+            }
+            AppPreferences.shared.typingBaselineWPM = clamped
+        }
+    }
     @Published private(set) var bedrockLastErrorMessage: String?
     @Published private(set) var bedrockLastErrorDate: Date?
 
@@ -316,6 +327,7 @@ class SettingsViewModel: ObservableObject {
         self.bedrockTimeoutSeconds = prefs.bedrockTimeoutSeconds
         self.bedrockMonthlyBudgetEnabled = prefs.bedrockMonthlyBudgetEnabled
         self.bedrockMonthlyBudgetUSD = prefs.bedrockMonthlyBudgetUSD
+        self.typingBaselineWPM = SpeakingEfficiency.clampedTypingWPM(prefs.typingBaselineWPM)
         self.launchAtLogin = prefs.launchAtLogin
         self.bedrockLastErrorMessage = prefs.bedrockLastErrorMessage
         self.bedrockLastErrorDate = prefs.bedrockLastErrorDate
@@ -400,10 +412,15 @@ class SettingsViewModel: ObservableObject {
             ?? BedrockUsageSummary()
         usage.add(FilterAssistantUsageStore.usage(since: monthStart))
         bedrockUsageSummary = usage
-        tokenEfficiencySummary = (try? await RecordingStore.shared.tokenEfficiency(since: monthStart))
-            ?? .empty
         bedrockLastErrorMessage = AppPreferences.shared.bedrockLastErrorMessage
         bedrockLastErrorDate = AppPreferences.shared.bedrockLastErrorDate
+    }
+
+    @MainActor
+    func refreshSpeakingSummary(store: RecordingStore? = nil, now: Date = Date()) async {
+        let store = store ?? .shared
+        let monthStart = Calendar.current.dateInterval(of: .month, for: now)?.start ?? now
+        speakingSummary = (try? await store.speakingSummary(since: monthStart)) ?? .empty
     }
 
     func useRecommendedBedrockDefaults() {

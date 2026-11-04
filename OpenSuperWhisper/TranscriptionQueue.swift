@@ -128,12 +128,16 @@ class TranscriptionQueue: ObservableObject {
         }
     }
 
+    /// Queues audio for transcription. `captureOrigin` is `.live` only for a
+    /// dictation queued because the engine was busy; its processing time,
+    /// which includes waiting in the queue, is never measured.
     func addFileToQueue(
         url: URL,
         title: String? = nil,
         mode: RecordingMode = .dictation,
         cleanupRequested: Bool = false,
-        targetBundleID: String? = nil
+        targetBundleID: String? = nil,
+        captureOrigin: CaptureOrigin = .imported
     ) async {
         do {
             let durationInSeconds = await AudioUtil.audioDuration(url: url)
@@ -169,7 +173,12 @@ class TranscriptionQueue: ObservableObject {
                 // are filled when the first transcription finishes.
                 try await recordingStore.addRecordingSync(
                     recording,
-                    source: DictationSource(recordingID: id, disposition: .pending, filter: selected)
+                    source: DictationSource(
+                        recordingID: id,
+                        disposition: .pending,
+                        filter: selected,
+                        captureOrigin: captureOrigin
+                    )
                 )
             } else {
                 try await recordingStore.addRecordingSync(recording)

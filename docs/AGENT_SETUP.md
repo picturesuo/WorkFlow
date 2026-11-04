@@ -64,6 +64,9 @@ This runbook lets a local coding agent install and verify WorkFlow without recei
      -only-testing:OpenSuperWhisperTests/CleanupReplyCompletenessTransportTests \
      -only-testing:OpenSuperWhisperTests/RecognizerToCleanupTraceTests \
      -only-testing:OpenSuperWhisperTests/CustomFilterHistoryTests \
+     -only-testing:OpenSuperWhisperTests/SpeakingEfficiencyTests \
+     -only-testing:OpenSuperWhisperTests/SpeakingEfficiencyStoreTests \
+     -only-testing:OpenSuperWhisperTests/SpeakingLayoutTests \
      -only-testing:OpenSuperWhisperTests/CustomFilterImmediacyTests \
      -only-testing:OpenSuperWhisperTests/CustomFilterDigitsChoiceTests \
      -only-testing:OpenSuperWhisperTests/RewriteOnlyContractTests \
@@ -99,7 +102,7 @@ This runbook lets a local coding agent install and verify WorkFlow without recei
 6. Ask the user to approve WorkFlow under Microphone and Accessibility. Input Monitoring is also required when the user selects `Fn`, `Control`+`Fn`, or another single-modifier shortcut. Upgrades must re-grant these permissions because macOS ties them to the old app identity. Do not automate privacy approval.
 7. Verify `WorkFlow.app` is running, its visible version is current, and its bundle identifier is `com.picturesuo.WorkFlow`. For an upgrade, confirm preferences and History were copied from the legacy identity; never delete the legacy data automatically.
 8. Have the user perform one short dictation with their selected shortcut in a disposable text field. Confirm the newest spoken text appears and History contains the same result.
-9. Set **Technical** in the WorkFlow menu-bar menu and have the user dictate a verbose technical request. Confirm History labels it Technical and shows a source-to-final token estimate. Repeat with Homework only when the user wants to validate long-form behavior; do not fabricate samples in their History.
+9. Set **Technical** in the WorkFlow menu-bar menu and have the user dictate a verbose technical request. Confirm History labels it Technical and shows its time saved against the assumed typing speed. Repeat with Homework only when the user wants to validate long-form behavior; do not fabricate samples in their History.
 10. For Bedrock or Azure OpenAI, open **Settings → Provider & Cost**, let the user enter the key, then let the user choose **Save & Test**. For Azure, the user also enters the resource endpoint and deployment name. Confirm a successful status with token counts. Leave the key field blank in all captured logs and screenshots.
 11. To verify Writing mode or learning, let the user select **Writing** (or another mode), dictate into a disposable document, edit it, then paste the whole finished document under **Settings → Personalize → Learn from finished writing** (also reached from **Learn…** beside the dictation mode in the main window) and select **Learn**. Confirm the outcome names the matched dictations and the learned preferences listed for that mode. Do not fabricate samples in their History.
 12. To verify custom filters, let the user create one under **Settings → Cleanup → Custom filters** (for example **Everyday with digits**, which turns on **Write quantities as digits**), select it in the menu-bar menu without restarting, and dictate a sentence with a spoken quantity such as "fifteen percent". Confirm the result shows 15% and History labels it with the filter name. Do not fabricate samples in their History. To verify AI drafting, let the user choose **Create with AI**, type or speak a request (and optionally paste a finished example), press **Send**, review the proposal, and save it.
@@ -110,6 +113,6 @@ This runbook lets a local coding agent install and verify WorkFlow without recei
 - The app has Microphone and Accessibility permissions, plus Input Monitoring when a single-modifier or `Control`+`Fn` shortcut is selected.
 - A short hold/release with the selected shortcut produces the newest transcript in the original target.
 - The same transcript appears in History and remains available on the clipboard.
-- The dictation mode is selectable from the main window and menu bar; successful cleanups record mode-specific efficiency without mixing in failed fallbacks.
+- The dictation mode is selectable from the main window and menu bar; new dictations show speaking pace and time saved against the assumed typing speed, never token ratios.
 - If remote cleanup is requested, the in-app connection test passes and the $0.25 monthly estimated-cost stop is enabled.
 - No credential appears in shell history, process arguments, source control, logs, or agent conversation.

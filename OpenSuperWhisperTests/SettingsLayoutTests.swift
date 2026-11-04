@@ -115,7 +115,7 @@ final class SettingsLayoutTests: XCTestCase {
 
     /// Whole panes, scrolled out to full height, for visual review.
     func testFullPaneContentForReview() throws {
-        let heights: [SettingsPane: CGFloat] = [.dictation: 1000, .cleanup: 1500, .personalize: 1250, .providerCost: 1350]
+        let heights: [SettingsPane: CGFloat] = [.dictation: 1450, .cleanup: 1500, .personalize: 1250, .providerCost: 1350]
         for pane in SettingsPane.allCases {
             for scheme in [ColorScheme.light, .dark] {
                 let size = CGSize(width: 720, height: heights[pane] ?? 1200)

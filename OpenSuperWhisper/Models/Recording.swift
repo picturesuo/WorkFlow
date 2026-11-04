@@ -42,6 +42,8 @@ struct Recording: Identifiable, Codable, FetchableRecord, PersistableRecord, Equ
     var tokenEstimatorID: String? = nil
     
     var isRegeneration: Bool = false
+    /// Not stored: History attaches it from the dictation's evidence when it loads.
+    var speaking: SpeakingEligibility? = nil
     
     enum CodingKeys: String, CodingKey {
         case id, timestamp, fileName, transcription, duration, status, progress, sourceFileURL
@@ -71,7 +73,8 @@ struct Recording: Identifiable, Codable, FetchableRecord, PersistableRecord, Equ
                lhs.rawTokenEstimate == rhs.rawTokenEstimate &&
                lhs.finalTokenEstimate == rhs.finalTokenEstimate &&
                lhs.tokenEstimatorID == rhs.tokenEstimatorID &&
-               lhs.isRegeneration == rhs.isRegeneration
+               lhs.isRegeneration == rhs.isRegeneration &&
+               lhs.speaking == rhs.speaking
     }
 
     static var recordingsDirectory: URL {
@@ -387,7 +390,41 @@ class RecordingStore: ObservableObject {
             }
         }
 
+        // Speaking-versus-typing needs to know whether a dictation was spoken
+        // into WorkFlow and how long its text took to be ready. Only rows that
+        // recorded a start time came from a live indicator dictation; others
+        // stay unclassified rather than guessed.
+        migrator.registerMigration("v11_add_dictation_timing") { db in
+            let columnNames = try db.columns(in: DictationSource.databaseTableName).map(\.name)
+            if !columnNames.contains("captureOrigin") {
+                try db.alter(table: DictationSource.databaseTableName) { t in
+                    t.add(column: "captureOrigin", .text)
+                }
+            }
+            if !columnNames.contains("processingSeconds") {
+                try db.alter(table: DictationSource.databaseTableName) { t in
+                    t.add(column: "processingSeconds", .double)
+                }
+            }
+            try db.execute(
+                sql: "UPDATE \(DictationSource.databaseTableName) SET captureOrigin = ? WHERE captureOrigin IS NULL AND recordingStartedAt IS NOT NULL",
+                arguments: [CaptureOrigin.live.rawValue]
+            )
+        }
+
         try migrator.migrate(dbQueue)
+    }
+
+    /// Attaches each row's speaking-versus-typing eligibility from its evidence.
+    private nonisolated static func attachSpeaking(_ recordings: [Recording], db: Database) throws -> [Recording] {
+        guard !recordings.isEmpty else { return recordings }
+        let sources = try DictationSource.filter(keys: recordings.map(\.id)).fetchAll(db)
+        let sourcesByID = Dictionary(sources.map { ($0.recordingID, $0) }, uniquingKeysWith: { first, _ in first })
+        return recordings.map { recording in
+            var recording = recording
+            recording.speaking = SpeakingEfficiency.classify(recording, source: sourcesByID[recording.id])
+            return recording
+        }
     }
     
     private nonisolated func fetchAllRecordings() async throws -> [Recording] {
@@ -412,10 +449,13 @@ class RecordingStore: ObservableObject {
 
     nonisolated func fetchRecordings(limit: Int, offset: Int) async throws -> [Recording] {
         try await dbQueue.read { db in
-            try Recording
-                .order(Recording.Columns.timestamp.desc)
-                .limit(limit, offset: offset)
-                .fetchAll(db)
+            try Self.attachSpeaking(
+                Recording
+                    .order(Recording.Columns.timestamp.desc)
+                    .limit(limit, offset: offset)
+                    .fetchAll(db),
+                db: db
+            )
         }
     }
 
@@ -472,32 +512,16 @@ class RecordingStore: ObservableObject {
         }
     }
 
-    nonisolated func tokenEfficiency(since startDate: Date) async throws -> TokenEfficiencySummary {
-        let recentRecordings = try await dbQueue.read { db in
-            try Recording
-                .filter(Recording.Columns.timestamp >= startDate)
-                .fetchAll(db)
+    /// Speaking-versus-typing totals for History rows saved since the date.
+    /// Each row is counted once and every excluded row is counted by reason.
+    nonisolated func speakingSummary(since startDate: Date) async throws -> SpeakingSummary {
+        try await dbQueue.read { db in
+            let recordings = try Self.attachSpeaking(
+                Recording.filter(Recording.Columns.timestamp >= startDate).fetchAll(db),
+                db: db
+            )
+            return SpeakingEfficiency.summarize(recordings.compactMap(\.speaking))
         }
-        let samples = recentRecordings.compactMap { recording -> TokenEfficiencySample? in
-            // Built-in averages stay pure: custom filters change output length
-            // by design, so their samples are not mixed into a base mode.
-            guard recording.tokenEstimatorID == LocalTokenEstimator.identifier,
-                  recording.cleanupFilterName == nil,
-                  let mode = recording.cleanupMode,
-                  let sourceTokens = recording.rawTokenEstimate,
-                  let finalTokens = recording.finalTokenEstimate else { return nil }
-            switch recording.cleanupSource {
-            case .bedrock, .ollama, .openAICompatible, .azureOpenAI:
-                return TokenEfficiencySample(
-                    mode: mode,
-                    sourceTokens: sourceTokens,
-                    finalTokens: finalTokens
-                )
-            case .rawFallback, .budgetLimited, .disabled, nil:
-                return nil
-            }
-        }
-        return TokenEfficiencyCalculator.summarize(samples)
     }
 
     func getPendingRecordings() -> [Recording] {
@@ -601,7 +625,8 @@ class RecordingStore: ObservableObject {
                     recordingID: id,
                     recordingStartedAt: recordingStartedAt,
                     disposition: .pending,
-                    filter: selectedFilter
+                    filter: selectedFilter,
+                    captureOrigin: .live
                 )
             )
             return true
@@ -1048,11 +1073,14 @@ class RecordingStore: ObservableObject {
     
     nonisolated func searchRecordingsAsync(query: String, limit: Int = 100, offset: Int = 0) async throws -> [Recording] {
         try await dbQueue.read { db in
-            try Recording
-                .filter(sql: "transcription LIKE ? ESCAPE '!'", arguments: [Self.literalSearchPattern(query)])
-                .order(Recording.Columns.timestamp.desc)
-                .limit(limit, offset: offset)
-                .fetchAll(db)
+            try Self.attachSpeaking(
+                Recording
+                    .filter(sql: "transcription LIKE ? ESCAPE '!'", arguments: [Self.literalSearchPattern(query)])
+                    .order(Recording.Columns.timestamp.desc)
+                    .limit(limit, offset: offset)
+                    .fetchAll(db),
+                db: db
+            )
         }
     }
 }
