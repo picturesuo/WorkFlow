@@ -11,9 +11,9 @@
 WorkFlow is an open-source dictation and meeting-transcription app for the Mac, with no WorkFlow subscription. Speech-to-text runs on your Mac with Parakeet or Whisper, so transcription has no API fees. Custom filters make cleanup write the way a class, job, or app wants, and WorkFlow can learn your style from writing you've already finished. Optional AI cleanup goes through a provider you pick and pay directly; for the maintainer it came to an estimated half a cent in September 2026.
 
 <p align="center">
-  <img src="docs/main-window-listening.png" width="560" alt="WorkFlow's main window while listening: History of earlier dictations above, the Dictation mode picker and a red stop button below">
+  <img src="docs/main-window-listening.png" width="560" alt="WorkFlow's main window in a listening state: this month's time saved versus typing, three cleaned-up dictations with their time saved, one filed under a Calculus filter that Auto picked, the Auto filter choice, and a red stop button">
 </p>
-<p align="center"><sub>The main window from the current source, rendered offscreen by the test suite with synthetic History while it listens. It isn't a recording of live speech.</sub></p>
+<p align="center"><sub>The main window from the current source, rendered offscreen by the test suite in a synthetic listening state. The dictations, times, and figures are synthetic; no microphone or live speech was used.</sub></p>
 
 ## Custom filters
 
