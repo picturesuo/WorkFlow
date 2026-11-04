@@ -11,7 +11,6 @@ struct CleanupSettingsView: View {
     let onShowProvider: () -> Void
 
     private var writingFilter = WritingFilterPreferences()
-    @State private var meetingCleanupEnabled = AppPreferences.shared.meetingCleanupEnabled
 
     init(viewModel: SettingsViewModel, onShowProvider: @escaping () -> Void = {}) {
         self.viewModel = viewModel
@@ -27,20 +26,17 @@ struct CleanupSettingsView: View {
             cleanupSwitch
             modes
             AutoFilterSettingsGroup(writingFilter: writingFilter)
-            CustomCleanupFiltersCard(writingFilter: writingFilter)
-                .padding(16)
-                .settingsSurface()
-            SettingsGroup(
-                footer: "Audio never leaves this Mac; only text goes to your provider. If cleanup fails, runs out of time, or would change your meaning, WorkFlow keeps your original transcript."
-            ) {
-                SettingsToggleRow(
-                    title: "Clean up meeting transcripts",
-                    detail: "Off keeps long meetings on this Mac and free.",
-                    isOn: $meetingCleanupEnabled
-                )
+            VStack(alignment: .leading, spacing: 7) {
+                CustomCleanupFiltersCard(writingFilter: writingFilter)
+                    .padding(16)
+                    .settingsSurface()
+                Text("Audio never leaves this Mac; only text goes to your provider. If cleanup fails, runs out of time, or would change your meaning, WorkFlow keeps your original transcript.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.horizontal, 2)
             }
         }
-        .onChange(of: meetingCleanupEnabled) { _, value in AppPreferences.shared.meetingCleanupEnabled = value }
     }
 
     private var destination: CleanupProviderDestination {

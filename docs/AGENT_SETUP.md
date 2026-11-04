@@ -64,6 +64,8 @@ This runbook lets a local coding agent install and verify WorkFlow without recei
      -only-testing:OpenSuperWhisperTests/BrandPaletteTests \
      -only-testing:OpenSuperWhisperTests/BrandLayoutTests \
      -only-testing:OpenSuperWhisperTests/MainWindowLayoutTests \
+     -only-testing:OpenSuperWhisperTests/RecordControlTests \
+     -only-testing:OpenSuperWhisperTests/ShareReadyRenderTests \
      -only-testing:OpenSuperWhisperTests/MeaningPreservationGuardTests \
      -only-testing:OpenSuperWhisperTests/CleanupReplyCompletenessTransportTests \
      -only-testing:OpenSuperWhisperTests/RecognizerToCleanupTraceTests \
@@ -93,7 +95,7 @@ This runbook lets a local coding agent install and verify WorkFlow without recei
      -only-testing:OpenSuperWhisperTests/DictationLearningFlowTests
    ```
 
-   `RecognizerToCleanupTraceTests` skips itself unless the Parakeet v3 model is already cached. `BackgroundAudioReductionTests` drives the capture with a scripted engine and the repository's tiny Whisper model, so it proves the setting, format conversion, and device-change handling, not how much music macOS voice processing removes. `DictationLearningFlowTests`, `CustomFilterImmediacyTests`, and `RewriteOnlyContractTests` use scripted stand-ins for the recognizer and providers, so they prove the plumbing and the guard, not real provider quality.
+   `RecognizerToCleanupTraceTests` skips itself unless the Parakeet v3 model is already cached. `BackgroundAudioReductionTests` drives the capture with a scripted engine and the repository's tiny Whisper model, so it proves the setting, format conversion, and device-change handling, not how much music macOS voice processing removes. `RecordControlTests` and `ShareReadyRenderTests` render the record control, dictation bar, and floating indicator offscreen with synthetic levels and History, so they prove colors, sizes, contrast, and Reduce Motion behavior, not how a real microphone sounds; set `TEST_RUNNER_WF_RENDER_DIR` to keep their PNGs. `DictationLearningFlowTests`, `CustomFilterImmediacyTests`, and `RewriteOnlyContractTests` use scripted stand-ins for the recognizer and providers, so they prove the plumbing and the guard, not real provider quality.
 
 4. Install the app. The WorkFlow ivory ribbon icon is already included in the repository:
 

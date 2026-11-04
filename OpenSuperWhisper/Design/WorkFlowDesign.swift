@@ -19,6 +19,37 @@ enum WFRadius {
 
 enum WFMotion {
     static let gentle = Animation.spring(response: 0.42, dampingFraction: 0.9)
+    /// A state change on the record control: quick, with no bounce.
+    static let snap = Animation.spring(response: 0.28, dampingFraction: 0.86)
+    /// How fast a level meter follows the voice.
+    static let level = Animation.easeOut(duration: 0.12)
+
+    /// The animation to use, or none when Reduce Motion is on.
+    static func unlessReduced(_ animation: Animation, _ reduceMotion: Bool) -> Animation? {
+        reduceMotion ? nil : animation
+    }
+}
+
+/// Reduce Motion as the system reports it, unless a subtree overrides it.
+@propertyWrapper
+struct WFReduceMotion: DynamicProperty {
+    @Environment(\.accessibilityReduceMotion) private var system
+    @Environment(\.reduceMotionOverride) private var override
+
+    var wrappedValue: Bool { override ?? system }
+}
+
+private struct ReduceMotionOverrideKey: EnvironmentKey {
+    static let defaultValue: Bool? = nil
+}
+
+extension EnvironmentValues {
+    /// Forces Reduce Motion on or off for a subtree, which the system value
+    /// cannot be; nil follows the system. Renders and previews use it.
+    var reduceMotionOverride: Bool? {
+        get { self[ReduceMotionOverrideKey.self] }
+        set { self[ReduceMotionOverrideKey.self] = newValue }
+    }
 }
 
 // MARK: - Palette
@@ -92,6 +123,31 @@ enum ThemePalette {
         scheme == .dark
             ? Color(red: 216 / 255, green: 201 / 255, blue: 169 / 255)
             : Color(red: 107 / 255, green: 93 / 255, blue: 69 / 255)
+    }
+
+    /// Live recording: a warm vermilion that sits with charcoal and ivory.
+    /// White glyphs stay readable on it (5.3:1 light, 4.8:1 dark) and it
+    /// stands out from the window at least 3:1 as a control should.
+    static func signal(_ scheme: ColorScheme) -> Color {
+        scheme == .dark
+            ? Color(red: 207 / 255, green: 63 / 255, blue: 51 / 255)
+            : Color(red: 196 / 255, green: 55 / 255, blue: 44 / 255)
+    }
+
+    /// Words in the recording and failure color. Light mode uses the signal
+    /// itself (4.8:1 on the window); dark mode lifts it to stay above 4.5:1
+    /// on the darker surfaces, where the fill would read only 3.5:1.
+    static func signalText(_ scheme: ColorScheme) -> Color {
+        scheme == .dark
+            ? Color(red: 242 / 255, green: 115 / 255, blue: 104 / 255)
+            : signal(.light)
+    }
+
+    /// Recoverable problems: amber text that keeps 4.5:1 on its surface.
+    static func caution(_ scheme: ColorScheme) -> Color {
+        scheme == .dark
+            ? BrandPalette.amber
+            : Color(red: 150 / 255, green: 88 / 255, blue: 0 / 255)
     }
 
     /// Fill for switches, prominent buttons, and checkboxes. White labels stay
@@ -321,5 +377,18 @@ enum WFDateFormat {
             return date.formatted(.dateTime.month(.abbreviated).day())
         }
         return date.formatted(.dateTime.month(.abbreviated).day().year())
+    }
+}
+
+// MARK: - Elapsed time
+
+enum WFTime {
+    /// A running clock: 0:07, 12:40, 1:02:03.
+    static func clock(_ seconds: TimeInterval) -> String {
+        let total = max(0, Int(seconds.isFinite ? seconds : 0))
+        let hours = total / 3600, minutes = (total % 3600) / 60, secs = total % 60
+        return hours > 0
+            ? String(format: "%d:%02d:%02d", hours, minutes, secs)
+            : String(format: "%d:%02d", minutes, secs)
     }
 }

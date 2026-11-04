@@ -74,6 +74,7 @@ class AudioRecorder: NSObject, ObservableObject {
     private var notificationObserver: Any?
     private var microphoneChangeObserver: Any?
     private var connectionCheckTimer: DispatchSourceTimer?
+    private var levelTimer: DispatchSourceTimer?
     private var recordingDeviceID: AudioDeviceID?
     private var previousDefaultInputDeviceID: AudioDeviceID?
 
@@ -268,7 +269,8 @@ class AudioRecorder: NSObject, ObservableObject {
         do {
             let audioRecorder = try AVAudioRecorder(url: fileURL, settings: settings)
             audioRecorder.delegate = self
-            audioRecorder.isMeteringEnabled = monitorConnection
+            // Metering drives the record control's live level.
+            audioRecorder.isMeteringEnabled = true
             guard audioRecorder.record() == true else {
                 print("Failed to start recording: AVAudioRecorder declined the request")
                 currentRecordingURL = nil
@@ -279,6 +281,7 @@ class AudioRecorder: NSObject, ObservableObject {
                 return "The microphone declined the recording request."
             }
             capture = audioRecorder
+            startLevelMetering()
             if monitorConnection {
                 startConnectionMonitoring()
             } else {
@@ -307,6 +310,7 @@ class AudioRecorder: NSObject, ObservableObject {
                 guard let self, let voiceCapture, voiceCapture === self.capture,
                       self.sessionGate.isCurrent(sessionID) else { return }
                 self.stopConnectionMonitoring()
+                self.stopLevelMetering()
                 self.updateRecordingState(isRecording: false, isConnecting: false)
                 DispatchQueue.main.async {
                     self.captureStopped.send(sessionID)
@@ -314,6 +318,7 @@ class AudioRecorder: NSObject, ObservableObject {
             }
             try voiceCapture.start()
             capture = voiceCapture
+            startLevelMetering()
             Self.publishBackgroundAudioReduction(.active)
             if monitorConnection {
                 startConnectionMonitoring()
@@ -357,6 +362,7 @@ class AudioRecorder: NSObject, ObservableObject {
                 self.capture = nil
                 self.currentRecordingURL = nil
                 self.stopConnectionMonitoring()
+                self.stopLevelMetering()
                 self.updateRecordingState(isRecording: false, isConnecting: false)
                 
                 self.workQueue.asyncAfter(deadline: .now() + Self.stopTailDuration) {
@@ -389,6 +395,7 @@ class AudioRecorder: NSObject, ObservableObject {
         let recordedDuration = capture?.finish() ?? 0
         capture = nil
         stopConnectionMonitoring()
+        stopLevelMetering()
         restoreSystemDefaultInputIfNeeded()
         updateRecordingState(isRecording: false, isConnecting: false)
         
@@ -521,6 +528,32 @@ class AudioRecorder: NSObject, ObservableObject {
         connectionCheckTimer?.cancel()
         connectionCheckTimer = nil
     }
+
+    /// Reads the open capture's loudness 20 times a second on the work queue,
+    /// the only queue that touches the capture.
+    private func startLevelMetering() {
+        stopLevelMetering()
+        let timer = DispatchSource.makeTimerSource(queue: workQueue)
+        timer.schedule(deadline: .now() + 0.05, repeating: 0.05)
+        timer.setEventHandler { [weak self] in
+            guard let self, let capture = self.capture else { return }
+            let level = capture.currentLevel()
+            DispatchQueue.main.async {
+                InputLevelMeter.shared.push(level)
+            }
+        }
+        levelTimer = timer
+        timer.resume()
+    }
+
+    private func stopLevelMetering() {
+        guard let timer = levelTimer else { return }
+        timer.cancel()
+        levelTimer = nil
+        DispatchQueue.main.async {
+            InputLevelMeter.shared.reset()
+        }
+    }
 }
 
 extension AudioRecorder: AVAudioRecorderDelegate {
@@ -538,6 +571,8 @@ extension AudioRecorder: AVAudioRecorderDelegate {
 protocol RecordingCapture: AnyObject {
     /// Stops capturing and returns how long the recording is.
     func finish() -> TimeInterval
+    /// How loud the microphone is right now, 0...1.
+    func currentLevel() -> CGFloat
 }
 
 extension AVAudioRecorder: RecordingCapture {
@@ -545,6 +580,12 @@ extension AVAudioRecorder: RecordingCapture {
         let recordedDuration = currentTime
         stop()
         return recordedDuration
+    }
+
+    func currentLevel() -> CGFloat {
+        guard isMeteringEnabled, isRecording else { return 0 }
+        updateMeters()
+        return InputLevelMeter.normalized(decibels: averagePower(forChannel: 0))
     }
 }
 

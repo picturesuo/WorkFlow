@@ -159,7 +159,7 @@ final class BrandLayoutTests: XCTestCase {
     }
 
     func testDictationDockStatesStayDistinctAndOnBrand() throws {
-        let states: [DictationDockStatus] = [.ready, .recording(83), .transcribing, .loadingModel, .noMicrophone, .meeting]
+        let states: [DictationDockStatus] = [.ready, .recording(83), .transcribing, .loadingModel, .noMicrophone, .meeting(754)]
         for scheme in [ColorScheme.light, .dark] {
             let bitmap = try render(AnyView(VStack(spacing: 8) {
                 ForEach(Array(states.enumerated()), id: \.offset) { _, status in

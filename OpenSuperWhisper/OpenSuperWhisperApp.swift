@@ -300,15 +300,21 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
         
         menu.addItem(NSMenuItem(title: AppIdentity.productName, action: #selector(openApp), keyEquivalent: "o"))
 
+        // Meetings are occasional: Start sits low in the menu, but a meeting
+        // that is recording, saving, or failed comes first so it can be stopped
+        // or explained.
         let meeting = MeetingSessionController.shared
         let meetingItem = NSMenuItem(
-            title: meeting.statusLabel,
+            title: Self.meetingMenuTitle(meeting),
             action: #selector(toggleMeeting),
             keyEquivalent: ""
         )
         meetingItem.target = self
         meetingItem.isEnabled = !meeting.isSaving
-        menu.addItem(meetingItem)
+        let meetingNeedsAttention = meeting.isBusy || meeting.errorMessage != nil
+        if meetingNeedsAttention {
+            menu.addItem(meetingItem)
+        }
 
         let cleanupModeItem = NSMenuItem(title: "Dictation Mode", action: nil, keyEquivalent: "")
         let cleanupModeMenu = NSMenu()
@@ -400,7 +406,12 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
         
         microphoneMenu.submenu = submenu
         menu.addItem(microphoneMenu)
-        
+
+        if !meetingNeedsAttention {
+            menu.addItem(NSMenuItem.separator())
+            menu.addItem(meetingItem)
+        }
+
         menu.addItem(NSMenuItem.separator())
         menu.addItem(NSMenuItem(title: "Quit", action: #selector(quitApp), keyEquivalent: "q"))
         
@@ -429,6 +440,11 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
     @objc private func openLearning() {
         showMainWindow()
         SettingsRequest.open(pane: .personalize)
+    }
+
+    /// Idle reads as an action, the way the main window's More menu does.
+    static func meetingMenuTitle(_ meeting: MeetingSessionController) -> String {
+        meeting.state == .idle && meeting.errorMessage == nil ? "Start Meeting Recording" : meeting.statusLabel
     }
 
     @objc private func toggleMeeting() {
