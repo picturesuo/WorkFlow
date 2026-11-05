@@ -357,10 +357,10 @@ class ProviderPressureCase: XCTestCase {
         prefs.bedrockTimeoutSeconds = timeout
     }
 
-    func makeStore() throws -> RecordingStore {
+    func makeStore(detector: any SpeechDetecting = SileroSpeechDetector.shared) throws -> RecordingStore {
         try RecordingStore(
             database: DatabaseQueue(), recordingsDirectory: Recording.recordingsDirectory,
-            cancelQueuedRecording: { _ in }, stopPlayback: { _ in }
+            cancelQueuedRecording: { _ in }, stopPlayback: { _ in }, speechDetector: detector
         )
     }
 
@@ -545,7 +545,10 @@ final class UpgradeChainPressureTests: XCTestCase {
                 try db.execute(sql: "ALTER TABLE dictation_sources DROP COLUMN filterReason")
                 try db.execute(sql: "ALTER TABLE dictation_sources DROP COLUMN captureOrigin")
                 try db.execute(sql: "ALTER TABLE dictation_sources DROP COLUMN processingSeconds")
-                try db.execute(sql: "DELETE FROM grdb_migrations WHERE identifier IN ('v11_add_dictation_timing', 'v12_add_filter_choice')")
+                try db.execute(sql: "ALTER TABLE dictation_sources DROP COLUMN speechActivity")
+                try db.execute(sql: "ALTER TABLE dictation_sources DROP COLUMN activeSpeechSeconds")
+                try db.execute(sql: "ALTER TABLE dictation_sources DROP COLUMN speechDetector")
+                try db.execute(sql: "DELETE FROM grdb_migrations WHERE identifier IN ('v11_add_dictation_timing', 'v12_add_filter_choice', 'v13_add_speech_activity')")
             }
             let applied = try await database.read { try String.fetchAll($0, sql: "SELECT identifier FROM grdb_migrations ORDER BY rowid") }
             XCTAssertEqual(applied.last, "v10_add_filter_writes_digits", "The database is at v10")
@@ -612,15 +615,15 @@ final class UpgradeChainPressureTests: XCTestCase {
                 XCTAssertEqual(rows.first { $0.id == queuedID }?.transcription, "Check the replica lag first then deploy.")
             }
 
-            // Speaking versus typing: the live row is compared on recording
-            // time only, the rest are named exclusions, never measured savings.
+            // Speaking versus typing: nothing is counted because active speech
+            // was never measured on these pre-upgrade rows, and each is a named
+            // exclusion rather than a backfilled saving.
             let summary = try await store.speakingSummary(since: .distantPast)
-            XCTAssertTrue(summary.measured.isEmpty, "launch \(launch)")
-            XCTAssertEqual(summary.recordingOnly.count, 1, "launch \(launch)")
-            XCTAssertEqual(summary.recordingOnly.producedWords, 6)
+            XCTAssertTrue(summary.counted.isEmpty, "launch \(launch)")
             if launch == 1 {
                 // Counted after the queued row finished: it has no origin, so it is legacy.
-                XCTAssertEqual(summary.exclusions, [.legacy: 3, .meeting: 1])
+                // The live row predates measurement, so it is speechNotMeasured.
+                XCTAssertEqual(summary.exclusions, [.legacy: 3, .meeting: 1, .speechNotMeasured: 1])
                 settledSummary = summary
             } else {
                 XCTAssertEqual(summary, settledSummary, "The summary is identical on every launch")
@@ -673,7 +676,7 @@ final class NativeProviderJourneyTests: ProviderPressureCase {
                 guard let transcript = sent.transcript else { return .http(status: 400, body: "{}") }
                 return .http(status: 200, body: PressureReplies.body(provider, PressureReplies.cleaned(transcript), thinking: "PRIVATE-REASONING"))
             }
-            let store = try makeStore()
+            let store = try makeStore(detector: FixedSpeechDetector(intervals: [SpeechInterval(start: 0, end: 0.5)]))
             let engine = ScriptedSpeech()
             let queue = TranscriptionQueue(transcriptionService: TranscriptionService(engine: engine), recordingStore: store, cleanupPipeline: makePipeline())
             let url = try audio()
@@ -689,6 +692,12 @@ final class NativeProviderJourneyTests: ProviderPressureCase {
             let evidence = try await store.dictationSource(for: first.id)
             XCTAssertEqual(evidence?.emittedText, first.transcription)
             XCTAssertEqual(evidence?.recognizerText, spoken)
+            for _ in 0..<500 {
+                if try await store.dictationSource(for: first.id)?.speechActivity != .measuring { break }
+                try await Task.sleep(nanoseconds: 10_000_000)
+            }
+            let settledActivity = try await store.dictationSource(for: first.id)?.speechActivity
+            XCTAssertNotEqual(settledActivity, .measuring, "\(provider)")
             let figures = try await store.speakingSummary(since: .distantPast)
 
             // Regenerate with a saved filter picked in History.
