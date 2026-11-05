@@ -50,7 +50,7 @@ Settings (⌘,) has four panes; ⌘1 to ⌘4 switch between them, and Settings r
 
 - **Toolbar**: search History, **More** (⋯) for **Start Meeting Recording…** and **Delete All Recordings…**, and Settings. While a meeting records, a stop button joins the toolbar and the record button stops and saves it.
 - **History**: dictations grouped by day, newest first. Each row has **Copy**; its ⋯ menu, or a right-click, also offers Play Recording, Regenerate Transcript, and Delete Recording. A failed transcription that kept its audio shows **Regenerate** in place of Copy, and a long transcript opens with **Show full text**.
-- **Dictation bar**: the dictation mode and **Learn…**, what dictation is doing now with your shortcut, the microphone menu (⌄), and the record button. While it listens, the button turns vermilion and its halo follows your microphone's level, so a still halo means the microphone hears nothing.
+- **Dictation bar**: the dictation mode and **Learn…**, what dictation is doing now with your shortcut, the microphone menu (⌄), and the record button. While it listens, the button shows a small vermilion stop square and a faint halo that follows your microphone's level, so a still halo means the microphone hears nothing.
 
 ## First dictation
 
@@ -59,6 +59,8 @@ Settings (⌘,) has four panes; ⌘1 to ⌘4 switch between them, and Settings r
 3. Choose **Homework**, **Technical**, **Everyday**, or a saved custom filter in the main window or WorkFlow's menu-bar menu.
 4. Put the cursor in any text field, hold your chosen shortcut, speak, and release it.
 5. Keep the cursor in the intended field until text appears. WorkFlow targets the app that was active when recording began, but changing fields inside that app can redirect the paste.
+
+While you speak, a small capsule just above the text cursor (or near the top of the screen when there isn't one) shows a dot, a thin waveform, and the clock. Drag it anywhere and later dictations appear there too; double-click it and the next dictation appears by the cursor again. Dragging it doesn't stop the recording or take focus from your app.
 
 Use Homework for developed prose, Technical for compact commands sent to computers or coding agents, and Everyday for natural messages.
 

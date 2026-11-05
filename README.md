@@ -11,7 +11,7 @@
 WorkFlow is an open-source (MIT) dictation and meeting-transcription app for the Mac, with no WorkFlow subscription. Speech-to-text runs on your Mac with Parakeet or Whisper, so transcription needs no account and has no API fees. Optional AI cleanup rewrites what you said through a provider you pick and pay directly.
 
 <p align="center">
-  <img src="docs/main-window-listening.png" width="560" alt="WorkFlow's main window in a listening state: this month's time saved and how many times faster than typing, three cleaned-up dictations each with its time saved and × faster, one filed under a Calculus filter that Auto picked, the Auto filter choice, and a red stop button">
+  <img src="docs/main-window-listening.png" width="560" alt="WorkFlow's main window in a listening state: this month's minutes saved and times faster than typing, three cleaned-up dictations with their own figures, one filed under a Calculus filter that Auto picked, the Auto filter choice, and the record button with a small stop square">
 </p>
 <p align="center"><sub>The main window from the current source, rendered offscreen by the test suite in a synthetic listening state. The dictations, times, and figures are synthetic; no microphone or live speech was used.</sub></p>
 
@@ -27,7 +27,7 @@ The math, one real month, and plan terms are in the [quickstart](docs/QUICKSTART
 
 ## Features
 
-- **Speaking vs typing.** The main window shows this month's time saved and speaking pace against an assumed typing speed you can change in Settings.
+- **Time saved while you talk.** The main window shows this month's minutes saved and how many times faster than typing, counted from your estimated active speech, so pauses, thinking, and waiting for text aren't counted. The typing speed it compares with is in Settings.
 - **Custom filters and Auto.** Tell cleanup how a class, job, or app wants text written, in your own words or drafted with AI. Auto picks a filter from trigger phrases on your Mac, with no extra request.
 - **Learn from finished writing.** Drop in a document you finished from your dictations and WorkFlow keeps small style preferences it can check against your edits, each one reversible.
 - **Your own key, built in.** Native Amazon Bedrock, OpenAI, and Anthropic support, plus Azure OpenAI, local Ollama, or any OpenAI-compatible API.
