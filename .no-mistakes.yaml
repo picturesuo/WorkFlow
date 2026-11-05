@@ -8,3 +8,9 @@ pr:
   # Keep one risk line and the pipeline attestation; omit Testing logs and
   # pipeline round history, which can carry local run paths.
   appendix: minimal
+commands:
+  # Existing native preparation: submodules, libwhisper, autocorrect, libomp,
+  # and the Debug app build into build/.
+  prepare: "git submodule update --init --recursive && ./run.sh build"
+  # The README's complete safe headless suite with its five required local skips.
+  test: "WORKFLOW_TEST_BUNDLE_ID=\"com.picturesuo.WorkFlow.fmtest.run$$\"; DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer xcodebuild test -scheme OpenSuperWhisper -derivedDataPath build -clonedSourcePackagesDirPath SourcePackages -destination 'platform=macOS,arch=arm64' -only-testing:OpenSuperWhisperTests -skip-testing:OpenSuperWhisperTests/ClipboardUtilPasteIntegrationTests -skip-testing:OpenSuperWhisperTests/ClipboardUtilKeyboardLayoutTests -skip-testing:OpenSuperWhisperTests/KeyboardLayoutProviderTests -skip-testing:OpenSuperWhisperTests/IndicatorWindowGeometryTests/testWindowKeepsPanelSizeAfterPresent -skip-testing:OpenSuperWhisperTests/ClipboardRestoreTests/testMissingTargetDoesNotRedirectPasteAndKeepsTranscriptOnClipboard CODE_SIGNING_ALLOWED=NO PRODUCT_BUNDLE_IDENTIFIER=\"$WORKFLOW_TEST_BUNDLE_ID\""
