@@ -11,64 +11,64 @@ struct SpeakingPresentation: Equatable {
         self.typingWPM = SpeakingEfficiency.clampedTypingWPM(typingWPM)
     }
 
-    var hasComparisons: Bool { !summary.allEligible.isEmpty }
+    var hasComparisons: Bool { !summary.counted.isEmpty }
 
-    /// The main window's one line, or nil when there is nothing to compare.
+    /// The main window's one line, or nil when there is nothing to say.
     var stripText: String? {
-        guard let pace = summary.allEligible.speakingWPM else { return nil }
-        let speaking = "speaking \(SpeakingFormat.wpm(pace))"
-        guard !summary.measured.isEmpty else {
-            return "This month: \(speaking) · time saved is measured from your next dictation"
+        if let headline = SpeakingFormat.headline(summary.counted, typingWPM: typingWPM) {
+            return "This month: \(headline)"
         }
-        let saved = summary.measured.savedSeconds(atWPM: typingWPM).rounded()
-        let comparison = saved >= 0
-            ? "≈\(SpeakingFormat.duration(saved)) saved vs typing at \(SpeakingFormat.wpm(typingWPM))"
-            : "≈\(SpeakingFormat.duration(saved)) slower than typing at \(SpeakingFormat.wpm(typingWPM))"
-        return "This month: \(comparison) · \(speaking)"
+        // Dictations from before active speech was measured are never shown as zero.
+        guard summary.exclusions[.speechNotMeasured, default: 0] > 0 else { return nil }
+        return "This month: time saved counts from your next dictation"
     }
 
     var savedValue: String {
-        guard !summary.measured.isEmpty else { return "Not measured yet" }
-        return SpeakingFormat.saved(summary.measured.savedSeconds(atWPM: typingWPM))
+        SpeakingFormat.saved(summary.counted.savedSeconds(atWPM: typingWPM))
     }
 
     var savedDetail: String {
-        let measured = summary.measured
-        guard !measured.isEmpty else {
-            return "New dictations time how long their text takes to be ready, then compare that with typing."
+        let counted = summary.counted
+        return "Typing the \(SpeakingFormat.words(counted.spokenWords)) you said in \(SpeakingFormat.dictations(counted.count)) at \(SpeakingFormat.wpm(typingWPM)) would take about \(SpeakingFormat.minutes(counted.typingSeconds(atWPM: typingWPM))); you spoke them in \(SpeakingFormat.minutes(counted.activeSpeechSeconds)) of active speech."
+    }
+
+    var speedValue: String {
+        summary.counted.speedup(atWPM: typingWPM).map(SpeakingFormat.speedup) ?? "—"
+    }
+
+    var speedDetail: String {
+        "Typing time ÷ active speech, each added up across the same \(SpeakingFormat.dictations(summary.counted.count)) before dividing."
+    }
+
+    var activeValue: String {
+        SpeakingFormat.minutes(summary.counted.activeSpeechSeconds)
+    }
+
+    var activeDetail: String {
+        let counted = summary.counted
+        var detail = "Estimated by the speech detector on this Mac, out of \(SpeakingFormat.minutes(counted.recordingSeconds)) recorded. Pauses, thinking, and waiting for text aren’t counted."
+        if let pace = counted.speakingWPM {
+            detail += " Speaking pace while talking: \(SpeakingFormat.wpm(pace))."
         }
-        var detail = "\(SpeakingFormat.dictations(measured.count)): recording plus measured processing took \(SpeakingFormat.duration(measured.dictationSeconds)). Typing their \(SpeakingFormat.words(measured.producedWords)) at \(SpeakingFormat.wpm(typingWPM)) would take about \(SpeakingFormat.duration(measured.typingSeconds(atWPM: typingWPM)))"
-        if let speedup = measured.speedup(atWPM: typingWPM) {
-            detail += ", \(SpeakingFormat.speedup(speedup)) the dictation time"
-        }
-        return detail + "."
+        return detail
     }
 
-    var paceValue: String {
-        summary.allEligible.speakingWPM.map(SpeakingFormat.wpm) ?? "—"
+    /// Present only when some History rows this month are not in the figures.
+    var notCountedValue: String? {
+        let excluded = summary.excludedCount
+        return excluded > 0 ? excluded.formatted() : nil
     }
 
-    var paceDetail: String {
-        let all = summary.allEligible
-        return "\(SpeakingFormat.words(all.spokenWords)) heard in \(SpeakingFormat.duration(all.recordingSeconds)) of recording across \(SpeakingFormat.dictations(all.count)), pauses included."
-    }
-
-    /// Present only when some dictations lack measured processing time.
-    var recordingOnlyValue: String? {
-        let rows = summary.recordingOnly
-        guard !rows.isEmpty else { return nil }
-        return SpeakingFormat.saved(rows.savedSeconds(atWPM: typingWPM))
-    }
-
-    var recordingOnlyDetail: String {
-        let rows = summary.recordingOnly
-        return "\(SpeakingFormat.dictations(rows.count)) without measured processing, from before timing or queued while busy. This compares \(SpeakingFormat.duration(rows.recordingSeconds)) of recording alone with typing \(SpeakingFormat.words(rows.producedWords)), so it excludes processing and overstates the saving. It isn’t added to the total above."
+    var notCountedDetail: String {
+        exclusionLines.map { "\($0.label): \($0.count.formatted())" }.joined(separator: " · ")
     }
 
     var emptyDetail: String {
-        let excluded = summary.excludedCount
-        guard excluded > 0 else { return "Dictate something and the comparison appears here." }
-        return "\(excluded.formatted()) History \(excluded == 1 ? "item" : "items") this month can’t be compared; see How it’s calculated."
+        if summary.exclusions[.speechNotMeasured, default: 0] > 0 {
+            return "Dictations from before WorkFlow measured active speech aren’t counted. Your next dictation starts the count."
+        }
+        guard summary.excludedCount > 0 else { return "Dictate something and the comparison appears here." }
+        return "Nothing this month can be compared yet; see Not counted."
     }
 
     /// Excluded rows by reason, in a stable order, zero counts left out.
@@ -80,11 +80,11 @@ struct SpeakingPresentation: Equatable {
     }
 
     static let method: [String] = [
-        "Speaking pace is words heard ÷ recording minutes, pauses included.",
-        "Typing time is the words WorkFlow produced ÷ the assumed typing speed.",
-        "Time saved is typing time − (recording + measured processing). It can be negative.",
-        "Totals add words and seconds across dictations before dividing; they never average each dictation’s rate.",
-        "Editing afterward isn’t measured. Meetings, imported audio, failures, and items still processing are left out, and a regenerated dictation counts once, as first produced.",
+        "Active speech is the time the speech detector on this Mac heard you talking. Pauses longer than about a quarter second, thinking, reading, and waiting for the text aren’t counted.",
+        "Typing time is the words the recognizer heard ÷ the assumed typing speed. Cleanup that lengthens or shortens the text doesn’t change it.",
+        "Time saved is typing time − active speech, in minutes. It can be negative.",
+        "× faster is total typing time ÷ total active speech for the same dictations; totals are added up before dividing, never averaged per dictation.",
+        "It’s an estimate: the detector can count other voices or a steady hum as speech and can miss whispers. Editing isn’t measured. Meetings, imports, failures, and dictations without measured active speech are left out, and a regenerated dictation keeps its first figures.",
     ]
 }
 
@@ -106,13 +106,15 @@ struct SpeakingSettingsGroup: View {
             if presentation.hasComparisons {
                 valueRow("Time saved", presentation.savedValue, detail: presentation.savedDetail)
                 SettingsDivider()
-                valueRow("Speaking pace", presentation.paceValue, detail: presentation.paceDetail)
-                if let recordingOnly = presentation.recordingOnlyValue {
-                    SettingsDivider()
-                    valueRow("Recording-only estimate", recordingOnly, detail: presentation.recordingOnlyDetail)
-                }
+                valueRow("Compared with typing", presentation.speedValue, detail: presentation.speedDetail)
+                SettingsDivider()
+                valueRow("Active speech", presentation.activeValue, detail: presentation.activeDetail)
             } else {
                 SettingsRow(title: "No dictations to compare yet", detail: presentation.emptyDetail) { EmptyView() }
+            }
+            if let notCounted = presentation.notCountedValue {
+                SettingsDivider()
+                valueRow("Not counted", notCounted, detail: presentation.notCountedDetail)
             }
             SettingsDivider()
             SettingsRow(
@@ -138,6 +140,10 @@ struct SpeakingSettingsGroup: View {
             }
         }
         .task { await viewModel.refreshSpeakingSummary() }
+        // A dictation's active speech is measured just after it is saved.
+        .onReceive(NotificationCenter.default.publisher(for: RecordingStore.recordingsDidUpdateNotification)) { _ in
+            Task { await viewModel.refreshSpeakingSummary() }
+        }
     }
 
     private func valueRow(_ title: String, _ value: String, detail: String) -> some View {
@@ -154,20 +160,6 @@ struct SpeakingSettingsGroup: View {
         VStack(alignment: .leading, spacing: 6) {
             ForEach(SpeakingPresentation.method, id: \.self) { line in
                 Text(line)
-            }
-            let exclusions = presentation.exclusionLines
-            if !exclusions.isEmpty {
-                Text("Left out this month")
-                    .font(.caption.weight(.semibold))
-                    .padding(.top, 4)
-                ForEach(exclusions, id: \.label) { line in
-                    HStack {
-                        Text(line.label)
-                        Spacer()
-                        Text(line.count.formatted()).monospacedDigit()
-                    }
-                    .accessibilityElement(children: .combine)
-                }
             }
         }
         .font(.caption)
@@ -215,7 +207,7 @@ struct SpeakingSummaryStrip: View {
         }
         .buttonStyle(.plain)
         .background(ThemePalette.contentBackground(colorScheme))
-        .help("Typing speed is an assumed \(SpeakingFormat.wpm(presentation.typingWPM)); processing is measured and editing isn’t. Open Settings → Dictation for the full calculation.")
+        .help("Estimated active speech compared with typing at an assumed \(SpeakingFormat.wpm(presentation.typingWPM)); pauses and waiting for text aren’t counted. Open Settings → Dictation for the details and to change the typing speed.")
         .accessibilityLabel(text)
         .accessibilityHint("Opens the speaking versus typing details in Settings")
     }

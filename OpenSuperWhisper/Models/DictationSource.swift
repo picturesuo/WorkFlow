@@ -56,6 +56,14 @@ struct DictationSource: Codable, FetchableRecord, PersistableRecord, Equatable {
     /// Why the filter was used: picked by hand, or what Auto saw. Nil for
     /// evidence from before Auto, and while Auto has not chosen yet.
     var filterReason: FilterChoiceReason?
+    /// Whether the speech detector measured this dictation's active speech.
+    /// Nil for rows saved before WorkFlow measured it and for imports.
+    var speechActivity: SpeechActivityStatus?
+    /// Seconds the detector heard speech in the original audio, pauses and
+    /// silence left out. Set once, only with `.measured`; Regenerate keeps it.
+    var activeSpeechSeconds: TimeInterval?
+    /// Which detector and settings produced `activeSpeechSeconds`.
+    var speechDetector: String?
 
     init(
         recordingID: UUID,
@@ -70,7 +78,8 @@ struct DictationSource: Codable, FetchableRecord, PersistableRecord, Equatable {
         filterReason: FilterChoiceReason? = nil,
         cleanupSource: TranscriptCleanupOutcome.Source? = nil,
         captureOrigin: CaptureOrigin? = nil,
-        processingSeconds: TimeInterval? = nil
+        processingSeconds: TimeInterval? = nil,
+        speechActivity: SpeechActivityStatus? = nil
     ) {
         self.recordingID = recordingID
         self.capturedAt = capturedAt
@@ -90,6 +99,7 @@ struct DictationSource: Codable, FetchableRecord, PersistableRecord, Equatable {
         self.cleanupSource = cleanupSource
         self.captureOrigin = captureOrigin
         self.processingSeconds = processingSeconds
+        self.speechActivity = speechActivity
     }
 
     /// Records the filter a dictation used and why.
@@ -113,7 +123,8 @@ struct DictationSource: Codable, FetchableRecord, PersistableRecord, Equatable {
         disposition: DictationDisposition,
         insertedText: String? = nil,
         captureOrigin: CaptureOrigin? = nil,
-        processingSeconds: TimeInterval? = nil
+        processingSeconds: TimeInterval? = nil,
+        speechActivity: SpeechActivityStatus? = nil
     ) {
         self.init(
             recordingID: recordingID,
@@ -127,7 +138,8 @@ struct DictationSource: Codable, FetchableRecord, PersistableRecord, Equatable {
             filterReason: cleanup.filterReason,
             cleanupSource: cleanup.source,
             captureOrigin: captureOrigin,
-            processingSeconds: processingSeconds
+            processingSeconds: processingSeconds,
+            speechActivity: speechActivity
         )
     }
 
@@ -154,5 +166,8 @@ struct DictationSource: Codable, FetchableRecord, PersistableRecord, Equatable {
         static let emittedText = Column(CodingKeys.emittedText)
         static let disposition = Column(CodingKeys.disposition)
         static let cleanupSource = Column(CodingKeys.cleanupSource)
+        static let speechActivity = Column(CodingKeys.speechActivity)
+        static let activeSpeechSeconds = Column(CodingKeys.activeSpeechSeconds)
+        static let speechDetector = Column(CodingKeys.speechDetector)
     }
 }

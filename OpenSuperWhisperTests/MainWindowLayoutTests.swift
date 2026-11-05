@@ -170,8 +170,8 @@ final class MainWindowLayoutTests: XCTestCase {
             let model = try XCTUnwrap(window.viewModel as? ScriptedRecordingViewModel)
             model.scriptedRecording = true
             model.updateRecorderState(isRecording: true, isConnecting: false)
-            window.settle { model.speakingSummary.measured.count == 3 }
-            XCTAssertEqual(model.speakingSummary.measured.count, 3, "Every row is a measured live dictation")
+            window.settle { model.speakingSummary.counted.count == 3 }
+            XCTAssertEqual(model.speakingSummary.counted.count, 3, "Every row is a measured live dictation")
             XCTAssertTrue(model.recordings.allSatisfy { $0.speaking?.sample != nil })
             save(try window.render(), name: "readme-listening-\(scheme.label)")
             window.assertHistoryStaysBelowTheToolbar()
@@ -843,11 +843,14 @@ enum MainWindowFixtures {
                 cleanupMode: row.mode, cleanupFilterName: row.filter?.name, cleanupFilterInstructions: row.filter?.instructions,
                 cleanupFilterWritesDigits: row.filter?.writesDigits ?? false, cleanupFilterReason: row.reason
             ))
-            sources.append(DictationSource(
+            var source = DictationSource(
                 recordingID: id, recordingStartedAt: now.addingTimeInterval(-row.ago - row.seconds),
                 recognizerText: row.spoken, emittedText: row.emitted, insertedText: row.emitted, disposition: .pasteSent,
-                filter: snapshot, filterReason: row.reason, cleanupSource: row.source, captureOrigin: .live, processingSeconds: 0.9
-            ))
+                filter: snapshot, filterReason: row.reason, cleanupSource: row.source, captureOrigin: .live, processingSeconds: 0.9,
+                speechActivity: .measured
+            )
+            source.activeSpeechSeconds = row.seconds * 0.75
+            sources.append(source)
         }
         return (recordings, sources)
     }

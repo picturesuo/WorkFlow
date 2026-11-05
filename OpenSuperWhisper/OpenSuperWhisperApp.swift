@@ -68,6 +68,11 @@ extension OpenSuperWhisperApp {
     static func startTranscriptionQueue() {
         Task { @MainActor in
             TranscriptionQueue.shared.startProcessingQueue()
+            // Only dictations whose measurement was cut off by quitting.
+            let store = RecordingStore.shared
+            Task.detached(priority: .utility) {
+                await store.measureInterruptedSpeechActivity()
+            }
         }
     }
 }

@@ -62,13 +62,13 @@ Settings (⌘,) has four panes; ⌘1 to ⌘4 switch between them, and Settings r
 
 Use Homework for developed prose, Technical for compact commands sent to computers or coding agents, and Everyday for natural messages.
 
-The main window shows this month's speaking-versus-typing summary, and **Settings → Dictation → Speaking vs typing this month** shows how it is calculated:
+The main window shows this month's time saved and how many times faster than typing, for example **≈12 min saved · 3.1× faster**. **Settings → Dictation → Speaking vs typing this month** has the details and the typing speed:
 
-- **Speaking pace** is the words the recognizer heard divided by recording minutes, pauses included.
-- **Time saved** is the estimated time to type the words WorkFlow produced at an assumed typing speed (40 WPM unless you change it), minus recording time plus measured processing time. It can be negative. Editing afterward is not measured, and the typing speed is your assumption, not a measurement.
-- Totals add words and seconds across dictations before dividing. Dictations without measured processing time (older ones, or ones queued while WorkFlow was busy) are shown separately as a recording-only estimate. Meetings, imported audio, failures, and items still processing are left out, and a regenerated dictation counts once, as first produced.
+- **Active speech** is the time the speech detector on your Mac heard you talking. Pauses, thinking, reading, and waiting for the text aren't counted. It's an estimate: other voices or a steady hum can count as speech, and whispers can be missed.
+- **Time saved** is the estimated time to type the words you said, as the recognizer heard them before cleanup, at an assumed typing speed (40 WPM unless you change it), minus active speech. Cleanup that writes more than you said doesn't raise it. **× faster** is that typing time divided by active speech. Both can show that speaking was slower. Editing afterward isn't measured, and the typing speed is your assumption, not a measurement.
+- Totals add words and seconds across dictations before dividing. Dictations from before WorkFlow measured active speech, meetings, imported audio, failures, and items still processing are listed as not counted, and a regenerated dictation keeps its first figures.
 
-History labels each comparable dictation with its time saved, or its speaking pace when processing was not measured. Provider billing tokens stay under **Settings → Provider & Cost**.
+History labels each comparable dictation with its own time saved and × faster. Provider billing tokens stay under **Settings → Provider & Cost**.
 
 To make a mode more specific, open **Settings → Cleanup → Custom filters**, choose **New filter**, pick a base mode, and describe the change in plain language, for example "Use more hyphens." Turn on **Write quantities as digits** if you want numbers as digits. The filter appears next to the built-in modes right away, and the next dictation uses it once you pick it.
 

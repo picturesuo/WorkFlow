@@ -135,7 +135,8 @@ class TranscriptionQueue: ObservableObject {
 
     /// Queues audio for transcription. `captureOrigin` is `.live` only for a
     /// dictation queued because the engine was busy; its processing time,
-    /// which includes waiting in the queue, is never measured.
+    /// which includes waiting in the queue, is never measured, and its active
+    /// speech is measured once its audio has moved into History.
     func addFileToQueue(
         url: URL,
         title: String? = nil,
@@ -188,7 +189,8 @@ class TranscriptionQueue: ObservableObject {
                         recordingID: id,
                         disposition: .pending,
                         filter: selected,
-                        captureOrigin: captureOrigin
+                        captureOrigin: captureOrigin,
+                        speechActivity: captureOrigin == .live ? .measuring : nil
                     )
                 )
             } else {
@@ -472,6 +474,12 @@ class TranscriptionQueue: ObservableObject {
                         transcription: localText,
                         cleanup: localOutcome
                     )
+                }
+                // A live dictation queued while busy is measured now that its
+                // audio is in History. Only rows still waiting are measured,
+                // so a regeneration never changes an existing figure.
+                if recording.mode == .dictation {
+                    recordingStore.measureSpeechActivityInBackground(for: recording.id)
                 }
 
                 _ = await discardCancelledOutput(recording)

@@ -26,7 +26,7 @@ final class SpeakingLayoutTests: XCTestCase {
         super.tearDown()
     }
 
-    /// Twelve measured dictations and three older ones without processing time.
+    /// Twelve measured dictations and three from before active speech was measured.
     private func fixtureStore() async throws -> RecordingStore {
         let store = try RecordingStore(
             database: DatabaseQueue(),
@@ -34,23 +34,26 @@ final class SpeakingLayoutTests: XCTestCase {
             cancelQueuedRecording: { _ in },
             stopPlayback: { _ in }
         )
-        func add(seconds: TimeInterval, spoken: Int, produced: Int, processing: TimeInterval?, mode: RecordingMode = .dictation) async throws {
+        func add(seconds: TimeInterval, active: TimeInterval?, spoken: Int, produced: Int, mode: RecordingMode = .dictation) async throws {
             let id = UUID()
             let recording = Recording(
                 id: id, timestamp: Date(), fileName: "\(id).wav", transcription: "synthetic",
                 duration: seconds, status: .completed, progress: 1, mode: mode
             )
             let text = { (count: Int) in (0..<count).map { _ in "word" }.joined(separator: " ") }
-            try await store.addRecordingSync(recording, source: DictationSource(
+            var source = DictationSource(
                 recordingID: id, recognizerText: text(spoken), emittedText: text(produced),
                 disposition: .pasteSent, filter: .builtIn(.everyday),
-                captureOrigin: .live, processingSeconds: processing
-            ))
+                captureOrigin: .live, processingSeconds: 1.2,
+                speechActivity: active == nil ? nil : .measured
+            )
+            source.activeSpeechSeconds = active
+            try await store.addRecordingSync(recording, source: source)
         }
         for index in 0..<12 {
-            try await add(seconds: 20 + Double(index), spoken: 52 + index, produced: 48 + index, processing: 1.2)
+            try await add(seconds: 20 + Double(index), active: 14 + Double(index) / 2, spoken: 52 + index, produced: 48 + index)
         }
-        for _ in 0..<3 { try await add(seconds: 15, spoken: 36, produced: 34, processing: nil) }
+        for _ in 0..<3 { try await add(seconds: 15, active: nil, spoken: 36, produced: 34) }
         try await store.addRecordingSync(Recording(
             id: UUID(), timestamp: Date(), fileName: "meeting.wav", transcription: "synthetic",
             duration: 600, status: .completed, progress: 1, mode: .meeting
@@ -79,9 +82,8 @@ final class SpeakingLayoutTests: XCTestCase {
         let store = try await fixtureStore()
         let model = SettingsViewModel(credentials: StoredCredentialStatus(bedrock: { false }, cleanup: { _ in false }))
         await model.refreshSpeakingSummary(store: store)
-        XCTAssertEqual(model.speakingSummary.measured.count, 12)
-        XCTAssertEqual(model.speakingSummary.recordingOnly.count, 3)
-        XCTAssertEqual(model.speakingSummary.exclusions, [.meeting: 1])
+        XCTAssertEqual(model.speakingSummary.counted.count, 12)
+        XCTAssertEqual(model.speakingSummary.exclusions, [.meeting: 1, .speechNotMeasured: 3])
 
         for scheme in [ColorScheme.light, .dark] {
             for width in [460.0, 620.0] {
@@ -112,7 +114,7 @@ final class SpeakingLayoutTests: XCTestCase {
         XCTAssertEqual(AppPreferences.shared.typingBaselineWPM, 10)
     }
 
-    func testHistoryBadgesReadTimeAndPaceNeverTokens() {
+    func testHistoryBadgesReadMinutesAndMultiplierNeverTokens() {
         func badge(_ speaking: SpeakingEligibility?) -> HistoryRow {
             HistoryRow(
                 recording: Recording(
@@ -124,14 +126,16 @@ final class SpeakingLayoutTests: XCTestCase {
                 searchQuery: "", isPlaying: false, onPlay: {}, onCopy: {}, onDelete: {}, onRegenerate: {}
             )
         }
-        let measured = badge(.eligible(SpeakingSample(recordingSeconds: 60, spokenWords: 120, producedWords: 120, processingSeconds: 10)))
-        XCTAssertEqual(measured.speakingBadgeLabel, "≈1m 50s saved")
+        // 120 words at 40 WPM = 180 s of typing; 45 s of active speech.
+        let measured = badge(.eligible(SpeakingSample(recordingSeconds: 60, activeSpeechSeconds: 45, spokenWords: 120, producedWords: 120, processingSeconds: 10)))
+        XCTAssertEqual(measured.speakingBadgeLabel, "≈2.3 min saved · 4.0× faster")
         XCTAssertTrue(measured.speakingBadgeHelp.contains("assumed 40 WPM"))
-        let unmeasured = badge(.eligible(SpeakingSample(recordingSeconds: 60, spokenWords: 120, producedWords: 120, processingSeconds: nil)))
-        XCTAssertEqual(unmeasured.speakingBadgeLabel, "120 WPM spoken")
-        let slower = badge(.eligible(SpeakingSample(recordingSeconds: 30, spokenWords: 10, producedWords: 10, processingSeconds: 5)))
-        XCTAssertEqual(slower.speakingBadgeLabel, "≈20s slower than typing")
+        XCTAssertTrue(measured.speakingBadgeHelp.contains("that wait isn’t counted"))
+        // 10 words = 15 s of typing; 40 s of active speech.
+        let slower = badge(.eligible(SpeakingSample(recordingSeconds: 50, activeSpeechSeconds: 40, spokenWords: 10, producedWords: 10, processingSeconds: 5)))
+        XCTAssertEqual(slower.speakingBadgeLabel, "≈−0.4 min saved · 0.4× as fast")
         XCTAssertNil(badge(.excluded(.legacy)).speakingBadgeLabel, "A row with token estimates but no capture evidence shows no productivity badge")
+        XCTAssertNil(badge(.excluded(.speechNotMeasured)).speakingBadgeLabel, "Unknown active speech shows no badge, never zero")
         XCTAssertNil(badge(nil).speakingBadgeLabel)
         var regenerating = measured.recording
         regenerating.status = .transcribing

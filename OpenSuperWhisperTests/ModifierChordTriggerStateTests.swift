@@ -135,8 +135,16 @@ final class ModifierKeyMonitorChordBoundaryTests: XCTestCase {
         monitor.handle(type: .keyDown, event: event)
     }
 
+    /// Waits until every callback the synchronous event feed enqueued has been
+    /// delivered. `emit` hands each callback to `DispatchQueue.main.async`, so
+    /// the assertions run on the main thread must let those blocks run first. A
+    /// trailing sentinel on the same FIFO main queue fulfils only after every
+    /// already-enqueued emit block has executed, so this never depends on a
+    /// fixed wall-clock window surviving scheduling pressure.
     private func drain() {
-        RunLoop.main.run(until: Date().addingTimeInterval(0.02))
+        let delivered = expectation(description: "queued trigger callbacks delivered")
+        DispatchQueue.main.async { delivered.fulfill() }
+        wait(for: [delivered], timeout: 5)
     }
 
     func testBothOrdersProduceOneSessionEach() throws {
