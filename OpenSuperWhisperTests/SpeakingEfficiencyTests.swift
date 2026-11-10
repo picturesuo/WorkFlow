@@ -737,6 +737,34 @@ final class SpeakingEfficiencyStoreTests: XCTestCase {
         XCTAssertEqual(summary.exclusions, [.speechNotMeasured: 1, .legacy: 2])
     }
 
+    // The process starts exiting while a dictation is measured: the refused
+    // detector writes nothing, so the row stays measuring, and the next
+    // launch's pass over interrupted measurements completes it.
+    func testMeasurementRefusedAtExitWritesNothingAndIsRetriedAtTheNextLaunch() async throws {
+        let database = try DatabaseQueue()
+        let exiting = try makeStore(database, detector: FixedSpeechDetector(error: SpeechDetectionError.processExiting))
+        let recording = row()
+        try await exiting.addRecordingSync(recording, source: evidence(for: recording, activity: .measuring))
+        _ = try audioInHistory(for: recording)
+        let before = try await exiting.dictationSource(for: recording.id)
+        XCTAssertEqual(before?.speechActivity, .measuring)
+
+        await exiting.measureSpeechActivity(for: recording.id)
+
+        let after = try await exiting.dictationSource(for: recording.id)
+        XCTAssertEqual(after, before, "Nothing is written when the process is exiting")
+        XCTAssertNil(after?.activeSpeechSeconds)
+        XCTAssertNil(after?.speechDetector)
+
+        let relaunched = try makeStore(database, detector: FixedSpeechDetector(intervals: [SpeechInterval(start: 0, end: 12)]))
+        await relaunched.measureInterruptedSpeechActivity()
+
+        let measured = try await relaunched.dictationSource(for: recording.id)
+        XCTAssertEqual(measured?.speechActivity, .measured)
+        XCTAssertEqual(measured?.activeSpeechSeconds, 12)
+        XCTAssertEqual(measured?.speechDetector, "fixture")
+    }
+
     func testInterruptedMeasurementFinishesWithoutTouchingOtherRows() async throws {
         let detector = FixedSpeechDetector(intervals: [SpeechInterval(start: 0, end: 12)])
         let store = try makeStore(DatabaseQueue(), detector: detector)
