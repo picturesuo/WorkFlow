@@ -609,7 +609,7 @@ final class PerfFlowBenchmarkTests: XCTestCase {
                     if typed.isEmpty { output.marker("search_clear") }
                     let mark = output.poll()
                     field.stringValue = typed
-                    (field.delegate as? NSControlTextEditingDelegate)?
+                    (field.delegate as NSControlTextEditingDelegate?)?
                         .controlTextDidChange?(Notification(name: NSControl.textDidChangeNotification, object: field))
                     let line = try await waitForFlow(.searchKeystroke, after: mark, timeout: 10)
                     XCTAssertEqual(line?["outcome"] as? String, "ok", "Query \(typed.isEmpty ? "(cleared)" : "\(typed.count) letters")")
