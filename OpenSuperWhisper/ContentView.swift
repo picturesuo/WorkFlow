@@ -23,6 +23,8 @@ final class RecordingHistoryModel: ObservableObject {
     }
     /// `recordings` grouped by calendar day, newest first.
     @Published private(set) var days: [HistoryDay] = []
+    /// The query whose first page the list currently shows.
+    @Published private(set) var shownQuery = ""
     /// True while a later page loads: the spinner below the list.
     @Published private(set) var isLoadingMore = false
     /// True while the first page loads into an empty list. A first page
@@ -109,6 +111,7 @@ final class RecordingHistoryModel: ObservableObject {
         // size, and only while fresh; any first-page load discards it, so it
         // is never shown stale.
         var prefetched: Task<[Recording], Error>?
+        let prefetchStart = prefetchStartedAt
         if offset == 0 {
             let isFresh = prefetchStartedAt.map { $0.duration(to: now()) < Self.prefetchFreshness } ?? false
             if requestQuery.isEmpty && limit == pageSize && isFresh {
@@ -134,15 +137,17 @@ final class RecordingHistoryModel: ObservableObject {
 
             do {
                 let page: [Recording]
-                if let prefetched, let value = try? await prefetched.value {
+                if let prefetched, let prefetchStart, let value = try? await prefetched.value,
+                   prefetchStart.duration(to: self.now()) < Self.prefetchFreshness {
                     page = value
                 } else {
-                    // No prefetch, or it failed: read once now.
+                    // No prefetch, it failed, or it finished too late to be fresh: read once now.
                     page = try await self.loader(requestQuery, limit, offset)
                 }
                 guard self.generation == requestGeneration else { return }
                 if offset == 0 {
                     if !Self.sameContent(self.recordings, page) { self.recordings = page }
+                    self.setIfChanged(\.shownQuery, requestQuery)
                     PerfSignpost.endAfterRender(.searchKeystroke, token: requestQuery)
                     PerfSignpost.endAfterRender(.historyOpen)
                 } else {
@@ -880,8 +885,9 @@ struct HistoryList: View {
                         }
                         .padding(.bottom, WFSpace.sm)
                     }
-                    // A new query starts at the top, as it did when the list was rebuilt.
-                    .onChange(of: search.debounced) { _, _ in
+                    // A new query's results start at the top once they arrive,
+                    // as they did when the list was rebuilt.
+                    .onChange(of: history.shownQuery) { _, _ in
                         if let first = history.recordings.first?.id {
                             proxy.scrollTo(first, anchor: .top)
                         }

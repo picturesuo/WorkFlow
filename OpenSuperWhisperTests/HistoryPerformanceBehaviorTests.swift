@@ -124,14 +124,21 @@ final class HistoryPerformanceBehaviorTests: XCTestCase {
         request.succeed([row("x match")])
         await searchTask.value
         XCTAssertGreaterThan(changes.count, 0)
-        XCTAssertLessThanOrEqual(changes.count, 2, "The new page publishes once per changed property")
+        XCTAssertLessThanOrEqual(changes.count, 3, "The new page publishes once per changed property (rows, days, shown query)")
 
         changes.count = 0
         let sameTask = history.search(query: "x m")
         let sameRequest = await loader.nextRequest()
         sameRequest.succeed(history.recordings)
         await sameTask.value
-        XCTAssertEqual(changes.count, 0, "An identical page publishes nothing")
+        XCTAssertEqual(changes.count, 1, "An identical page for a new query publishes only the shown query")
+
+        changes.count = 0
+        let refreshTask = history.refresh()
+        let refreshRequest = await loader.nextRequest()
+        refreshRequest.succeed(history.recordings)
+        await refreshTask.value
+        XCTAssertEqual(changes.count, 0, "An identical page for the same query publishes nothing")
     }
 
     func testFirstLoadStillShowsLoading() async {
@@ -223,6 +230,47 @@ final class HistoryPerformanceBehaviorTests: XCTestCase {
             XCTAssertEqual(history.recordings.map(\.transcription), [expectedCalls == 1 ? "alpha" : "fresh"],
                            "A stale prefetch is never shown")
         }
+    }
+
+    func testPrefetchFinishingTooLateIsReadAgain() async {
+        let start = ContinuousClock.now
+        var clock = start
+        let loader = SuspendingHistoryLoader()
+        let history = RecordingHistoryModel(prefetchesFirstPage: true, now: { clock }, loader: loader.load)
+        let prefetchRequest = await loader.nextRequest()
+        clock = start.advanced(by: .seconds(1))
+        let task = history.refresh()
+        clock = start.advanced(by: .seconds(4))
+        prefetchRequest.succeed([row("stale")])
+        let reread = await loader.nextRequest()
+        XCTAssertEqual(reread.query, "", "A prefetch that finishes more than 2 s after it started is read again")
+        reread.succeed([row("fresh")])
+        await task.value
+        XCTAssertEqual(history.recordings.map(\.transcription), ["fresh"])
+    }
+
+    // MARK: Scrolling follows the shown results
+
+    func testShownQueryChangesOnlyWhenTheNewPageIsApplied() async {
+        let loader = SuspendingHistoryLoader()
+        let history = RecordingHistoryModel(loader: loader.load)
+        let rows = [row("alpha"), row("bravo")]
+        let firstTask = history.refresh()
+        await loader.nextRequest().succeed(rows)
+        await firstTask.value
+        XCTAssertEqual(history.shownQuery, "")
+
+        let searchTask = history.search(query: "x")
+        let request = await loader.nextRequest()
+        XCTAssertEqual(history.shownQuery, "", "The previous query is shown until its page arrives")
+        request.succeed(rows)
+        await searchTask.value
+        XCTAssertEqual(history.shownQuery, "x", "An identical page still marks the new query as shown")
+
+        let refreshTask = history.refresh()
+        await loader.nextRequest().succeed([row("charlie")])
+        await refreshTask.value
+        XCTAssertEqual(history.shownQuery, "x", "A refresh of the same query never changes it")
     }
 
     // MARK: History changes stay inside the list
