@@ -413,8 +413,9 @@ class IndicatorWindowManager: IndicatorViewDelegate {
         }
         
         guard let window = window else { return }
-        // Reuse the hosting view across sessions: rebuilding the SwiftUI
-        // hierarchy (with its blur material) on every recording is wasted work.
+        // Reuse the hosting view within one dictation (prepare, then present):
+        // rebuilding the SwiftUI hierarchy (with its blur material) between
+        // them is wasted work. hide() replaces it with a fresh idle one.
         let rootView = IndicatorWindow(viewModel: presentedViewModel) { [weak self] width in
             self?.cardWidthDidChange(width)
         }
@@ -436,11 +437,13 @@ class IndicatorWindowManager: IndicatorViewDelegate {
         window.contentView?.layoutSubtreeIfNeeded()
     }
     
-    /// Binds the hidden panel to a fresh idle view model. The hosting view is
-    /// kept (rebuilding it costs the next appearance its first frames), but a
-    /// finished session left in `.decoding` would keep its travelling wave
-    /// redrawing every display frame while the panel is ordered out.
+    /// Gives the hidden panel a freshly built hosting view on an idle model.
+    /// Rebinding the old one is not enough: if that render lands on a frame where
+    /// the transcribing wave's TimelineView is due, SwiftUI can keep the removed
+    /// TimelineView running and lay out the hidden panel every display frame.
+    /// A hosting view that never drew `.decoding` has nothing to keep running.
     private func parkIdleContent() {
+        window?.contentView = nil
         ensureWindowContent(for: IndicatorViewModel())
     }
     
@@ -483,7 +486,7 @@ class IndicatorWindowManager: IndicatorViewDelegate {
             // already returned and the shortcut stays enabled for it.
             KeyboardShortcuts.disable(.escape)
             
-            // The hosting view is kept and reused by the next session, parked on an idle view model.
+            // The panel is kept; its hosting view is replaced by a fresh idle one.
             self.window?.orderOut(nil)
             self.parkIdleContent()
             self.viewModel = nil

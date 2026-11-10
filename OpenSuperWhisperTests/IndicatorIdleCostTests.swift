@@ -43,9 +43,10 @@ final class IndicatorIdleCostTests: XCTestCase {
 
         XCTAssertTrue(spin(until: { manager.viewModel == nil }, timeout: 5), "hide() did not finish")
         XCTAssertFalse(panel.isVisible)
-        XCTAssertEqual(host.rootView.viewModel.state, .idle,
+        let current = try XCTUnwrap(panel.contentView as? IndicatorHostingView, "The hidden panel has no hosting view")
+        XCTAssertEqual(current.rootView.viewModel.state, .idle,
                        "The hidden panel still draws the finished session: .decoding keeps TimelineView(.animation) ticking")
-        XCTAssertFalse(host.rootView.viewModel === session,
+        XCTAssertFalse(current.rootView.viewModel === session,
                        "The hidden panel must not keep the finished session alive")
     }
 
@@ -54,16 +55,17 @@ final class IndicatorIdleCostTests: XCTestCase {
     func testCancelledSessionsLeaveTheHiddenPanelIdle() throws {
         let states: [RecordingState] = [.connecting, .recording, .decoding, .busy, .transcriptionFailed, .pasteFailed]
         for state in states {
-            let (manager, _, host, session) = try makeSession(state)
+            let (manager, panel, host, session) = try makeSession(state)
 
             manager.stopForce()
             XCTAssertTrue(host.rootView.viewModel === session, "\(state): changed before the hide animation")
             XCTAssertEqual(host.rootView.viewModel.state, state, "\(state): changed before the hide animation")
 
             XCTAssertTrue(spin(until: { manager.viewModel == nil }, timeout: 5), "\(state): hide() did not finish")
-            XCTAssertEqual(host.rootView.viewModel.state, .idle,
+            let current = try XCTUnwrap(panel.contentView as? IndicatorHostingView, "\(state): the hidden panel has no hosting view")
+            XCTAssertEqual(current.rootView.viewModel.state, .idle,
                            "\(state): the hidden panel keeps the cancelled session's content")
-            XCTAssertFalse(host.rootView.viewModel === session,
+            XCTAssertFalse(current.rootView.viewModel === session,
                            "\(state): the hidden panel must not keep the cancelled session")
         }
     }
@@ -86,39 +88,44 @@ final class IndicatorIdleCostTests: XCTestCase {
     /// After the hide, nothing in the panel keeps the finished session alive.
     func testFinishedSessionIsReleasedAfterHide() throws {
         weak var released: IndicatorViewModel?
-        let manager: IndicatorWindowManager
-        do {
+        let manager = try autoreleasepool { () throws -> IndicatorWindowManager in
             let made = try makeSession(.decoding)
-            manager = made.manager
             released = made.session
-            manager.didFinishDecoding(made.session)
+            made.manager.didFinishDecoding(made.session)
+            return made.manager
         }
         XCTAssertTrue(spin(until: { manager.viewModel == nil }, timeout: 5), "hide() did not finish")
         XCTAssertTrue(spin(until: { released == nil }, timeout: 2),
                       "The hidden panel still retains the finished session's view model")
     }
 
-    /// Parking rebinds and lays out the ordered-out panel; that must neither
-    /// show it nor overwrite the position the user dragged the capsule to.
+    /// Parking replaces and lays out the ordered-out panel's content; that must
+    /// neither show it nor overwrite the position the user dragged the capsule to.
     func testParkingDoesNotShowThePanelOrMoveTheSavedPosition() throws {
         defaults.set([300.0, 400.0], forKey: "indicatorCardCenter")
-        let (manager, panel, host, session) = try makeSession(.decoding)
+        let (manager, panel, _, session) = try makeSession(.decoding)
 
         manager.didFinishDecoding(session)
         XCTAssertTrue(spin(until: { manager.viewModel == nil }, timeout: 5), "hide() did not finish")
         spin(0.3) // the parked root lays out and reports its width
         XCTAssertFalse(panel.isVisible, "Parking ordered the hidden panel in")
-        XCTAssertEqual(host.rootView.viewModel.state, .idle)
+        let current = try XCTUnwrap(panel.contentView as? IndicatorHostingView, "The hidden panel has no hosting view")
+        XCTAssertEqual(current.rootView.viewModel.state, .idle)
         XCTAssertEqual(manager.savedCardCenter, CGPoint(x: 300, y: 400),
                        "Parking overwrote the user's saved capsule position")
     }
 
     /// What the user pays: once the finished session is parked, the hidden
-    /// panel no longer wakes the main thread every frame. Measured against
-    /// the host's own background wake-ups, which other suites can raise.
+    /// panel no longer wakes the main thread every frame, and the hosting
+    /// view that drew the wave is gone.
     func testHiddenPanelStopsWakingTheMainThread() throws {
         let baseline = mainRunLoopWakeups(during: 1.0)
-        let (manager, _, _, session) = try makeSession(.decoding)
+        weak var shown: IndicatorHostingView?
+        let (manager, panel, session) = try autoreleasepool { () throws -> (IndicatorWindowManager, NSWindow, IndicatorViewModel) in
+            let made = try makeSession(.decoding)
+            shown = made.host
+            return (made.manager, made.panel, made.session)
+        }
         let ticking = mainRunLoopWakeups(during: 1.0)
         print("IndicatorIdleCostTests: baseline \(baseline) wake-ups in 1 s, \(ticking) in 1 s with the panel in .decoding")
         if ticking < baseline + 20 {
@@ -129,10 +136,41 @@ final class IndicatorIdleCostTests: XCTestCase {
         XCTAssertTrue(spin(until: { manager.viewModel == nil }, timeout: 5), "hide() did not finish")
         spin(0.3) // the parked root renders once
 
+        XCTAssertFalse((panel.contentView as? IndicatorHostingView) === shown,
+                       "The hidden panel still holds the hosting view that drew the wave")
+        XCTAssertTrue(spin(until: { shown == nil }, timeout: 2),
+                      "The hosting view that drew the wave is still alive")
+        XCTAssertEqual((panel.contentView as? IndicatorHostingView)?.rootView.viewModel.state, .idle)
+
         let afterHide = mainRunLoopWakeups(during: 2.0)
         print("IndicatorIdleCostTests: baseline \(baseline), ticking \(ticking), afterHide \(afterHide) wake-ups in 2 s")
-        XCTAssertLessThanOrEqual(Double(afterHide) / 2.0, Double(baseline) + 5,
-                                 "The hidden panel still wakes the main thread: baseline \(baseline)/s, ticking \(ticking)/s, afterHide \(afterHide) in 2 s")
+        XCTAssertLessThan(Double(afterHide) / 2.0, Double(ticking) / 4.0,
+                          "The hidden panel still wakes the main thread: baseline \(baseline)/s, ticking \(ticking)/s, afterHide \(afterHide) in 2 s")
+    }
+
+    /// Whatever ends a session, the hosting view that drew it leaves the panel
+    /// and is freed, so none of its per-frame content can outlive the hide.
+    func testTheHostThatDrewASessionIsNeverKept() throws {
+        let states: [RecordingState] = [.decoding, .recording, .busy]
+        for state in states {
+            weak var drew: IndicatorHostingView?
+            let (manager, panel) = try autoreleasepool { () throws -> (IndicatorWindowManager, NSWindow) in
+                let made = try makeSession(state)
+                drew = made.host
+                if state == .recording {
+                    made.manager.stopForce()
+                } else {
+                    made.manager.didFinishDecoding(made.session)
+                }
+                return (made.manager, made.panel)
+            }
+            XCTAssertTrue(spin(until: { manager.viewModel == nil }, timeout: 5), "\(state): hide() did not finish")
+            let current = panel.contentView as? IndicatorHostingView
+            XCTAssertNotNil(current, "\(state): the hidden panel has no hosting view")
+            XCTAssertFalse(current === drew, "\(state): the hidden panel kept the hosting view that drew the session")
+            XCTAssertTrue(spin(until: { drew == nil }, timeout: 2),
+                          "\(state): the hosting view that drew the session is still alive")
+        }
     }
 
     // MARK: Helpers
