@@ -436,6 +436,14 @@ class IndicatorWindowManager: IndicatorViewDelegate {
         window.contentView?.layoutSubtreeIfNeeded()
     }
     
+    /// Binds the hidden panel to a fresh idle view model. The hosting view is
+    /// kept (rebuilding it costs the next appearance its first frames), but a
+    /// finished session left in `.decoding` would keep its travelling wave
+    /// redrawing every display frame while the panel is ordered out.
+    private func parkIdleContent() {
+        ensureWindowContent(for: IndicatorViewModel())
+    }
+    
     func stopRecording() {
         viewModel?.startDecoding()
     }
@@ -475,8 +483,9 @@ class IndicatorWindowManager: IndicatorViewDelegate {
             // already returned and the shortcut stays enabled for it.
             KeyboardShortcuts.disable(.escape)
             
-            // The content view is kept alive and reused by the next session.
+            // The hosting view is kept and reused by the next session, parked on an idle view model.
             self.window?.orderOut(nil)
+            self.parkIdleContent()
             self.viewModel = nil
             
             NotificationCenter.default.post(name: .indicatorWindowDidHide, object: nil)

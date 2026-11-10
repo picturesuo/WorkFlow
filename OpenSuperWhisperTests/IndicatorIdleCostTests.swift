@@ -98,6 +98,21 @@ final class IndicatorIdleCostTests: XCTestCase {
                       "The hidden panel still retains the finished session's view model")
     }
 
+    /// Parking rebinds and lays out the ordered-out panel; that must neither
+    /// show it nor overwrite the position the user dragged the capsule to.
+    func testParkingDoesNotShowThePanelOrMoveTheSavedPosition() throws {
+        defaults.set([300.0, 400.0], forKey: "indicatorCardCenter")
+        let (manager, panel, host, session) = try makeSession(.decoding)
+
+        manager.didFinishDecoding(session)
+        XCTAssertTrue(spin(until: { manager.viewModel == nil }, timeout: 5), "hide() did not finish")
+        spin(0.3) // the parked root lays out and reports its width
+        XCTAssertFalse(panel.isVisible, "Parking ordered the hidden panel in")
+        XCTAssertEqual(host.rootView.viewModel.state, .idle)
+        XCTAssertEqual(manager.savedCardCenter, CGPoint(x: 300, y: 400),
+                       "Parking overwrote the user's saved capsule position")
+    }
+
     /// What the user pays: once the finished session is parked, the hidden
     /// panel no longer wakes the main thread every frame.
     func testHiddenPanelStopsWakingTheMainThread() throws {
