@@ -301,7 +301,7 @@ final class MainWindowLayoutTests: XCTestCase {
         var calls: [String] = []
         func toolbar(recording: Bool = false, inProgress: Bool = false, meetingAvailable: Bool = true) -> some View {
             MainToolbar(
-                searchText: .constant(""), meetingLabel: recording ? "Stop & save meeting" : "Start meeting",
+                search: HistorySearch(onQuery: { _ in }), meetingLabel: recording ? "Stop & save meeting" : "Start meeting",
                 isMeetingRecording: recording, isMeetingInProgress: inProgress,
                 isMeetingAvailable: meetingAvailable, canDeleteAll: true,
                 onMeeting: { calls.append("meeting") }, onDeleteAll: { calls.append("delete") }, onSettings: { calls.append("settings") }
@@ -311,7 +311,7 @@ final class MainWindowLayoutTests: XCTestCase {
         XCTAssertEqual(idle.buttons.count, 1, "Only Settings is a button; meetings start from More")
         XCTAssertEqual(idle.popUps.count, 1, "More opens a menu")
         XCTAssertEqual(idle.searchFields.first?.placeholderString, "Search History")
-        let idleToolbar = MainToolbar(searchText: .constant(""), meetingLabel: "Start meeting", isMeetingRecording: false,
+        let idleToolbar = MainToolbar(search: HistorySearch(onQuery: { _ in }), meetingLabel: "Start meeting", isMeetingRecording: false,
                                       isMeetingAvailable: true, canDeleteAll: true, onMeeting: {}, onDeleteAll: {}, onSettings: {})
         XCTAssertEqual(idleToolbar.moreMenuItems, [.init(title: "Start Meeting Recording…", isEnabled: true),
                                                    .init(title: "Delete All Recordings…", isEnabled: true)])
@@ -324,7 +324,7 @@ final class MainWindowLayoutTests: XCTestCase {
         XCTAssertEqual(buttons.count, 2, "A running meeting puts its stop button in the toolbar")
         buttons.forEach { $0.performClick(nil) }
         XCTAssertEqual(calls, ["meeting", "settings"])
-        let recordingToolbar = MainToolbar(searchText: .constant(""), meetingLabel: "Stop & save meeting", isMeetingRecording: true,
+        let recordingToolbar = MainToolbar(search: HistorySearch(onQuery: { _ in }), meetingLabel: "Stop & save meeting", isMeetingRecording: true,
                                            isMeetingInProgress: true, isMeetingAvailable: true, canDeleteAll: false,
                                            onMeeting: {}, onDeleteAll: {}, onSettings: {})
         XCTAssertEqual(recordingToolbar.moreMenuItems.map(\.isEnabled), [false, false], "No second meeting; nothing to delete")

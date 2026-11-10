@@ -25,6 +25,51 @@ final class HistoryPerformanceBehaviorTests: XCTestCase {
         XCTAssertEqual(counter.count, 0, "The window's size queries never measure the content")
     }
 
+    func testMainWindowMinimumMatchesWhatItsContentNeeds() async throws {
+        let minimum = CGSize(width: 440, height: 460)
+        let store = try temporaryStore()
+        for index in 0..<4 {
+            try await store.store.addRecordingSync(row("Row \(index) with a few words in it.", daysAgo: Double(index)))
+        }
+        defer { store.remove() }
+        let pasteboard = NSPasteboard(name: .init("workflow-history-perf-tests"))
+        defer { pasteboard.releaseGlobally() }
+
+        for (name, microphone) in [("main window", true), ("permissions", false)] {
+            func content(_ model: ContentViewModel) -> some View {
+                ContentView(
+                    viewModel: model,
+                    permissionsManager: PermissionsManager(microphone: microphone, accessibility: true, inputMonitoring: true)
+                )
+                .environment(\.transcriptPasteboard, pasteboard.name)
+            }
+            let controller = NSHostingController(rootView: content(ContentViewModel(recordingStore: store.store)))
+            XCTAssertEqual(controller.sizeThatFits(in: .zero), minimum, "\(name): the window minimum")
+
+            let model = ContentViewModel(recordingStore: store.store)
+            let host = NSHostingView(rootView: content(model))
+            host.frame = NSRect(origin: .zero, size: minimum)
+            host.layoutSubtreeIfNeeded()
+            if microphone {
+                let loaded = try await waitUntil { model.recordings.count == 4 }
+                XCTAssertTrue(loaded, "\(name): rows load")
+            }
+            try await Task.sleep(for: .milliseconds(200))
+            host.layoutSubtreeIfNeeded()
+            var outside: [String] = []
+            var stack = host.subviews
+            while let view = stack.popLast() {
+                let frame = view.convert(view.bounds, to: host)
+                if frame.minX < -0.5 || frame.minY < -0.5
+                    || frame.maxX > host.bounds.width + 0.5 || frame.maxY > host.bounds.height + 0.5 {
+                    outside.append("\(type(of: view)) \(frame)")
+                }
+                stack.append(contentsOf: view.subviews)
+            }
+            XCTAssertEqual(outside, [], "\(name): nothing extends outside the window at its minimum")
+        }
+    }
+
     // MARK: Search keeps the list on screen
 
     func testSearchKeepsPreviousRowsUntilTheNewPageArrives() async {
@@ -86,7 +131,73 @@ final class HistoryPerformanceBehaviorTests: XCTestCase {
         XCTAssertEqual(history.recordings.count, 1)
     }
 
+    // MARK: History changes stay inside the list
+
+    func testHistoryChangesDoNotInvalidateTheWholeWindowModel() async throws {
+        let temporary = try temporaryStore()
+        defer { temporary.remove() }
+        let store = temporary.store
+        for (index, text) in ["alpha river", "bravo river", "charlie stone"].enumerated() {
+            try await store.addRecordingSync(row(text, daysAgo: Double(index)))
+        }
+        let viewModel = ContentViewModel(recordingStore: store)
+        viewModel.search(query: "")
+        let loaded = try await waitUntil { viewModel.recordings.count == 3 }
+        XCTAssertTrue(loaded, "The first page loads")
+
+        let changes = ChangeCounter(viewModel.objectWillChange)
+        for typed in ["r", "ri", "riv"] { viewModel.search.textChanged(typed) }
+        XCTAssertEqual(changes.count, 0, "Typing publishes nothing on the window's view model before the debounce")
+        let debounced = try await waitUntil { viewModel.search.debounced == "riv" && viewModel.recordings.count == 2 }
+        XCTAssertTrue(debounced, "The debounced query applies")
+        try await Task.sleep(for: .milliseconds(100))
+        XCTAssertEqual(changes.count, 1, "Only the search-active flag changes when the query applies")
+
+        changes.count = 0
+        viewModel.search.textChanged("")
+        let cleared = try await waitUntil { viewModel.recordings.count == 3 }
+        XCTAssertTrue(cleared, "Clearing the field restores History")
+        try await Task.sleep(for: .milliseconds(100))
+        XCTAssertEqual(changes.count, 1, "Clearing the field flips only the search-active flag")
+
+        changes.count = 0
+        viewModel.search(query: "river")
+        let searched = try await waitUntil { viewModel.recordings.count == 2 }
+        XCTAssertTrue(searched, "The search returns its page")
+        try await Task.sleep(for: .milliseconds(100))
+        XCTAssertEqual(changes.count, 0, "History publishes on its own object, not the window's view model")
+
+        viewModel.search(query: "zzzz")
+        let emptied = try await waitUntil { viewModel.recordings.isEmpty }
+        XCTAssertTrue(emptied, "A search with no match shows no rows")
+        try await Task.sleep(for: .milliseconds(100))
+        XCTAssertEqual(changes.count, 1, "Only the empty flag changes the window's view model")
+        withExtendedLifetime(viewModel) {}
+    }
+
     // MARK: Fixtures
+
+    /// An on-disk History in its own temporary folder.
+    private func temporaryStore() throws -> (store: RecordingStore, remove: () -> Void) {
+        let scratch = FileManager.default.temporaryDirectory
+            .appendingPathComponent("WorkFlowHistoryPerf-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: scratch, withIntermediateDirectories: true)
+        let store = try RecordingStore(
+            database: DatabaseQueue(path: scratch.appendingPathComponent("history.sqlite").path),
+            recordingsDirectory: scratch.appendingPathComponent("recordings"),
+            cancelQueuedRecording: { _ in }, stopPlayback: { _ in }
+        )
+        return (store, { try? FileManager.default.removeItem(at: scratch) })
+    }
+
+    private func waitUntil(timeout: TimeInterval = 5, _ condition: () -> Bool) async throws -> Bool {
+        let deadline = Date().addingTimeInterval(timeout)
+        while !condition() {
+            guard Date() < deadline else { return false }
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        return true
+    }
 
     private func row(_ text: String, daysAgo: Double = 0) -> Recording {
         Recording(

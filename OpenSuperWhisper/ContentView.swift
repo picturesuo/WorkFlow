@@ -122,6 +122,43 @@ final class RecordingHistoryModel: ObservableObject {
     }
 }
 
+/// The History search field's text and its debounced query. Typing
+/// invalidates only the views that observe this object, never the window.
+@MainActor
+final class HistorySearch: ObservableObject {
+    @Published var text = ""
+    /// The query History shows, 200 ms after typing stops.
+    @Published private(set) var debounced = ""
+    private var task: Task<Void, Never>?
+    private let onQuery: @MainActor (String) -> Void
+
+    init(onQuery: @escaping @MainActor (String) -> Void) {
+        self.onQuery = onQuery
+    }
+
+    func textChanged(_ query: String) {
+        PerfSignpost.begin(.searchKeystroke, token: query)
+        task?.cancel()
+
+        if query.isEmpty {
+            if !debounced.isEmpty { debounced = "" }
+            onQuery("")
+            return
+        }
+
+        task = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: 200_000_000) // 200ms debounce
+            guard !Task.isCancelled, let self else { return }
+            if self.debounced != query { self.debounced = query }
+            self.onQuery(query)
+        }
+    }
+
+    func cancel() {
+        task?.cancel()
+    }
+}
+
 @MainActor
 class ContentViewModel: ObservableObject {
     @Published var state: RecordingState = .idle
@@ -130,13 +167,19 @@ class ContentViewModel: ObservableObject {
     @Published var transcriptionQueue: TranscriptionQueue
     @Published var recordingStore: RecordingStore
     var cleanupPipeline = TranscriptCleanupPipeline.shared
-    private let history: RecordingHistoryModel
+    /// The History list observes this directly, so its changes never
+    /// invalidate views that observe only the window's view model.
+    let history: RecordingHistoryModel
+    let search: HistorySearch
+    /// Whether History shows no rows, for the toolbar's Delete All.
+    @Published private(set) var historyIsEmpty = true
+    /// Whether a search query is applied, for the toolbar's Delete All.
+    @Published private(set) var searchIsActive = false
     var recordings: [Recording] {
         get { history.recordings }
         set { history.recordings = newValue }
     }
     var isLoadingMore: Bool { history.isLoadingMore }
-    var isInitialLoading: Bool { history.isInitialLoading }
     var canLoadMore: Bool { history.canLoadMore }
     var historyError: String? { history.errorMessage }
     @Published private(set) var recordingStartedAt: Date?
@@ -163,15 +206,35 @@ class ContentViewModel: ObservableObject {
         self.transcriptionService = transcriptionService ?? .shared
         self.transcriptionQueue = transcriptionQueue ?? .shared
         self.recordingStore = recordingStore
-        history = RecordingHistoryModel { query, limit, offset in
+        let history = RecordingHistoryModel { query, limit, offset in
             if query.isEmpty {
                 return try await recordingStore.fetchRecordings(limit: limit, offset: offset)
             }
             return try await recordingStore.searchRecordingsAsync(query: query, limit: limit, offset: offset)
         }
+        self.history = history
+        search = HistorySearch { [weak history] query in history?.search(query: query) }
 
-        history.objectWillChange
-            .sink { [weak self] _ in self?.objectWillChange.send() }
+        history.$recordings
+            .map(\.isEmpty)
+            .removeDuplicates()
+            .sink { [weak self] isEmpty in
+                MainActor.assumeIsolated {
+                    guard let self, self.historyIsEmpty != isEmpty else { return }
+                    self.historyIsEmpty = isEmpty
+                }
+            }
+            .store(in: &cancellables)
+
+        search.$debounced
+            .map { !$0.isEmpty }
+            .removeDuplicates()
+            .sink { [weak self] isActive in
+                MainActor.assumeIsolated {
+                    guard let self, self.searchIsActive != isActive else { return }
+                    self.searchIsActive = isActive
+                }
+            }
             .store(in: &cancellables)
 
         recorder.$isRecording.combineLatest(recorder.$isConnecting)
@@ -473,12 +536,9 @@ struct ContentView: View {
     @Environment(\.colorScheme) private var colorScheme
     @State private var isSettingsPresented = false
     @State private var settingsPane = SettingsPane.dictation
-    @State private var searchText = ""
-    @State private var debouncedSearchText = ""
     @State private var showDeleteConfirmation = false
     @State private var showMeetingNamePrompt = false
     @State private var meetingTitle = MeetingSessionController.defaultTitle()
-    @State private var searchTask: Task<Void, Never>? = nil
     private var writingFilter = WritingFilterPreferences()
     @AppStorage(SpeakingEfficiency.typingWPMKey) private var typingWPM = SpeakingEfficiency.defaultTypingWPM
     @AppStorage("modifierOnlyHotkey") private var modifierOnlyHotkeyRaw = ModifierKey.fn.rawValue
@@ -503,28 +563,6 @@ struct ContentView: View {
         return ""
     }
     
-    private func performSearch(_ query: String) {
-        PerfSignpost.begin(.searchKeystroke, token: query)
-        searchTask?.cancel()
-        
-        if query.isEmpty {
-            debouncedSearchText = ""
-            viewModel.search(query: "")
-            return
-        }
-        
-        searchTask = Task {
-            try? await Task.sleep(nanoseconds: 200_000_000) // 200ms debounce
-            
-            guard !Task.isCancelled else { return }
-            
-            await MainActor.run {
-                self.debouncedSearchText = query
-                viewModel.search(query: query)
-            }
-        }
-    }
-
     private var requiresInputMonitoring: Bool {
         RecordingTriggerConfiguration(
             mouseButton: MouseButton(rawValue: AppPreferences.shared.mouseButtonHotkey) ?? .none,
@@ -532,85 +570,6 @@ struct ContentView: View {
             modifierKey: ModifierKey(rawValue: modifierOnlyHotkeyRaw) ?? .none,
             secondaryModifierKey: .none
         ).requiresInputMonitoring
-    }
-
-    @ViewBuilder
-    private var historyList: some View {
-        if viewModel.recordings.isEmpty {
-            Group {
-                if viewModel.isInitialLoading {
-                    ProgressView("Loading history…")
-                } else if let error = viewModel.historyError {
-                    HistoryLoadError(message: error, onRetry: viewModel.retryLoading)
-                } else {
-                    HistoryEmptyState(isSearching: !debouncedSearchText.isEmpty, query: debouncedSearchText,
-                                      shortcut: currentShortcutDescription)
-                }
-            }
-            .padding(WFSpace.xl)
-        } else {
-            VStack(spacing: 0) {
-                ScrollViewReader { proxy in
-                    ScrollView {
-                        LazyVStack(alignment: .leading, spacing: 0, pinnedViews: [.sectionHeaders]) {
-                            ForEach(HistoryDay.group(viewModel.recordings)) { day in
-                                Section {
-                                    ForEach(day.recordings) { recording in
-                                        RecordingRow(
-                                            recording: recording,
-                                            searchQuery: debouncedSearchText,
-                                            onDelete: {
-                                                viewModel.deleteRecording(recording)
-                                            },
-                                            onRegenerate: {
-                                                Task {
-                                                    await TranscriptionQueue.shared.requeueRecording(recording)
-                                                }
-                                            },
-                                            onRegenerateWith: { selection in
-                                                Task {
-                                                    await TranscriptionQueue.shared.requeueRecording(recording, with: selection)
-                                                }
-                                            },
-                                            regenerationFilters: writingFilter.filters
-                                        )
-                                        .id(recording.id)
-                                        .onAppear {
-                                            if recording.id == viewModel.recordings.last?.id {
-                                                viewModel.loadMore()
-                                            }
-                                        }
-                                        if recording.id != day.recordings.last?.id {
-                                            HistoryRowSeparator()
-                                        }
-                                    }
-                                } header: {
-                                    HistoryDayHeader(title: day.title)
-                                }
-                            }
-
-                            if viewModel.isLoadingMore {
-                                ProgressView()
-                                    .controlSize(.small)
-                                    .frame(maxWidth: .infinity)
-                                    .padding(WFSpace.md)
-                            }
-                        }
-                        .padding(.bottom, WFSpace.sm)
-                    }
-                    // A new query starts at the top, as it did when the list was rebuilt.
-                    .onChange(of: debouncedSearchText) { _, _ in
-                        if let first = viewModel.recordings.first?.id {
-                            proxy.scrollTo(first, anchor: .top)
-                        }
-                    }
-                }
-                if let error = viewModel.historyError {
-                    HistoryLoadError(message: error, onRetry: viewModel.retryLoading)
-                        .padding(WFSpace.md)
-                }
-            }
-        }
     }
 
     var body: some View {
@@ -624,7 +583,7 @@ struct ContentView: View {
                 } else {
                     VStack(spacing: 0) {
                         MainToolbar(
-                            searchText: $searchText,
+                            search: viewModel.search,
                             meetingLabel: meetingController.statusLabel,
                             isMeetingRecording: meetingController.isRecording,
                             isMeetingInProgress: meetingController.isBusy,
@@ -633,7 +592,7 @@ struct ContentView: View {
                                 isMeetingBusy: meetingController.isBusy,
                                 dictationState: viewModel.state
                             ),
-                            canDeleteAll: !(viewModel.recordings.isEmpty && debouncedSearchText.isEmpty),
+                            canDeleteAll: !(viewModel.historyIsEmpty && !viewModel.searchIsActive),
                             onMeeting: {
                                 if meetingController.isRecording {
                                     Task { await meetingController.stop() }
@@ -645,7 +604,6 @@ struct ContentView: View {
                             onDeleteAll: { showDeleteConfirmation = true },
                             onSettings: { SettingsRequest.open() }
                         )
-                        .onChange(of: searchText) { _, query in performSearch(query) }
                         .confirmationDialog(
                             "Delete All Recordings",
                             isPresented: $showDeleteConfirmation,
@@ -668,13 +626,19 @@ struct ContentView: View {
                             }
                         }
 
-                        if debouncedSearchText.isEmpty {
+                        SearchInactive(search: viewModel.search) {
                             SpeakingSummaryStrip(
                                 presentation: SpeakingPresentation(summary: viewModel.speakingSummary, typingWPM: typingWPM)
                             ) { SettingsRequest.open(pane: .dictation) }
                         }
 
-                        historyList
+                        HistoryList(
+                            history: viewModel.history,
+                            search: viewModel.search,
+                            regenerationFilters: writingFilter.filters,
+                            shortcut: currentShortcutDescription,
+                            onDelete: viewModel.deleteRecording
+                        )
                             .frame(maxWidth: .infinity, maxHeight: .infinity)
                             .background(ThemePalette.contentBackground(colorScheme))
 
@@ -766,17 +730,127 @@ struct ContentView: View {
             Text(viewModel.historyDeletionError ?? "Please try again.")
         }
         .modifier(OpenSettingsRequests(isPresented: $isSettingsPresented, pane: $settingsPane))
-        .onDisappear { searchTask?.cancel() }
+        .onDisappear { viewModel.search.cancel() }
     }
 }
 
+
+/// The toolbar's search field. Only this view observes the typed text.
+private struct HistorySearchField: View {
+    @ObservedObject var search: HistorySearch
+
+    var body: some View {
+        SearchField(text: $search.text, prompt: "Search History")
+            .onChange(of: search.text) { _, query in search.textChanged(query) }
+    }
+}
+
+/// Shows its content only while no search is applied.
+private struct SearchInactive<Content: View>: View {
+    @ObservedObject var search: HistorySearch
+    @ViewBuilder let content: () -> Content
+
+    var body: some View {
+        if search.debounced.isEmpty {
+            content()
+        }
+    }
+}
+
+/// The History list. It observes the history and the applied query itself,
+/// so a page or a keystroke re-renders only the list.
+struct HistoryList: View {
+    @ObservedObject var history: RecordingHistoryModel
+    @ObservedObject var search: HistorySearch
+    let regenerationFilters: [CustomCleanupFilter]
+    let shortcut: String
+    let onDelete: (Recording) -> Void
+
+    var body: some View {
+        if history.recordings.isEmpty {
+            Group {
+                if history.isInitialLoading {
+                    ProgressView("Loading history…")
+                } else if let error = history.errorMessage {
+                    HistoryLoadError(message: error, onRetry: { history.loadMore() })
+                } else {
+                    HistoryEmptyState(isSearching: !search.debounced.isEmpty, query: search.debounced,
+                                      shortcut: shortcut)
+                }
+            }
+            .padding(WFSpace.xl)
+        } else {
+            VStack(spacing: 0) {
+                ScrollViewReader { proxy in
+                    ScrollView {
+                        LazyVStack(alignment: .leading, spacing: 0, pinnedViews: [.sectionHeaders]) {
+                            ForEach(HistoryDay.group(history.recordings)) { day in
+                                Section {
+                                    ForEach(day.recordings) { recording in
+                                        RecordingRow(
+                                            recording: recording,
+                                            searchQuery: search.debounced,
+                                            onDelete: {
+                                                onDelete(recording)
+                                            },
+                                            onRegenerate: {
+                                                Task {
+                                                    await TranscriptionQueue.shared.requeueRecording(recording)
+                                                }
+                                            },
+                                            onRegenerateWith: { selection in
+                                                Task {
+                                                    await TranscriptionQueue.shared.requeueRecording(recording, with: selection)
+                                                }
+                                            },
+                                            regenerationFilters: regenerationFilters
+                                        )
+                                        .id(recording.id)
+                                        .onAppear {
+                                            if recording.id == history.recordings.last?.id {
+                                                history.loadMore()
+                                            }
+                                        }
+                                        if recording.id != day.recordings.last?.id {
+                                            HistoryRowSeparator()
+                                        }
+                                    }
+                                } header: {
+                                    HistoryDayHeader(title: day.title)
+                                }
+                            }
+
+                            if history.isLoadingMore {
+                                ProgressView()
+                                    .controlSize(.small)
+                                    .frame(maxWidth: .infinity)
+                                    .padding(WFSpace.md)
+                            }
+                        }
+                        .padding(.bottom, WFSpace.sm)
+                    }
+                    // A new query starts at the top, as it did when the list was rebuilt.
+                    .onChange(of: search.debounced) { _, _ in
+                        if let first = history.recordings.first?.id {
+                            proxy.scrollTo(first, anchor: .top)
+                        }
+                    }
+                }
+                if let error = history.errorMessage {
+                    HistoryLoadError(message: error, onRetry: { history.loadMore() })
+                        .padding(WFSpace.md)
+                }
+            }
+        }
+    }
+}
 
 /// One row in the title bar band: the window title, search, and the
 /// window's actions, the way a unified macOS toolbar reads. Meeting
 /// recording is occasional, so it starts from More; while a meeting records
 /// or saves, its stop button joins the toolbar.
 struct MainToolbar: View {
-    @Binding var searchText: String
+    let search: HistorySearch
     let meetingLabel: String
     let isMeetingRecording: Bool
     /// A meeting is recording or saving, so its button shows.
@@ -820,7 +894,7 @@ struct MainToolbar: View {
 
             Spacer(minLength: WFSpace.sm)
 
-            SearchField(text: $searchText, prompt: "Search History")
+            HistorySearchField(search: search)
                 .frame(minWidth: 110, idealWidth: 220, maxWidth: 240)
 
             HStack(spacing: 2) {
