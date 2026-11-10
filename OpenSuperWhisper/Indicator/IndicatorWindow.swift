@@ -124,12 +124,6 @@ class IndicatorViewModel: ObservableObject {
     }
 
     func startRecording() {
-        if MeetingSessionController.shared.isRecording {
-            ShortcutManager.endTriggerFlows(outcome: "busy")
-            showBusyMessage()
-            return
-        }
-
         if isTranscriptionBusy {
             ShortcutManager.endTriggerFlows(outcome: "busy")
             showBusyMessage()

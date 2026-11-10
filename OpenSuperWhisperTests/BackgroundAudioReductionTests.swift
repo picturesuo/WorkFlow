@@ -166,6 +166,12 @@ final class BackgroundAudioReductionTests: XCTestCase {
                        "The device changed. The audio recorded until then was kept.")
     }
 
+    func testDictationDuringAMeetingSaysWhyItUsedTheMicrophoneAsIs() throws {
+        let notice = try XCTUnwrap(BackgroundAudioReductionStatus.offDuringMeeting.notice)
+        XCTAssertEqual(notice.title, "Last recording used the microphone as is")
+        XCTAssertTrue(notice.detail.hasPrefix("A meeting was recording"))
+    }
+
     // MARK: Device changes
 
     func testDeviceChangeRestartsWithTheNewFormatIntoTheSameRecording() throws {

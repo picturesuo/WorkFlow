@@ -48,7 +48,7 @@ Settings (⌘,) has four panes; ⌘1 to ⌘4 switch between them, and Settings r
 
 ## Main window at a glance
 
-- **Toolbar**: search History, **More** (⋯) for **Start Meeting Recording…** and **Delete All Recordings…**, and Settings. While a meeting records, a stop button joins the toolbar and the record button stops and saves it.
+- **Toolbar**: search History, **More** (⋯) for **Start Meeting Recording…** and **Delete All Recordings…**, and Settings. While a meeting records, a stop button joins the toolbar and the record button stops and saves it. Your dictation shortcut keeps working during the meeting, and what you dictate is in the meeting's recording too, since both hear the same microphone.
 - **History**: dictations grouped by day, newest first. Each row has **Copy**; its ⋯ menu, or a right-click, also offers Play Recording, Regenerate Transcript, and Delete Recording. A failed transcription that kept its audio shows **Regenerate** in place of Copy, and a long transcript opens with **Show full text**.
 - **Dictation bar**: the dictation mode and **Learn…**, what dictation is doing now with your shortcut, the microphone menu (⌄), and the record button. While it listens, the button shows a small vermilion stop square and a faint halo that follows your microphone's level, so a still halo means the microphone hears nothing.
 
@@ -127,7 +127,7 @@ If the reply drops a question you asked, or is made of material you didn't say, 
 
 ## Music while you dictate
 
-To keep music or a video playing while you dictate, turn on **Settings → Dictation → Reduce background audio**. Dictation then records through macOS voice processing, the echo cancellation and noise suppression calls use. Apple describes it as taking audio the Mac plays out of what the microphone hears, so it may reduce music from this Mac's speakers and steady noise. Your music keeps playing; macOS may lower it slightly while you dictate. It's off by default, and meetings always record the microphone as is, so people on a call stay in the transcript.
+To keep music or a video playing while you dictate, turn on **Settings → Dictation → Reduce background audio**. Dictation then records through macOS voice processing, the echo cancellation and noise suppression calls use. Apple describes it as taking audio the Mac plays out of what the microphone hears, so it may reduce music from this Mac's speakers and steady noise. Your music keeps playing; macOS may lower it slightly while you dictate. It's off by default, and meetings always record the microphone as is, so people on a call stay in the transcript. A dictation made while a meeting records uses the microphone as is too.
 
 It reduces background audio; it doesn't promise to remove it:
 

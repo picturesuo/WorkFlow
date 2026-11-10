@@ -404,7 +404,6 @@ class ContentViewModel: ObservableObject {
     }
     
     func startRecording() {
-        guard !MeetingSessionController.shared.isRecording else { return }
         guard microphoneService.getActiveMicrophone() != nil else { return }
 
         if microphoneService.isActiveMicrophoneRequiresConnection() {
@@ -750,7 +749,7 @@ struct ContentView: View {
                 _ = meetingController.start(title: meetingTitle)
             }
         } message: {
-            Text("\(AppIdentity.productName) records locally until you stop it. Meeting mode never pastes into another app.")
+            Text("\(AppIdentity.productName) records locally until you stop it. Meeting mode never pastes into another app, and your dictation shortcut keeps working while it records.")
         }
         .alert(
             "Meeting recording failed",

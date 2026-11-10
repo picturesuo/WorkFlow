@@ -30,6 +30,8 @@ enum BackgroundAudioReductionStatus: Equatable {
     case unavailable(String)
     /// It stopped partway; the audio up to then was kept.
     case stopped(String)
+    /// A meeting was recording, so that dictation used the microphone as is.
+    case offDuringMeeting
 
     var notice: (title: String, detail: String)? {
         switch self {
@@ -39,6 +41,8 @@ enum BackgroundAudioReductionStatus: Equatable {
             ("Last recording used the microphone as is", "Background audio reduction couldn’t start. \(reason)")
         case .stopped(let reason):
             ("Background audio reduction stopped early", "\(reason) The audio recorded until then was kept.")
+        case .offDuringMeeting:
+            ("Last recording used the microphone as is", "A meeting was recording, so background audio reduction stayed off and the call stays in the meeting.")
         }
     }
 }
