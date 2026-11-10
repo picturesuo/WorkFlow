@@ -156,11 +156,12 @@ struct SettingsNotice<Action: View>: View {
     let title: String
     var detail: String?
     @ViewBuilder var action: Action
+    @Environment(\.colorScheme) private var colorScheme
 
     var body: some View {
         HStack(alignment: .top, spacing: 10) {
             Image(systemName: "exclamationmark.triangle.fill")
-                .foregroundStyle(.orange)
+                .foregroundStyle(ThemePalette.caution(colorScheme))
                 .font(.system(size: 12))
                 .padding(.top, 2)
                 .accessibilityHidden(true)

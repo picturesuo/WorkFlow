@@ -599,13 +599,13 @@ struct CustomCleanupFiltersCard: View {
                 if !errorMessage.isEmpty {
                     Label(errorMessage, systemImage: "exclamationmark.triangle.fill")
                         .font(.caption)
-                        .foregroundColor(.orange)
+                        .foregroundColor(ThemePalette.caution(colorScheme))
                         .fixedSize(horizontal: false, vertical: true)
                 }
                 Spacer()
                 Text("\(count)/\(CustomCleanupFilterStore.maximumInstructionLength)")
                     .font(.caption.monospacedDigit())
-                    .foregroundColor(count > CustomCleanupFilterStore.maximumInstructionLength ? .orange : .secondary)
+                    .foregroundColor(count > CustomCleanupFilterStore.maximumInstructionLength ? ThemePalette.caution(colorScheme) : .secondary)
                 Button("Cancel") { endDraft() }
                     .keyboardShortcut(.cancelAction)
                 Button("Save") { saveDraft() }

@@ -452,7 +452,7 @@ struct OnboardingView: View {
                                     Image(systemName: permissionsManager.isInputMonitoringPermissionGranted
                                           ? "checkmark.circle.fill"
                                           : "exclamationmark.triangle.fill")
-                                        .foregroundColor(permissionsManager.isInputMonitoringPermissionGranted ? .green : .orange)
+                                        .foregroundColor(permissionsManager.isInputMonitoringPermissionGranted ? .green : ThemePalette.caution(colorScheme))
 
                                     Text(permissionsManager.isInputMonitoringPermissionGranted
                                          ? "Input Monitoring is enabled. Only modifier-key events are observed."
@@ -696,6 +696,8 @@ private struct KeyCap: View {
 struct OnboardingKeyboardView: View {
     let selectedShortcut: OnboardingShortcutOption
     let layoutInfo: KeyboardLayoutInfo
+    /// The drawing's real width, so its height fits the keys it draws.
+    @State private var keyboardWidth: CGFloat = 450 - 24
     
     private let gap: CGFloat = 2
     private let pad: CGFloat = 6
@@ -804,7 +806,8 @@ struct OnboardingKeyboardView: View {
             }
             .padding(pad)
         }
-        .frame(height: heightForWidth(450 - 24))
+        .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { keyboardWidth = $0 }
+        .frame(height: heightForWidth(keyboardWidth))
         .background(
             RoundedRectangle(cornerRadius: 10)
                 .fill(Color(.controlBackgroundColor).opacity(0.3))

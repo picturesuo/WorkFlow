@@ -97,7 +97,7 @@ struct CorrectionLearningCard: View {
             if let notice = session.vocabularyNotice {
                 Text(notice)
                     .font(.caption)
-                    .foregroundColor(.orange)
+                    .foregroundColor(ThemePalette.caution(colorScheme))
                     .fixedSize(horizontal: false, vertical: true)
             }
 
@@ -179,7 +179,7 @@ struct CorrectionLearningCard: View {
             }
             Text("\(session.document.count.formatted()) / \(CorrectionAligner.maximumDocumentLength.formatted())")
                 .font(.caption2.monospacedDigit())
-                .foregroundColor(session.document.count > CorrectionAligner.maximumDocumentLength ? .orange : .secondary)
+                .foregroundColor(session.document.count > CorrectionAligner.maximumDocumentLength ? ThemePalette.caution(colorScheme) : .secondary)
             Spacer()
         }
     }
@@ -189,7 +189,7 @@ struct CorrectionLearningCard: View {
         if let error = session.errorMessage {
             Text(error)
                 .font(.caption)
-                .foregroundColor(.orange)
+                .foregroundColor(ThemePalette.caution(colorScheme))
                 .fixedSize(horizontal: false, vertical: true)
         } else if let report = session.report {
             Text(report.summary)
@@ -205,7 +205,7 @@ struct CorrectionLearningCard: View {
         } else if let fileSummary = session.fileSummary {
             Text(fileSummary)
                 .font(.caption)
-                .foregroundColor(session.document.count > CorrectionAligner.maximumDocumentLength ? .orange : .secondary)
+                .foregroundColor(session.document.count > CorrectionAligner.maximumDocumentLength ? ThemePalette.caution(colorScheme) : .secondary)
                 .fixedSize(horizontal: false, vertical: true)
         }
     }

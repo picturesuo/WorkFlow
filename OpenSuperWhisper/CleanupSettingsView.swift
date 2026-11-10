@@ -444,7 +444,7 @@ struct ProviderCostSettingsView: View {
             if !currentStatus.isEmpty {
                 Text(currentStatus)
                     .font(.caption)
-                    .foregroundStyle(currentStatus.localizedCaseInsensitiveContains("failed") ? Color.orange : Color.secondary)
+                    .foregroundStyle(currentStatus.localizedCaseInsensitiveContains("failed") ? ThemePalette.caution(colorScheme) : Color.secondary)
                     .textSelection(.enabled)
                     .fixedSize(horizontal: false, vertical: true)
                     .padding(.horizontal, 14)
@@ -832,13 +832,13 @@ struct ProviderCostSettingsView: View {
                     .accessibilityLabel("Estimated cost this month: \(BedrockPricing.formatUSD(spent))\(stopEnabled ? " of a \(BedrockPricing.formatUSD(limit)) stop" : "")")
                     if stopEnabled {
                         ProgressView(value: min(spent, limit), total: max(limit, 0.0001))
-                            .tint(spent >= limit ? Color.orange : ThemePalette.ink(colorScheme))
+                            .tint(spent >= limit ? ThemePalette.caution(colorScheme) : ThemePalette.ink(colorScheme))
                             .accessibilityHidden(true)
                         Text(spent >= limit
                              ? "Stop reached: Bedrock requests pause until next month."
                              : "\(BedrockPricing.formatUSD(max(0, limit - spent))) left before Bedrock requests pause.")
                             .font(.caption.weight(.medium))
-                            .foregroundStyle(spent >= limit ? Color.orange : Color.secondary)
+                            .foregroundStyle(spent >= limit ? ThemePalette.caution(colorScheme) : Color.secondary)
                     }
                 }
                 .settingsRowPadding()
@@ -876,7 +876,7 @@ struct ProviderCostSettingsView: View {
                 SettingsDivider()
                 SettingsDisclosureRow(
                     title: "Usage this month",
-                    detail: "\(countLabel(usage.cleanedDictations, singular: "dictation", plural: "dictations")) cleaned · \(usage.inputTokens + usage.outputTokens) tokens",
+                    detail: "\(countLabel(usage.cleanedDictations, singular: "dictation", plural: "dictations")) cleaned · \((usage.inputTokens + usage.outputTokens).formatted(.number)) tokens",
                     isExpanded: $showsUsage
                 )
                 if showsUsage {
@@ -919,7 +919,7 @@ struct ProviderCostSettingsView: View {
             valueRow("Filter drafts", "\(usage.filterDraftRequests)")
         }
         SettingsDivider()
-        valueRow("Tokens", "\(usage.inputTokens) in · \(usage.outputTokens) out")
+        valueRow("Tokens", "\(usage.inputTokens.formatted(.number)) in · \(usage.outputTokens.formatted(.number)) out")
         if usage.unpricedDictations > 0 {
             SettingsDivider()
             SettingsNotice(
@@ -976,7 +976,7 @@ struct ProviderCostSettingsView: View {
                 }
             }
             let tokenCount = (result.inputTokens ?? 0) + (result.outputTokens ?? 0)
-            providerStatus = tokenCount > 0 ? "Connected · \(tokenCount) tokens for this test." : "Connected successfully."
+            providerStatus = tokenCount > 0 ? "Connected · \(tokenCount.formatted(.number)) tokens for this test." : "Connected successfully."
         } catch {
             let reason = Self.connectionFailureReason(error)
             if account != nil, !enteredKey.isEmpty {

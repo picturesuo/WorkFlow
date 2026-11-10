@@ -32,7 +32,7 @@ struct FilterAssistantSheet: View {
             if let message = session.errorMessage {
                 Label(message, systemImage: "exclamationmark.triangle.fill")
                     .font(.caption)
-                    .foregroundColor(.orange)
+                    .foregroundColor(ThemePalette.caution(colorScheme))
                     .fixedSize(horizontal: false, vertical: true)
             }
             if session.proposal != nil {
@@ -153,7 +153,7 @@ struct FilterAssistantSheet: View {
                 if let voiceError = voice.errorMessage {
                     Text(voiceError)
                         .font(.caption)
-                        .foregroundColor(.orange)
+                        .foregroundColor(ThemePalette.caution(colorScheme))
                         .fixedSize(horizontal: false, vertical: true)
                 } else if voice.state == .idle, voice.isModelLoading {
                     Text("The speech model is loading. You can type meanwhile.")
@@ -328,6 +328,6 @@ struct FilterAssistantSheet: View {
         let count = value.trimmingCharacters(in: .whitespacesAndNewlines).count
         return Text("\(count)/\(limit)")
             .monospacedDigit()
-            .foregroundColor(count > limit ? .orange : .secondary)
+            .foregroundColor(count > limit ? ThemePalette.caution(colorScheme) : .secondary)
     }
 }
