@@ -452,7 +452,7 @@ struct OnboardingView: View {
                                     Image(systemName: permissionsManager.isInputMonitoringPermissionGranted
                                           ? "checkmark.circle.fill"
                                           : "exclamationmark.triangle.fill")
-                                        .foregroundColor(permissionsManager.isInputMonitoringPermissionGranted ? .green : .orange)
+                                        .foregroundColor(permissionsManager.isInputMonitoringPermissionGranted ? .green : ThemePalette.caution(colorScheme))
 
                                     Text(permissionsManager.isInputMonitoringPermissionGranted
                                          ? "Input Monitoring is enabled. Only modifier-key events are observed."

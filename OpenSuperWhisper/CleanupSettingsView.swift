@@ -444,7 +444,7 @@ struct ProviderCostSettingsView: View {
             if !currentStatus.isEmpty {
                 Text(currentStatus)
                     .font(.caption)
-                    .foregroundStyle(currentStatus.localizedCaseInsensitiveContains("failed") ? Color.orange : Color.secondary)
+                    .foregroundStyle(currentStatus.localizedCaseInsensitiveContains("failed") ? ThemePalette.caution(colorScheme) : Color.secondary)
                     .textSelection(.enabled)
                     .fixedSize(horizontal: false, vertical: true)
                     .padding(.horizontal, 14)
@@ -832,13 +832,13 @@ struct ProviderCostSettingsView: View {
                     .accessibilityLabel("Estimated cost this month: \(BedrockPricing.formatUSD(spent))\(stopEnabled ? " of a \(BedrockPricing.formatUSD(limit)) stop" : "")")
                     if stopEnabled {
                         ProgressView(value: min(spent, limit), total: max(limit, 0.0001))
-                            .tint(spent >= limit ? Color.orange : ThemePalette.ink(colorScheme))
+                            .tint(spent >= limit ? ThemePalette.caution(colorScheme) : ThemePalette.ink(colorScheme))
                             .accessibilityHidden(true)
                         Text(spent >= limit
                              ? "Stop reached: Bedrock requests pause until next month."
                              : "\(BedrockPricing.formatUSD(max(0, limit - spent))) left before Bedrock requests pause.")
                             .font(.caption.weight(.medium))
-                            .foregroundStyle(spent >= limit ? Color.orange : Color.secondary)
+                            .foregroundStyle(spent >= limit ? ThemePalette.caution(colorScheme) : Color.secondary)
                     }
                 }
                 .settingsRowPadding()
