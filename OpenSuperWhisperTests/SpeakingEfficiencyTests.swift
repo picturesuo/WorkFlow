@@ -447,11 +447,11 @@ final class SpeechActivityTests: XCTestCase {
     func testFailureSilenceAndOutOfRangeAreUnavailableNeverZero() async {
         let url = URL(fileURLWithPath: "/nonexistent/fixture.wav")
         let failed = await SpeechActivity.measure(url, with: FixedSpeechDetector(error: SpeechDetectionError.detectionFailed))
-        XCTAssertEqual(failed, .unavailable("fixture"))
+        XCTAssertEqual(failed, SpeechActivityMeasurement.unavailable("fixture"))
         let silent = await SpeechActivity.measure(url, with: FixedSpeechDetector(intervals: []))
-        XCTAssertEqual(silent, .unavailable("fixture"))
+        XCTAssertEqual(silent, SpeechActivityMeasurement.unavailable("fixture"))
         let outside = await SpeechActivity.measure(url, with: FixedSpeechDetector(intervals: [SpeechInterval(start: 30, end: 40)], analyzedSeconds: 20))
-        XCTAssertEqual(outside, .unavailable("fixture"))
+        XCTAssertEqual(outside, SpeechActivityMeasurement.unavailable("fixture"))
         let heard = await SpeechActivity.measure(url, with: FixedSpeechDetector(intervals: [
             SpeechInterval(start: 1, end: 3), SpeechInterval(start: 2, end: 4.5),
         ], analyzedSeconds: 20))
@@ -490,9 +490,9 @@ final class SpeechActivityTests: XCTestCase {
         let url = Self.repoRoot.appendingPathComponent("jfk.wav")
         let measurement = await SpeechActivity.measure(url, with: SileroSpeechDetector())
 
-        XCTAssertEqual(measurement.status, .measured)
-        XCTAssertEqual(measurement.detectorID, "silero-v5.1.2/whisper.cpp-default")
-        XCTAssertEqual(try XCTUnwrap(measurement.activeSeconds), 7.44, accuracy: 0.3)
+        XCTAssertEqual(measurement?.status, .measured)
+        XCTAssertEqual(measurement?.detectorID, "silero-v5.1.2/whisper.cpp-default")
+        XCTAssertEqual(try XCTUnwrap(measurement?.activeSeconds), 7.44, accuracy: 0.3)
     }
 
     // The same speech twice, 2 s or 34 s apart, measures the same active
@@ -504,8 +504,8 @@ final class SpeechActivityTests: XCTestCase {
         let close = await SpeechActivity.measure(try wav(speech + silence(2) + speech, "close"), with: detector)
         let apart = await SpeechActivity.measure(try wav(speech + silence(34) + speech, "apart"), with: detector)
 
-        let closeSeconds = try XCTUnwrap(close.activeSeconds)
-        let apartSeconds = try XCTUnwrap(apart.activeSeconds)
+        let closeSeconds = try XCTUnwrap(close?.activeSeconds)
+        let apartSeconds = try XCTUnwrap(apart?.activeSeconds)
         XCTAssertEqual(closeSeconds, apartSeconds, accuracy: 0.1)
         XCTAssertEqual(closeSeconds, 2 * 7.44, accuracy: 0.6)
     }
@@ -524,27 +524,27 @@ final class SpeechActivityTests: XCTestCase {
         ]
         for (name, samples) in fixtures {
             let measurement = await SpeechActivity.measure(try wav(samples, name), with: detector)
-            XCTAssertEqual(measurement.status, .unavailable, name)
-            XCTAssertNil(measurement.activeSeconds, name)
+            XCTAssertEqual(measurement?.status, .unavailable, name)
+            XCTAssertNil(measurement?.activeSeconds, name)
         }
 
         let speech = try await jfkSamples()
         let noisy = zip(speech, whiteNoise(Double(speech.count) / 16_000, amplitude: 0.03, seed: 4)).map(+)
         let clean = await SpeechActivity.measure(try wav(speech, "clean"), with: detector)
         let withNoise = await SpeechActivity.measure(try wav(noisy, "noisy"), with: detector)
-        XCTAssertEqual(try XCTUnwrap(withNoise.activeSeconds), try XCTUnwrap(clean.activeSeconds), accuracy: 0.2)
+        XCTAssertEqual(try XCTUnwrap(withNoise?.activeSeconds), try XCTUnwrap(clean?.activeSeconds), accuracy: 0.2)
     }
 
     func testMissingModelOrUnreadableAudioIsUnavailable() async throws {
         let jfk = Self.repoRoot.appendingPathComponent("jfk.wav")
         let noModel = await SpeechActivity.measure(jfk, with: SileroSpeechDetector(modelPath: "/nonexistent/silero.bin"))
-        XCTAssertEqual(noModel.status, .unavailable)
+        XCTAssertEqual(noModel?.status, .unavailable)
 
         let garbage = FileManager.default.temporaryDirectory.appendingPathComponent("speech-garbage-\(UUID().uuidString).wav")
         try Data("not audio".utf8).write(to: garbage)
         cleanupURLs.append(garbage)
         let unreadable = await SpeechActivity.measure(garbage, with: SileroSpeechDetector())
-        XCTAssertEqual(unreadable.status, .unavailable)
+        XCTAssertEqual(unreadable?.status, .unavailable)
     }
 
     func testMeasuringReadsTheAudioWithoutChangingIt() async throws {

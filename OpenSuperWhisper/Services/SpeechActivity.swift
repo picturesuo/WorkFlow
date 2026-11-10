@@ -74,12 +74,16 @@ enum SpeechActivity {
 
     /// Measures one recording's active speech. Any failure, or hearing no
     /// speech at all, is unavailable rather than a guessed or zero figure.
-    static func measure(_ audioURL: URL, with detector: any SpeechDetecting) async -> SpeechActivityMeasurement {
+    /// Nil means the process is exiting: there is no result to record, and
+    /// the next launch measures the recording again.
+    static func measure(_ audioURL: URL, with detector: any SpeechDetecting) async -> SpeechActivityMeasurement? {
         do {
             let detection = try await detector.detectSpeech(in: audioURL)
             let active = unionSeconds(detection.intervals, within: detection.analyzedSeconds)
             guard active.isFinite, active > 0 else { return .unavailable(detector.detectorID) }
             return SpeechActivityMeasurement(status: .measured, activeSeconds: active, detectorID: detector.detectorID)
+        } catch SpeechDetectionError.processExiting {
+            return nil
         } catch {
             return .unavailable(detector.detectorID)
         }
@@ -90,6 +94,8 @@ enum SpeechDetectionError: Error {
     case detectorUnavailable
     case unreadableAudio
     case detectionFailed
+    /// The process is exiting, so whisper.cpp refused the call.
+    case processExiting
 }
 
 /// The Silero voice-activity model bundled with WorkFlow, run on this Mac
@@ -130,14 +136,16 @@ final class SileroSpeechDetector: SpeechDetecting {
         }
 
         func detect(_ samples: [Float]) throws -> SpeechDetection {
+            let gate = ProcessExitGate.shared
+            if gate.isExiting { throw SpeechDetectionError.processExiting }
             if context == nil {
                 guard let path, let loaded = MyWhisperVadContext(modelPath: path) else {
-                    throw SpeechDetectionError.detectorUnavailable
+                    throw gate.isExiting ? SpeechDetectionError.processExiting : SpeechDetectionError.detectorUnavailable
                 }
                 context = loaded
             }
             guard let segments = context?.speechSegments(in: samples) else {
-                throw SpeechDetectionError.detectionFailed
+                throw gate.isExiting ? SpeechDetectionError.processExiting : SpeechDetectionError.detectionFailed
             }
             return SpeechDetection(
                 intervals: segments.map {

@@ -741,10 +741,14 @@ class RecordingStore: ObservableObject {
             print("Failed to read the dictation to measure.")
             return
         }
-        let measurement: SpeechActivityMeasurement = if let audioURL {
-            await SpeechActivity.measure(audioURL, with: speechDetector)
+        let measurement: SpeechActivityMeasurement
+        if let audioURL {
+            // Nil: the process is exiting. Nothing is written, so the row
+            // stays measuring and the next launch measures it again.
+            guard let measured = await SpeechActivity.measure(audioURL, with: speechDetector) else { return }
+            measurement = measured
         } else {
-            .unavailable(speechDetector.detectorID)
+            measurement = .unavailable(speechDetector.detectorID)
         }
         do {
             // Only the three measurement columns of a row still waiting, so a
