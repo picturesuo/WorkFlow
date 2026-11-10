@@ -131,6 +131,24 @@ final class HistoryPerformanceBehaviorTests: XCTestCase {
         XCTAssertEqual(history.recordings.count, 1)
     }
 
+    // MARK: The first page is read early
+
+    func testFirstPageIsReadOnceAndBeforeTheListAsksForIt() async {
+        let loader = CountingHistoryLoader(page: [row("alpha"), row("bravo")])
+        let history = RecordingHistoryModel(prefetchesFirstPage: true, loader: loader.load)
+        await Task.yield()
+        await Task.yield()
+        XCTAssertEqual(loader.calls.count, 1, "Constructing the model starts reading the first page")
+        XCTAssertEqual(loader.calls.first, CountingHistoryLoader.Call(query: "", limit: 100, offset: 0))
+
+        await history.refresh().value
+        XCTAssertEqual(loader.calls.count, 1, "The list's first request uses the page already read")
+        XCTAssertEqual(history.recordings.map(\.transcription), ["alpha", "bravo"])
+
+        await history.refresh().value
+        XCTAssertEqual(loader.calls.count, 2, "A later refresh reads again")
+    }
+
     // MARK: History changes stay inside the list
 
     func testHistoryChangesDoNotInvalidateTheWholeWindowModel() async throws {
@@ -218,6 +236,26 @@ private final class ChangeCounter {
 
     init<P: Publisher>(_ publisher: P) where P.Failure == Never {
         subscription = publisher.sink { [weak self] _ in self?.count += 1 }
+    }
+}
+
+/// Returns a fixed page at once and records every call.
+@MainActor
+private final class CountingHistoryLoader {
+    struct Call: Equatable {
+        let query: String
+        let limit: Int
+        let offset: Int
+    }
+
+    let page: [Recording]
+    private(set) var calls: [Call] = []
+
+    init(page: [Recording]) { self.page = page }
+
+    func load(query: String, limit: Int, offset: Int) async throws -> [Recording] {
+        calls.append(Call(query: query, limit: limit, offset: offset))
+        return page
     }
 }
 

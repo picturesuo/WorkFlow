@@ -33,11 +33,19 @@ final class RecordingHistoryModel: ObservableObject {
     private var loadTask: Task<Void, Never>?
     /// A page request is in flight. Not published: only the spinners are.
     private var isLoading = false
+    /// The unsearched first page, read as soon as the model exists so the
+    /// read overlaps the window's first layout.
+    private var prefetch: Task<[Recording], Error>?
 
-    init(pageSize: Int = 100, loader: @escaping Loader) {
+    /// With `prefetchesFirstPage`, the unsearched first page starts loading
+    /// now and the list's first request uses it.
+    init(pageSize: Int = 100, prefetchesFirstPage: Bool = false, loader: @escaping Loader) {
         self.pageSize = pageSize
         self.initialPageLimit = pageSize
         self.loader = loader
+        if prefetchesFirstPage {
+            prefetch = Task { try await loader("", pageSize, 0) }
+        }
     }
 
     /// Starts a new query from its first page. The current rows stay until
@@ -79,6 +87,13 @@ final class RecordingHistoryModel: ObservableObject {
         setIfChanged(\.isLoadingMore, offset > 0)
         setIfChanged(\.isInitialLoading, offset == 0 && recordings.isEmpty)
         setIfChanged(\.errorMessage, nil)
+        // The prefetch answers only the first unsearched page at the normal
+        // size; any first-page load discards it, so it is never shown stale.
+        var prefetched: Task<[Recording], Error>?
+        if offset == 0 {
+            if requestQuery.isEmpty && limit == pageSize { prefetched = prefetch }
+            prefetch = nil
+        }
 
         let task = Task { [weak self] in
             guard let self else { return }
@@ -93,7 +108,13 @@ final class RecordingHistoryModel: ObservableObject {
             }
 
             do {
-                let page = try await self.loader(requestQuery, limit, offset)
+                let page: [Recording]
+                if let prefetched, let value = try? await prefetched.value {
+                    page = value
+                } else {
+                    // No prefetch, or it failed: read once now.
+                    page = try await self.loader(requestQuery, limit, offset)
+                }
                 guard self.generation == requestGeneration else { return }
                 if offset == 0 {
                     if self.recordings != page { self.recordings = page }
@@ -206,7 +227,7 @@ class ContentViewModel: ObservableObject {
         self.transcriptionService = transcriptionService ?? .shared
         self.transcriptionQueue = transcriptionQueue ?? .shared
         self.recordingStore = recordingStore
-        let history = RecordingHistoryModel { query, limit, offset in
+        let history = RecordingHistoryModel(prefetchesFirstPage: true) { query, limit, offset in
             if query.isEmpty {
                 return try await recordingStore.fetchRecordings(limit: limit, offset: offset)
             }
