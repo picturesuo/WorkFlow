@@ -1495,33 +1495,39 @@ struct PermissionsView: View {
 
     var body: some View {
         VStack(spacing: 20) {
-            Text("Permissions needed")
-                .font(.title2.weight(.semibold))
-                .padding()
+            Spacer()
 
-            if didMigrateFromChat {
-                Text("WorkFlow now has its own macOS identity. Your settings and History were preserved, but macOS needs these permissions once more.")
-                    .font(.callout)
-                    .foregroundStyle(.secondary)
-                    .multilineTextAlignment(.center)
-                    .accessibilityLabel("WorkFlow was renamed. Settings and History were preserved. Grant permissions once more.")
-            }
+            // Centered in the window and no wider than a readable column.
+            VStack(spacing: 20) {
+                Text("Permissions needed")
+                    .font(.title2.weight(.semibold))
+                    .padding()
 
-            PermissionRow(
-                isGranted: permissionsManager.isMicrophonePermissionGranted,
-                title: "Microphone Access",
-                description: "Required for audio recording",
-                action: {
-                    permissionsManager.requestMicrophonePermissionOrOpenSystemPreferences()
+                if didMigrateFromChat {
+                    Text("WorkFlow now has its own macOS identity. Your settings and History were preserved, but macOS needs these permissions once more.")
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                        .multilineTextAlignment(.center)
+                        .accessibilityLabel("WorkFlow was renamed. Settings and History were preserved. Grant permissions once more.")
                 }
-            )
 
-            PermissionRow(
-                isGranted: permissionsManager.isAccessibilityPermissionGranted,
-                title: "Accessibility Access",
-                description: "Required to paste transcriptions into other apps",
-                action: { permissionsManager.openSystemPreferences(for: .accessibility) }
-            )
+                PermissionRow(
+                    isGranted: permissionsManager.isMicrophonePermissionGranted,
+                    title: "Microphone Access",
+                    description: "Required for audio recording",
+                    action: {
+                        permissionsManager.requestMicrophonePermissionOrOpenSystemPreferences()
+                    }
+                )
+
+                PermissionRow(
+                    isGranted: permissionsManager.isAccessibilityPermissionGranted,
+                    title: "Accessibility Access",
+                    description: "Required to paste transcriptions into other apps",
+                    action: { permissionsManager.openSystemPreferences(for: .accessibility) }
+                )
+            }
+            .frame(maxWidth: 480)
 
             Spacer()
         }
@@ -1537,28 +1543,29 @@ struct PermissionRow: View {
     @Environment(\.colorScheme) private var colorScheme
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack {
-                Image(systemName: isGranted ? "checkmark.circle.fill" : "exclamationmark.circle.fill")
-                    .foregroundColor(isGranted ? .green : ThemePalette.caution(colorScheme))
+        // The description sits under its title, not under the icon.
+        HStack(alignment: .firstTextBaseline, spacing: 10) {
+            Image(systemName: isGranted ? "checkmark.circle.fill" : "exclamationmark.circle.fill")
+                .foregroundColor(isGranted ? .green : ThemePalette.caution(colorScheme))
+                .font(.headline)
 
+            VStack(alignment: .leading, spacing: 4) {
                 Text(title)
                     .font(.headline)
-
-                Spacer()
-
-                if !isGranted {
-                    Button("Grant Access") {
-                        action()
-                    }
-                    .buttonStyle(.borderedProminent)
-                    .accessibilityLabel("Grant \(title)")
-                }
+                Text(description)
+                    .font(.subheadline)
+                    .foregroundColor(.secondary)
             }
 
-            Text(description)
-                .font(.subheadline)
-                .foregroundColor(.secondary)
+            Spacer(minLength: WFSpace.md)
+
+            if !isGranted {
+                Button("Grant Access") {
+                    action()
+                }
+                .buttonStyle(.borderedProminent)
+                .accessibilityLabel("Grant \(title)")
+            }
         }
         .padding()
         .surfaceCard()

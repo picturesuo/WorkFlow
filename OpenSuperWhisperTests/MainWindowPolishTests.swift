@@ -88,6 +88,21 @@ final class MainWindowPolishTests: XCTestCase {
         XCTAssertTrue(menu.1.contains(microphone.displayName), "\(menu.1)")
     }
 
+    // MARK: Permissions
+
+    func testPermissionRowSpeaksTitleDescriptionAndButton() {
+        let spoken = AccessibilityTree.withSwiftUITree {
+            let row = OffscreenHost(
+                PermissionRow(isGranted: false, title: "Microphone Access", description: "Required for audio recording", action: {}),
+                size: CGSize(width: 480, height: 90)
+            )
+            return Self.spokenText(in: row.host)
+        }
+        for text in ["Microphone Access", "Required for audio recording", "Grant Microphone Access"] {
+            XCTAssertTrue(spoken.contains(text), "\(text): \(spoken)")
+        }
+    }
+
     // MARK: Helpers
 
     /// Every label, title and string value VoiceOver can read below
