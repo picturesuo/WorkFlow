@@ -1092,9 +1092,13 @@ final class UIScreenshotCatalogTests: XCTestCase {
             )
         }
         let method = "CorrectionLearningCard(session:defaults:) with scripted History candidates and provider"
-        let textFile = FileManager.default.temporaryDirectory.appendingPathComponent("catalog-finished-\(UUID().uuidString).txt")
+        // A fixed name in a folder of its own, so the rendered summary is the same every run.
+        let textFolder = FileManager.default.temporaryDirectory
+            .appendingPathComponent("UIScreenshotCatalog-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: textFolder, withIntermediateDirectories: true)
+        let textFile = textFolder.appendingPathComponent("catalog-finished-document.txt")
         try Catalog.learningDocument.write(to: textFile, atomically: true, encoding: .utf8)
-        fixtureFiles.append(textFile)
+        fixtureFiles.append(textFolder)
 
         for scheme in schemes {
             let background = ThemePalette.windowBackground(scheme)
@@ -1473,8 +1477,30 @@ final class UIScreenshotCatalogTests: XCTestCase {
             file: name, family: family, screen: screen, state: state, scheme: Self.schemeName(scheme),
             width: width, height: height, pixelWidth: srgb.pixelsWide, pixelHeight: srgb.pixelsHigh,
             viewType: view, source: CatalogSource.declaration(of: view), method: method, note: note,
-            backingScale: Double(host.window.backingScaleFactor)
+            backingScale: Double(host.window.backingScaleFactor),
+            animated: Self.drawsWallClockAnimation(screen: screen, state: state)
         ))
+    }
+
+    /// States that draw one frame of an animation driven by the wall clock,
+    /// so two runs differ there and only there: the record control's progress
+    /// arc while connecting or working, the indicator's processing wave while
+    /// transcribing or refining, and the cancel countdown bar.
+    static func drawsWallClockAnimation(screen: String, state: String) -> Bool {
+        switch screen {
+        case "record-button":
+            // Reduce Motion replaces the arc with a steady ring.
+            return ["connecting", "working"].contains(state)
+        case "dictation-dock":
+            // Statuses whose record control is connecting or working.
+            return ["connecting", "transcribing", "loading-model", "processing-queue", "saving-meeting"].contains(state)
+        case "main-window":
+            return ["dictation-connecting", "dictation-transcribing", "dictation-processing-queue"].contains(state)
+        case "indicator":
+            return state.hasPrefix("decoding-") || state.hasPrefix("recording-confirm-cancel-")
+        default:
+            return false
+        }
     }
 
     /// Types into a SwiftUI text field the way AppKit reports typing.
@@ -1565,17 +1591,18 @@ final class UIScreenshotCatalogTests: XCTestCase {
         ordered in or made key. Hover, pressed, and focus-ring states are not drawn (see `not-capturable.md`).
 
         Run it again with `TEST_RUNNER_WF_UI_SHOTS_OUT=<folder>` and the xcodebuild test command for \
-        `-only-testing:OpenSuperWhisperTests/UIScreenshotCatalogTests`; file names stay the same, so two folders can be compared file by file.
+        `-only-testing:OpenSuperWhisperTests/UIScreenshotCatalogTests`; file names stay the same, so two folders can be compared file by file. \
+        Rows marked animated draw one frame of a wall-clock animation, so they differ between runs and are compared by eye.
 
         """
         for family in CatalogFamily.order {
             let rows = all.filter { $0.family == family }
             guard !rows.isEmpty else { continue }
             markdown += "\n## \(family) (\(rows.count))\n\n"
-            markdown += "| File | Screen | State | Scheme | Size (pt) | View | Source | How reached | Note |\n"
-            markdown += "|---|---|---|---|---|---|---|---|---|\n"
+            markdown += "| File | Screen | State | Scheme | Size (pt) | Animated | View | Source | How reached | Note |\n"
+            markdown += "|---|---|---|---|---|---|---|---|---|---|\n"
             for row in rows {
-                markdown += "| \(cell(row.file)) | \(cell(row.screen)) | \(cell(row.state)) | \(row.scheme) | \(row.width)x\(row.height) | `\(cell(row.viewType))` | `\(cell(row.source))` | \(cell(row.method)) | \(cell(row.note)) |\n"
+                markdown += "| \(cell(row.file)) | \(cell(row.screen)) | \(cell(row.state)) | \(row.scheme) | \(row.width)x\(row.height) | \(row.animated ? "yes" : "no") | `\(cell(row.viewType))` | `\(cell(row.source))` | \(cell(row.method)) | \(cell(row.note)) |\n"
             }
         }
         try? markdown.write(to: output.appendingPathComponent("index.md"), atomically: true, encoding: .utf8)
@@ -2125,6 +2152,47 @@ private struct CatalogRow: Codable {
     var method: String
     var note: String
     var backingScale: Double
+    var animated: Bool
+
+    init(file: String, family: String, screen: String, state: String, scheme: String, width: Int, height: Int,
+         pixelWidth: Int, pixelHeight: Int, viewType: String, source: String, method: String, note: String,
+         backingScale: Double, animated: Bool) {
+        self.file = file
+        self.family = family
+        self.screen = screen
+        self.state = state
+        self.scheme = scheme
+        self.width = width
+        self.height = height
+        self.pixelWidth = pixelWidth
+        self.pixelHeight = pixelHeight
+        self.viewType = viewType
+        self.source = source
+        self.method = method
+        self.note = note
+        self.backingScale = backingScale
+        self.animated = animated
+    }
+
+    /// Rows written before the flag existed read as not animated.
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        file = try container.decode(String.self, forKey: .file)
+        family = try container.decode(String.self, forKey: .family)
+        screen = try container.decode(String.self, forKey: .screen)
+        state = try container.decode(String.self, forKey: .state)
+        scheme = try container.decode(String.self, forKey: .scheme)
+        width = try container.decode(Int.self, forKey: .width)
+        height = try container.decode(Int.self, forKey: .height)
+        pixelWidth = try container.decode(Int.self, forKey: .pixelWidth)
+        pixelHeight = try container.decode(Int.self, forKey: .pixelHeight)
+        viewType = try container.decode(String.self, forKey: .viewType)
+        source = try container.decode(String.self, forKey: .source)
+        method = try container.decode(String.self, forKey: .method)
+        note = try container.decode(String.self, forKey: .note)
+        backingScale = try container.decode(Double.self, forKey: .backingScale)
+        animated = try container.decodeIfPresent(Bool.self, forKey: .animated) ?? false
+    }
 }
 
 private struct CatalogUnreached {
