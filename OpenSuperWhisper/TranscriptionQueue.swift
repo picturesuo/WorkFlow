@@ -1,0 +1,510 @@
+import Foundation
+import Combine
+
+@MainActor
+class TranscriptionQueue: ObservableObject {
+    static let shared = TranscriptionQueue()
+
+    @Published private(set) var isProcessing = false
+    @Published private(set) var currentRecordingId: UUID?
+
+    private let transcriptionService: TranscriptionService
+    private let recordingStore: RecordingStore
+    private let cleanupPipeline: TranscriptCleanupPipeline
+    private var processingTask: Task<Void, Never>?
+    private var currentTranscriptionTask: Task<Void, Never>?
+    private var cancelledRecordingIds: Set<UUID> = []
+    private var progressCancellable: AnyCancellable?
+
+    /// Where learned preferences live, to check what a regeneration may reuse.
+    private let learningDefaults: UserDefaults
+
+    private convenience init() {
+        self.init(
+            transcriptionService: TranscriptionService.shared,
+            recordingStore: RecordingStore.shared,
+            cleanupPipeline: TranscriptCleanupPipeline.shared
+        )
+    }
+
+    init(
+        transcriptionService: TranscriptionService,
+        recordingStore: RecordingStore,
+        cleanupPipeline: TranscriptCleanupPipeline,
+        learningDefaults: UserDefaults = .standard
+    ) {
+        self.transcriptionService = transcriptionService
+        self.recordingStore = recordingStore
+        self.cleanupPipeline = cleanupPipeline
+        self.learningDefaults = learningDefaults
+        setupProgressObserver()
+    }
+    
+    private func setupProgressObserver() {
+        progressCancellable = transcriptionService.$progress
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] newProgress in
+                guard let self = self,
+                      let recordingId = self.currentRecordingId,
+                      newProgress > 0,
+                      newProgress < 1.0 else { return }
+                
+                self.recordingStore.updateRecordingProgressTransient(
+                    recordingId,
+                    progress: newProgress,
+                    status: .transcribing
+                )
+            }
+    }
+
+    func cancelRecording(_ recordingId: UUID) {
+        cancelledRecordingIds.insert(recordingId)
+
+        if currentRecordingId == recordingId {
+            transcriptionService.cancelTranscription(requestID: recordingId)
+            currentTranscriptionTask?.cancel()
+        }
+    }
+
+    private func isRecordingCancelled(_ recordingId: UUID) -> Bool {
+        return cancelledRecordingIds.contains(recordingId)
+    }
+
+    private func clearCancellation(_ recordingId: UUID) {
+        cancelledRecordingIds.remove(recordingId)
+    }
+
+    func startProcessingQueue() {
+        guard !isProcessing else { return }
+
+        isProcessing = true
+
+        processingTask = Task {
+            await cleanupMissingFiles()
+            await processQueue()
+            isProcessing = false
+            processingTask = nil
+        }
+    }
+
+    /// Older pending rows can point at a temp file already moved to their owned
+    /// audio path before interruption. Recover that exact path, never another recording.
+    nonisolated static func recoverPendingAudioSource(sourceURL: URL?, savedAudioURL: URL) -> URL? {
+        let fileManager = FileManager.default
+        if let sourceURL, fileManager.fileExists(atPath: sourceURL.path) {
+            return sourceURL
+        }
+        return fileManager.fileExists(atPath: savedAudioURL.path) ? savedAudioURL : nil
+    }
+
+    private func cleanupMissingFiles() async {
+        let pendingRecordings = recordingStore.getPendingRecordings()
+        let recoveredSources = await Task.detached(priority: .utility) {
+            pendingRecordings.map { recording in
+                let sourceURL = recording.sourceFileURL.flatMap { path in
+                    path.isEmpty ? nil : URL(fileURLWithPath: path)
+                }
+                return (recording, Self.recoverPendingAudioSource(
+                    sourceURL: sourceURL, savedAudioURL: recording.url
+                ))
+            }
+        }.value
+
+        for (recording, sourceURL) in recoveredSources {
+            guard let sourceURL else {
+                await recordingStore.updateRecordingProgressOnlySync(
+                    recording.id,
+                    transcription: recording.transcription.isEmpty
+                        ? "Audio file not found. This recording could not resume."
+                        : recording.transcription,
+                    progress: 0,
+                    status: .failed,
+                    isRegeneration: false
+                )
+                continue
+            }
+            if sourceURL.path != recording.sourceFileURL {
+                do {
+                    try await recordingStore.updateSourceFileURL(recording.id, sourceURL: sourceURL.path)
+                } catch {
+                    await recordingStore.updateRecordingStatusOnly(recording.id, progress: 0, status: .failed)
+                }
+            }
+        }
+    }
+
+    /// Queues audio for transcription. `captureOrigin` is `.live` only for a
+    /// dictation queued because the engine was busy; its processing time,
+    /// which includes waiting in the queue, is never measured, and its active
+    /// speech is measured once its audio has moved into History.
+    func addFileToQueue(
+        url: URL,
+        title: String? = nil,
+        mode: RecordingMode = .dictation,
+        cleanupRequested: Bool = false,
+        targetBundleID: String? = nil,
+        captureOrigin: CaptureOrigin = .imported
+    ) async {
+        do {
+            let durationInSeconds = await AudioUtil.audioDuration(url: url)
+
+            let timestamp = Date()
+            let id = UUID()
+            let fileName = AudioRecorder.recordingFileName(id: id)
+            // Captured at enqueue so later filter edits cannot change queued
+            // work. Under Auto that is its choices; it picks from the words
+            // once they are transcribed.
+            let plan = FilterAutoSettings.currentPlan()
+            let selected = plan.provisionalFilter
+            let filter = cleanupRequested ? selected : nil
+            let autoConfig = cleanupRequested ? plan.autoConfig : nil
+
+            let recording = Recording(
+                id: id,
+                timestamp: timestamp,
+                fileName: fileName,
+                transcription: "",
+                duration: durationInSeconds,
+                status: .pending,
+                progress: 0.0,
+                sourceFileURL: url.path,
+                title: title,
+                mode: mode,
+                cleanupRequested: cleanupRequested,
+                targetBundleID: targetBundleID,
+                cleanupMode: filter?.mode,
+                cleanupFilterName: filter?.customName,
+                cleanupFilterInstructions: filter?.customInstructions,
+                cleanupFilterWritesDigits: filter?.customWritesDigits ?? false,
+                cleanupFilterReason: filter == nil || autoConfig != nil ? nil : .manual,
+                cleanupFilterAuto: autoConfig
+            )
+
+            if mode == .dictation {
+                // The selection is kept even when cleanup is off; the texts
+                // are filled when the first transcription finishes.
+                try await recordingStore.addRecordingSync(
+                    recording,
+                    source: DictationSource(
+                        recordingID: id,
+                        disposition: .pending,
+                        filter: selected,
+                        captureOrigin: captureOrigin,
+                        speechActivity: captureOrigin == .live ? .measuring : nil
+                    )
+                )
+            } else {
+                try await recordingStore.addRecordingSync(recording)
+            }
+
+            startProcessingQueue()
+        } catch {
+            print("Failed to add the audio file to the transcription queue.")
+        }
+    }
+
+    /// Regenerates with a filter picked by hand from History, which replaces
+    /// whatever was picked or chosen by Auto before.
+    func requeueRecording(_ recording: Recording, with selection: CleanupFilterSelection) async {
+        guard let filter = FilterAutoSettings.capture(
+            selection, filters: CustomCleanupFilterStore.load()
+        )?.snapshot else { return }
+        await recordingStore.setRegenerationFilter(recording.id, filter: filter)
+        var updated = recording
+        updated.cleanupRequested = true
+        await requeueRecording(updated)
+    }
+
+    func requeueRecording(_ recording: Recording) async {
+        let sourceURL: URL? = await Task.detached(priority: .userInitiated) {
+            if let existingSource = recording.sourceFileURL,
+               !existingSource.isEmpty,
+               FileManager.default.fileExists(atPath: existingSource) {
+                return URL(fileURLWithPath: existingSource)
+            } else if FileManager.default.fileExists(atPath: recording.url.path) {
+                return recording.url
+            }
+            return nil
+        }.value
+        
+        guard let sourceURL = sourceURL else {
+            // Never replace a transcript with this message; only a row with
+            // nothing to keep says its audio is gone.
+            guard recording.status == .failed || recording.transcription.isEmpty else { return }
+            await recordingStore.updateRecordingProgressOnlySync(
+                recording.id,
+                transcription: "Cannot regenerate: audio file not found",
+                progress: 0.0,
+                status: .failed
+            )
+            return
+        }
+
+        let shouldCleanup = recording.cleanupRequested
+            || (recording.cleanupSource != nil && recording.cleanupSource != .disabled)
+        await recordingStore.updateCleanupRequested(recording.id, cleanupRequested: shouldCleanup)
+        await recordingStore.updateRecordingStatusOnly(
+            recording.id,
+            progress: 0.0,
+            status: .pending,
+            isRegeneration: true
+        )
+
+        do {
+            try await recordingStore.updateSourceFileURL(recording.id, sourceURL: sourceURL.path)
+        } catch {
+            print("Failed to update the queued audio source.")
+        }
+
+        startProcessingQueue()
+    }
+
+    /// The History text of a dictation whose transcription failed.
+    nonisolated static func failedTranscriptionText(_ error: Error) -> String {
+        "Failed to transcribe: \(error.localizedDescription)"
+    }
+
+    nonisolated static func shouldDiscardEmptyDictation(
+        text: String,
+        sourceURL: URL,
+        mode: RecordingMode
+    ) -> Bool {
+        mode == .dictation
+            && text.isEmpty
+            && sourceURL.path.hasPrefix(AudioRecorder.temporaryRecordingsDirectory.path)
+    }
+
+    private func processQueue() async {
+        while let recording = recordingStore.getNextPendingRecording() {
+            currentRecordingId = recording.id
+            await processRecording(recording)
+            currentRecordingId = nil
+        }
+    }
+
+    /// Cancellation comes from committed History deletion. If an awaited copy
+    /// finishes after that deletion, remove the newly recreated owned audio too.
+    private func discardCancelledOutput(_ recording: Recording) async -> Bool {
+        guard isRecordingCancelled(recording.id) || Task.isCancelled else { return false }
+        await Task.detached(priority: .utility) {
+            try? FileManager.default.removeItem(at: recording.url)
+        }.value
+        return true
+    }
+
+    private func processRecording(_ recording: Recording) async {
+        if isRecordingCancelled(recording.id) {
+            clearCancellation(recording.id)
+            return
+        }
+
+        guard let sourceURLString = recording.sourceFileURL,
+              !sourceURLString.isEmpty else {
+            await recordingStore.updateRecordingProgressOnlySync(
+                recording.id,
+                transcription: "Source file not found",
+                progress: 0.0,
+                status: .failed
+            )
+            return
+        }
+
+        let sourceURL = URL(fileURLWithPath: sourceURLString)
+
+        let sourceExists = await Task.detached(priority: .userInitiated) {
+            FileManager.default.fileExists(atPath: sourceURL.path)
+        }.value
+        
+        guard sourceExists else {
+            await recordingStore.updateRecordingProgressOnlySync(
+                recording.id,
+                transcription: "Source file not found",
+                progress: 0.0,
+                status: .failed
+            )
+            return
+        }
+
+        let isRegeneration = !recording.transcription.isEmpty && 
+            recording.transcription != "In queue..." && 
+            recording.transcription != "Starting transcription..."
+
+        if isRegeneration {
+            await recordingStore.updateRecordingStatusOnly(
+                recording.id,
+                progress: 0.0,
+                status: .converting
+            )
+        } else {
+            await recordingStore.updateRecordingProgressOnlySync(
+                recording.id,
+                transcription: "",
+                progress: 0.0,
+                status: .converting
+            )
+        }
+
+        currentTranscriptionTask = Task {
+            do {
+                if isRecordingCancelled(recording.id) {
+                    return
+                }
+
+                if isRecordingCancelled(recording.id) || Task.isCancelled {
+                    return
+                }
+
+                let settings = Settings()
+                let text = try await transcriptionService.transcribeAudio(url: sourceURL, settings: settings, requestID: recording.id)
+
+                if isRecordingCancelled(recording.id) || Task.isCancelled {
+                    return
+                }
+
+                if Self.shouldDiscardEmptyDictation(
+                    text: text,
+                    sourceURL: sourceURL,
+                    mode: recording.mode
+                ) {
+                    try await recordingStore.deleteRecordingSync(recording)
+                    await Task.detached(priority: .utility) {
+                        try? FileManager.default.removeItem(at: sourceURL)
+                    }.value
+                    return
+                }
+
+                let finalURL = recording.url
+                try await Task.detached(priority: .userInitiated) {
+                    try? FileManager.default.createDirectory(
+                        at: Recording.recordingsDirectory,
+                        withIntermediateDirectories: true
+                    )
+
+                    if sourceURL.path != finalURL.path {
+                        if FileManager.default.fileExists(atPath: finalURL.path) {
+                            try? FileManager.default.removeItem(at: finalURL)
+                        }
+                        // Our own temp recordings are moved (no disk duplication);
+                        // user-provided files must stay in place, so they are copied.
+                        if sourceURL.path.hasPrefix(AudioRecorder.temporaryRecordingsDirectory.path) {
+                            try FileManager.default.moveItem(at: sourceURL, to: finalURL)
+                        } else {
+                            try FileManager.default.copyItem(at: sourceURL, to: finalURL)
+                        }
+                    }
+                }.value
+
+                if await discardCancelledOutput(recording) { return }
+                // Commit the new source before remote cleanup; startup also recovers
+                // the narrow move/DB-write interruption window from recording.url.
+                try await recordingStore.updateSourceFileURL(recording.id, sourceURL: finalURL.path)
+                if await discardCancelledOutput(recording) { return }
+
+                if recording.mode == .meeting,
+                   text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    await recordingStore.updateRecordingProgressOnlySync(
+                        recording.id,
+                        transcription: "No speech was detected. The meeting audio was saved for playback or retry.",
+                        progress: 0,
+                        status: .failed,
+                        isRegeneration: false
+                    )
+                    return
+                }
+
+                if recording.cleanupRequested {
+                    // Learned preferences captured at enqueue apply only to the
+                    // mode or filter they were captured for. Queued work keeps
+                    // them as captured; a regeneration keeps only the ones
+                    // still in use, so a deleted, switched-off, or reset
+                    // preference never comes back.
+                    let captured = try? await recordingStore.dictationSource(for: recording.id)?.filter
+                    // The row was read when its turn came, so a filter picked
+                    // for a regeneration is already in it.
+                    let current = recording
+                    let plan: CleanupFilterPlan? = if let auto = current.cleanupFilterAuto {
+                        .auto(isRegeneration ? auto.keepingStillActive(in: learningDefaults) : auto)
+                    } else {
+                        current.cleanupMode.map {
+                            let capturedLearned = captured?.mode == $0 ? captured?.learned ?? [] : []
+                            return .fixed(
+                                CleanupFilterSnapshot(
+                                    mode: $0,
+                                    customName: current.cleanupFilterName,
+                                    customInstructions: current.cleanupFilterInstructions,
+                                    customID: captured?.customName == current.cleanupFilterName ? captured?.customID : nil,
+                                    customWritesDigits: current.cleanupFilterWritesDigits,
+                                    learned: isRegeneration
+                                        ? LearnedPreferenceStore.stillActive(capturedLearned, in: learningDefaults)
+                                        : capturedLearned
+                                ),
+                                current.cleanupFilterReason ?? .manual
+                            )
+                        }
+                    }
+                    let cleanup = await cleanupPipeline.finalize(
+                        text,
+                        targetBundleID: recording.targetBundleID,
+                        cleanupOverride: true,
+                        filterPlan: plan
+                    )
+                    if await discardCancelledOutput(recording) { return }
+                    await recordingStore.completeDictationSource(recording.id, recognizerText: text, cleanup: cleanup)
+                    await recordingStore.completeRecording(
+                        recording.id,
+                        transcription: cleanup.text,
+                        cleanup: cleanup
+                    )
+                } else {
+                    let localText = VocabularyRewriter.apply(text, entries: VocabularyStore.load())
+                    let localOutcome = TranscriptCleanupOutcome(
+                        text: localText,
+                        source: .disabled,
+                        inputTokens: nil,
+                        outputTokens: nil,
+                        modelID: nil,
+                        rawTokenEstimate: LocalTokenEstimator.estimate(text),
+                        finalTokenEstimate: LocalTokenEstimator.estimate(localText),
+                        tokenEstimatorID: LocalTokenEstimator.identifier,
+                        cleanupInput: localText
+                    )
+                    await recordingStore.completeDictationSource(recording.id, recognizerText: text, cleanup: localOutcome)
+                    await recordingStore.completeRecording(
+                        recording.id,
+                        transcription: localText,
+                        cleanup: localOutcome
+                    )
+                }
+                // A live dictation queued while busy is measured now that its
+                // audio is in History. Only rows still waiting are measured,
+                // so a regeneration never changes an existing figure.
+                if recording.mode == .dictation {
+                    recordingStore.measureSpeechActivityInBackground(for: recording.id)
+                }
+
+                _ = await discardCancelledOutput(recording)
+            } catch {
+                if await discardCancelledOutput(recording) { return }
+                // Our own recordings leave the temporary folder, which is swept
+                // after a day, so Regenerate can still find them later.
+                if sourceURL.path.hasPrefix(AudioRecorder.temporaryRecordingsDirectory.path),
+                   let kept = AudioRecorder.shared.keepTemporaryRecording(sourceURL, at: recording.url),
+                   kept != sourceURL {
+                    try? await recordingStore.updateSourceFileURL(recording.id, sourceURL: kept.path)
+                }
+                await recordingStore.updateRecordingProgressOnlySync(
+                    recording.id,
+                    transcription: Self.failedTranscriptionText(error),
+                    progress: 0.0,
+                    status: .failed,
+                    isRegeneration: false
+                )
+            }
+        }
+
+        await currentTranscriptionTask?.value
+        currentTranscriptionTask = nil
+        clearCancellation(recording.id)
+    }
+
+}

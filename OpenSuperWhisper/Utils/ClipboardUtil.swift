@@ -1,0 +1,298 @@
+import Cocoa
+import ApplicationServices
+import Carbon
+
+class ClipboardUtil {
+
+    typealias PasteboardContents = ([NSPasteboard.PasteboardType: Any], [NSPasteboard.PasteboardType])
+
+    /// Slow consumers (browsers, Electron apps) can service the synthesized
+    /// Cmd+V long after the event is posted. Restoring the original clipboard
+    /// earlier makes them paste the old contents instead of the transcription.
+    static let clipboardRestoreDelay: TimeInterval = 1.5
+
+    /// Copies text to clipboard without pasting or restoring
+    static func copyToClipboard(_ text: String) {
+        let pasteboard = NSPasteboard.general
+        pasteboard.declareTypes([.string], owner: nil)
+        pasteboard.setString(text, forType: .string)
+    }
+
+    /// Pastes text and keeps it in clipboard (does not restore original clipboard)
+    @discardableResult
+    static func insertTextAndKeepInClipboard(_ text: String, targetPID: pid_t? = nil) -> Bool {
+        let pasteboard = NSPasteboard.general
+        pasteboard.declareTypes([.string], owner: nil)
+        guard pasteboard.setString(text, forType: .string) else { return false }
+        return simulatePaste(targetPID: targetPID)
+    }
+
+    /// Pastes text and restores original clipboard (legacy behavior)
+    @discardableResult
+    static func insertText(
+        _ text: String,
+        targetPID: pid_t? = nil,
+        pasteboard: NSPasteboard = .general,
+        restoreDelay: TimeInterval = clipboardRestoreDelay,
+        paste: ((pid_t?) -> Bool)? = nil
+    ) -> Bool {
+        // Save current pasteboard contents. A paste still waiting to restore
+        // the user's clipboard left its transcript there, so a paste that
+        // starts before then keeps the user's contents, not that transcript.
+        let savedContents: PasteboardContents?
+        if let pending = pendingRestore,
+           pending.pasteboard == pasteboard.name,
+           pending.changeCount == pasteboard.changeCount {
+            savedContents = pending.contents
+        } else {
+            savedContents = saveCurrentPasteboardContents(from: pasteboard)
+        }
+        pendingRestore = nil
+
+        // Set new text to pasteboard
+        pasteboard.declareTypes([.string], owner: nil)
+        guard pasteboard.setString(text, forType: .string) else { return false }
+        let changeCountAfterCopy = pasteboard.changeCount
+
+        // Simulate Cmd+V using layout-aware keycode resolution
+        guard (paste ?? simulatePaste(targetPID:))(targetPID) else {
+            // Keep the newest transcript available for a manual Cmd+V. In
+            // particular, do not restore stale clipboard contents on failure.
+            return false
+        }
+
+        // Restore original contents only after the target app had a chance to
+        // process the paste, and only if the pasteboard still holds our text:
+        // a different changeCount means the user (or another app) took over
+        // the clipboard and restoring would clobber their data.
+        if let contents = savedContents {
+            pendingRestore = (pasteboard.name, contents, changeCountAfterCopy)
+            DispatchQueue.main.asyncAfter(deadline: .now() + restoreDelay) {
+                // A newer paste took over this restore.
+                guard pendingRestore?.pasteboard == pasteboard.name,
+                      pendingRestore?.changeCount == changeCountAfterCopy else { return }
+                pendingRestore = nil
+                restoreIfUnchanged(contents, expectedChangeCount: changeCountAfterCopy, pasteboard: pasteboard)
+            }
+        }
+        return true
+    }
+
+    /// The user's clipboard a paste will restore, and the change count of the
+    /// transcript it put there. Pastes run on the main thread.
+    private static var pendingRestore: (
+        pasteboard: NSPasteboard.Name,
+        contents: PasteboardContents,
+        changeCount: Int
+    )?
+
+    @discardableResult
+    static func restoreIfUnchanged(_ contents: PasteboardContents,
+                                   expectedChangeCount: Int,
+                                   pasteboard: NSPasteboard = .general) -> Bool {
+        guard pasteboard.changeCount == expectedChangeCount else { return false }
+        restorePasteboardContents(contents, to: pasteboard)
+        return true
+    }
+    
+    private static func simulatePaste(targetPID: pid_t?) -> Bool {
+        sendCmdV(targetPID: targetPID)
+    }
+    
+    private static func sendCmdV(targetPID: pid_t?) -> Bool {
+        // Never redirect a finished dictation into whichever app happens to
+        // be focused if its original target closed while transcription ran.
+        if let targetPID, NSRunningApplication(processIdentifier: targetPID) == nil {
+            return false
+        }
+        guard AXIsProcessTrusted() else { return false }
+
+        // QWERTY keycode for V
+        let qwertyKeyCodeV: CGKeyCode = 9
+        
+        // Determine the correct keycode for Cmd+V
+        let keyCodeV: CGKeyCode
+        
+        if isQwertyCommandLayout() {
+            // For layouts like "Dvorak - QWERTY ⌘" that use QWERTY for Command shortcuts
+            keyCodeV = qwertyKeyCodeV
+        } else if let foundKeycode = findKeycodeForCharacter("v") {
+            // For layouts where shortcuts follow the layout (Dvorak Left/Right Hand)
+            keyCodeV = foundKeycode
+        } else {
+            // Fallback for non-Latin layouts (Russian, etc.) - use QWERTY keycode
+            keyCodeV = qwertyKeyCodeV
+        }
+        
+        guard let source = CGEventSource(stateID: .combinedSessionState),
+              let keyDown = CGEvent(keyboardEventSource: source, virtualKey: keyCodeV, keyDown: true),
+              let keyUp = CGEvent(keyboardEventSource: source, virtualKey: keyCodeV, keyDown: false)
+        else { return false }
+        
+        keyDown.flags = .maskCommand
+        keyUp.flags = .maskCommand
+        
+        if let targetPID {
+            keyDown.postToPid(targetPID)
+            keyUp.postToPid(targetPID)
+        } else {
+            keyDown.post(tap: .cghidEventTap)
+            keyUp.post(tap: .cghidEventTap)
+        }
+        return true
+    }
+    
+    static func isQwertyCommandLayout() -> Bool {
+        guard let inputSource = TISCopyCurrentKeyboardInputSource()?.takeRetainedValue(),
+              let idPtr = TISGetInputSourceProperty(inputSource, kTISPropertyInputSourceID)
+        else { return false }
+        
+        let sourceID = Unmanaged<CFString>.fromOpaque(idPtr).takeUnretainedValue() as String
+        
+        // "Dvorak - QWERTY ⌘" uses QWERTY positions for Command shortcuts
+        // Its ID contains "DVORAK-QWERTY" or similar patterns
+        // Also standard QWERTY, ABC, US layouts use keycode 9 for V
+        let qwertyCommandLayouts = [
+            "DVORAK-QWERTY",  // Dvorak - QWERTY ⌘
+            "US",             // US QWERTY
+            "ABC",            // ABC
+            "Australian",     // Australian
+            "British",        // British
+            "Canadian",       // Canadian
+            "USInternational" // US International
+        ]
+        
+        let upperID = sourceID.uppercased()
+        return qwertyCommandLayouts.contains { upperID.contains($0.uppercased()) }
+    }
+    
+    static func findKeycodeForCharacter(_ char: Character) -> CGKeyCode? {
+        guard let inputSource = TISCopyCurrentKeyboardInputSource()?.takeRetainedValue(),
+              let layoutDataPtr = TISGetInputSourceProperty(inputSource, kTISPropertyUnicodeKeyLayoutData)
+        else { return nil }
+        
+        let layoutData = unsafeBitCast(layoutDataPtr, to: CFData.self)
+        let keyboardLayout = unsafeBitCast(
+            CFDataGetBytePtr(layoutData),
+            to: UnsafePointer<UCKeyboardLayout>.self
+        )
+        
+        let targetLower = char.lowercased()
+        
+        // Iterate through common keycodes (0-50 covers all letter keys)
+        for keycode: UInt16 in 0...50 {
+            var deadKeyState: UInt32 = 0
+            var chars = [UniChar](repeating: 0, count: 4)
+            var length: Int = 0
+            
+            let status = UCKeyTranslate(
+                keyboardLayout,
+                keycode,
+                UInt16(kUCKeyActionDisplay),
+                0,
+                UInt32(LMGetKbdType()),
+                UInt32(kUCKeyTranslateNoDeadKeysBit),
+                &deadKeyState,
+                4,
+                &length,
+                &chars
+            )
+            
+            if status == noErr && length > 0 {
+                let resultChar = Character(UnicodeScalar(chars[0])!)
+                if resultChar.lowercased() == targetLower {
+                    return CGKeyCode(keycode)
+                }
+            }
+        }
+        return nil
+    }
+    
+    static func saveCurrentPasteboardContents(from pasteboard: NSPasteboard = .general) -> PasteboardContents? {
+        let types = pasteboard.types ?? []
+        
+        guard !types.isEmpty else { return nil }
+        
+        var savedContents: [NSPasteboard.PasteboardType: Any] = [:]
+        
+        for type in types {
+            if let data = pasteboard.data(forType: type) {
+                savedContents[type] = data
+            } else if let string = pasteboard.string(forType: type) {
+                savedContents[type] = string
+            } else if let urls = pasteboard.propertyList(forType: type) as? [String] {
+                savedContents[type] = urls
+            }
+        }
+        
+        return (!savedContents.isEmpty) ? (savedContents, types) : nil
+    }
+    
+    static func restorePasteboardContents(_ contents: PasteboardContents, to pasteboard: NSPasteboard = .general) {
+        let (savedContents, types) = contents
+        
+        pasteboard.declareTypes(types, owner: nil)
+        
+        for (type, content) in savedContents {
+            if let data = content as? Data {
+                pasteboard.setData(data, forType: type)
+            } else if let string = content as? String {
+                pasteboard.setString(string, forType: type)
+            } else if let urls = content as? [String] {
+                pasteboard.setPropertyList(urls, forType: type)
+            }
+        }
+    }
+    
+    @available(*, deprecated, renamed: "insertText")
+    static func insertTextUsingPasteboard(_ text: String) {
+        insertText(text)
+    }
+    
+    // MARK: - Testing Helpers
+    
+    static func getCurrentInputSourceID() -> String? {
+        guard let inputSource = TISCopyCurrentKeyboardInputSource()?.takeRetainedValue(),
+              let idPtr = TISGetInputSourceProperty(inputSource, kTISPropertyInputSourceID)
+        else { return nil }
+        return Unmanaged<CFString>.fromOpaque(idPtr).takeUnretainedValue() as String
+    }
+    
+    static func switchToInputSource(withID targetID: String) -> Bool {
+        guard let sourceList = TISCreateInputSourceList(nil, false)?.takeRetainedValue() as? [TISInputSource] else {
+            return false
+        }
+        
+        for source in sourceList {
+            guard let idPtr = TISGetInputSourceProperty(source, kTISPropertyInputSourceID) else { continue }
+            let sourceID = Unmanaged<CFString>.fromOpaque(idPtr).takeUnretainedValue() as String
+            
+            if sourceID.contains(targetID) || targetID.contains(sourceID) || sourceID == targetID {
+                let result = TISSelectInputSource(source)
+                usleep(100000) // 100ms delay for layout switch
+                return result == noErr
+            }
+        }
+        return false
+    }
+    
+    static func getAvailableInputSources() -> [String] {
+        guard let sourceList = TISCreateInputSourceList(nil, false)?.takeRetainedValue() as? [TISInputSource] else {
+            return []
+        }
+        
+        var result: [String] = []
+        for source in sourceList {
+            guard let idPtr = TISGetInputSourceProperty(source, kTISPropertyInputSourceID),
+                  let selectablePtr = TISGetInputSourceProperty(source, kTISPropertyInputSourceIsSelectCapable)
+            else { continue }
+            
+            let isSelectable = unsafeBitCast(selectablePtr, to: CFBoolean.self) == kCFBooleanTrue
+            if isSelectable {
+                let sourceID = Unmanaged<CFString>.fromOpaque(idPtr).takeUnretainedValue() as String
+                result.append(sourceID)
+            }
+        }
+        return result
+    }
+}

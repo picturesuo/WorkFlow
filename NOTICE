@@ -1,0 +1,51 @@
+WorkFlow
+Copyright (c) 2026 WorkFlow contributors
+
+WorkFlow is derived from OpenSuperWhisper:
+https://github.com/Starmel/OpenSuperWhisper
+Copyright (c) 2024 OpenSuperWhisper
+Licensed under the MIT License included in LICENSE.
+
+Product and pipeline research also referenced FreeFlow:
+https://github.com/zachlatta/freeflow
+Copyright (c) 2026 Zach Latta
+Licensed under the MIT License.
+
+The bundled voice-activity-detection model is derived from Silero VAD:
+https://github.com/snakers4/silero-vad
+Copyright (c) 2020-present Silero Team
+Licensed under the MIT License.
+
+Parakeet transcription uses FluidAudio:
+https://github.com/FluidInference/FluidAudio
+Licensed under the Apache License, Version 2.0.
+
+Parakeet Core ML model files are downloaded on demand from FluidInference:
+https://huggingface.co/FluidInference/parakeet-tdt-0.6b-v3-coreml
+Based on NVIDIA Parakeet TDT and licensed under CC BY 4.0.
+
+Whisper inference, the ggml test model, and the JFK test-audio fixture come
+from whisper.cpp and its model repository:
+https://github.com/ggml-org/whisper.cpp
+https://huggingface.co/ggerganov/whisper.cpp
+Licensed under the MIT License.
+
+The optional Asian autocorrect setting uses AutoCorrect, built into the
+bundled autocorrect-swift library:
+https://github.com/huacnlee/autocorrect
+Copyright (c) 2020 Jason Lee
+Licensed under the MIT License.
+
+History storage uses GRDB.swift:
+https://github.com/groue/GRDB.swift
+Copyright (C) 2015-2025 Gwendal Roué
+Licensed under the MIT License.
+
+Shortcut recording uses KeyboardShortcuts:
+https://github.com/sindresorhus/KeyboardShortcuts
+Copyright (c) Sindre Sorhus <sindresorhus@gmail.com> (https://sindresorhus.com)
+Licensed under the MIT License.
+
+Amazon, AWS, Amazon Bedrock, and Amazon Nova are trademarks of Amazon.com,
+Inc. or its affiliates. WorkFlow is not affiliated with or endorsed by AWS,
+NVIDIA, FluidInference, Wispr Flow, Superwhisper, OpenSuperWhisper, or FreeFlow.

@@ -1,0 +1,141 @@
+# Agent setup runbook
+
+This runbook lets a local coding agent install and verify WorkFlow without receiving or printing the user's secrets.
+
+## Security boundary
+
+- Never ask the user to paste an AWS or other provider key into chat, a terminal command, an environment variable, a source file, or a GitHub secret for normal app use.
+- Never read or print WorkFlow Keychain items.
+- The agent may navigate to WorkFlow's **Settings → Provider & Cost**; the user types the key into the secure field and selects **Save & Test**.
+- Apple-account, Keychain, Microphone, Accessibility, and Input Monitoring dialogs remain user-confirmed steps.
+
+## Agent procedure
+
+1. Verify the machine is Apple Silicon with macOS 14 or newer and that `git`, `xcodebuild`, and Homebrew are available.
+2. Clone with submodules and install build dependencies:
+
+   ```bash
+   git clone --recurse-submodules https://github.com/picturesuo/WorkFlow.git
+   cd WorkFlow
+   brew install cmake libomp rust
+   ```
+
+3. Run the focused deterministic tests before installation. The test host runs under its own per-run bundle identifier, so the tests never read or change WorkFlow's preferences and concurrent runs never share one preferences domain:
+
+   ```bash
+   WORKFLOW_TEST_BUNDLE_ID="com.picturesuo.WorkFlow.fmtest.run$$"
+   DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer \
+   xcodebuild test \
+     -scheme OpenSuperWhisper \
+     -derivedDataPath build \
+     -destination 'platform=macOS,arch=arm64' \
+     CODE_SIGNING_ALLOWED=NO \
+     PRODUCT_BUNDLE_IDENTIFIER="$WORKFLOW_TEST_BUNDLE_ID" \
+     -only-testing:OpenSuperWhisperTests/RenamedAppMigrationTests \
+     -only-testing:OpenSuperWhisperTests/LatestDictationGateTests \
+     -only-testing:OpenSuperWhisperTests/LatestDictationDeliveryTests \
+     -only-testing:OpenSuperWhisperTests/DictationFailureRecoveryTests \
+     -only-testing:OpenSuperWhisperTests/QueuedAudioRetentionTests \
+     -only-testing:OpenSuperWhisperTests/SettingsRequestTests \
+     -only-testing:OpenSuperWhisperTests/SettingsLayoutTests \
+     -only-testing:OpenSuperWhisperTests/ClipboardRestoreTests \
+     -only-testing:OpenSuperWhisperTests/OnboardingShortcutOptionTests \
+     -only-testing:OpenSuperWhisperTests/ModifierChordTriggerStateTests \
+     -only-testing:OpenSuperWhisperTests/ModifierKeyMonitorChordBoundaryTests \
+     -only-testing:OpenSuperWhisperTests/RecordingTriggerConfigurationTests \
+     -only-testing:OpenSuperWhisperTests/EscapeCancelConfirmationTests \
+     -only-testing:OpenSuperWhisperTests/BedrockCleanupServiceTests \
+     -only-testing:OpenSuperWhisperTests/ProviderPipelineTests \
+     -only-testing:OpenSuperWhisperTests/OpenAIDirectTransportTests \
+     -only-testing:OpenSuperWhisperTests/AnthropicTransportTests \
+     -only-testing:OpenSuperWhisperTests/ProviderErrorTextTests \
+     -only-testing:OpenSuperWhisperTests/DirectProviderFactoryTests \
+     -only-testing:OpenSuperWhisperTests/CustomCleanupFilterStoreTests \
+     -only-testing:OpenSuperWhisperTests/CustomCleanupPromptTests \
+     -only-testing:OpenSuperWhisperTests/CustomFilterNumberGuardTests \
+     -only-testing:OpenSuperWhisperTests/CustomFilterPipelineTests \
+     -only-testing:OpenSuperWhisperTests/CustomFilterProviderTransportTests \
+     -only-testing:OpenSuperWhisperTests/FilterAssistantPromptTests \
+     -only-testing:OpenSuperWhisperTests/FilterAssistantTransportTests \
+     -only-testing:OpenSuperWhisperTests/FilterAssistantSessionTests \
+     -only-testing:OpenSuperWhisperTests/FilterAssistantMathCleanupTests \
+     -only-testing:OpenSuperWhisperTests/FilterAssistantVoiceInputTests \
+     -only-testing:OpenSuperWhisperTests/FilterAssistantLayoutTests \
+     -only-testing:OpenSuperWhisperTests/FilterAutoSelectorTests \
+     -only-testing:OpenSuperWhisperTests/FilterCollectionStoreTests \
+     -only-testing:OpenSuperWhisperTests/FilterAutoPipelineTests \
+     -only-testing:OpenSuperWhisperTests/FilterAssistantTriggerTests \
+     -only-testing:OpenSuperWhisperTests/BrandPaletteTests \
+     -only-testing:OpenSuperWhisperTests/BrandLayoutTests \
+     -only-testing:OpenSuperWhisperTests/MainWindowLayoutTests \
+     -only-testing:OpenSuperWhisperTests/RecordControlTests \
+     -only-testing:OpenSuperWhisperTests/IndicatorPlacementTests \
+     -only-testing:OpenSuperWhisperTests/ShareReadyRenderTests \
+     -only-testing:OpenSuperWhisperTests/MeaningPreservationGuardTests \
+     -only-testing:OpenSuperWhisperTests/CleanupReplyCompletenessTransportTests \
+     -only-testing:OpenSuperWhisperTests/RecognizerToCleanupTraceTests \
+     -only-testing:OpenSuperWhisperTests/CustomFilterHistoryTests \
+     -only-testing:OpenSuperWhisperTests/SpeakingEfficiencyTests \
+     -only-testing:OpenSuperWhisperTests/SpeakingEfficiencyStoreTests \
+     -only-testing:OpenSuperWhisperTests/SpeechActivityTests \
+     -only-testing:OpenSuperWhisperTests/SpeakingLayoutTests \
+     -only-testing:OpenSuperWhisperTests/CustomFilterImmediacyTests \
+     -only-testing:OpenSuperWhisperTests/CustomFilterDigitsChoiceTests \
+     -only-testing:OpenSuperWhisperTests/RewriteOnlyContractTests \
+     -only-testing:OpenSuperWhisperTests/RewriteOnlyGuardTests \
+     -only-testing:OpenSuperWhisperTests/NumericPreservationGuardTests \
+     -only-testing:OpenSuperWhisperTests/HomeworkNumberFormattingTests \
+     -only-testing:OpenSuperWhisperTests/DictationSourceEvidenceTests \
+     -only-testing:OpenSuperWhisperTests/CorrectionAlignerTests \
+     -only-testing:OpenSuperWhisperTests/CorrectionPreferenceValidationTests \
+     -only-testing:OpenSuperWhisperTests/LearnedPreferenceStoreTests \
+     -only-testing:OpenSuperWhisperTests/LearnedPreferenceScopeTests \
+     -only-testing:OpenSuperWhisperTests/CorrectionLearningSessionTests \
+     -only-testing:OpenSuperWhisperTests/CorrectionLearningLayoutTests \
+     -only-testing:OpenSuperWhisperTests/LearnedWordChangeTests \
+     -only-testing:OpenSuperWhisperTests/PreferenceLearningFlowTests \
+     -only-testing:OpenSuperWhisperTests/DocumentTextExtractorTests \
+     -only-testing:OpenSuperWhisperTests/DocumentTypeLookupTests \
+     -only-testing:OpenSuperWhisperTests/CoreAudioDeviceLookupTests \
+     -only-testing:OpenSuperWhisperTests/BackgroundAudioReductionTests \
+     -only-testing:OpenSuperWhisperTests/WhisperConversionFingerprintTests \
+     -only-testing:OpenSuperWhisperTests/WhisperProgressCallbackTests \
+     -only-testing:OpenSuperWhisperTests/DictationLearningFlowTests \
+     -only-testing:OpenSuperWhisperTests/UpgradeChainPressureTests \
+     -only-testing:OpenSuperWhisperTests/NativeProviderJourneyTests \
+     -only-testing:OpenSuperWhisperTests/BurstAndLateReplyPressureTests \
+     -only-testing:OpenSuperWhisperTests/SpeechSegmenterTests \
+     -only-testing:OpenSuperWhisperTests/SegmentedTranscriberTests \
+     -only-testing:OpenSuperWhisperTests/GrowingWAVReaderTests \
+     -only-testing:OpenSuperWhisperTests/LiveTranscriptionTests \
+     -only-testing:OpenSuperWhisperTests/LiveTranscriptionServiceTests \
+     -skip-testing:OpenSuperWhisperTests/ClipboardRestoreTests/testMissingTargetDoesNotRedirectPasteAndKeepsTranscriptOnClipboard
+   ```
+
+   The skipped `ClipboardRestoreTests` case writes the system clipboard, so run it only by hand in an interactive session; the other `ClipboardRestoreTests` use private named pasteboards. `RecognizerToCleanupTraceTests` skips itself unless the Parakeet v3 model is already cached. `BackgroundAudioReductionTests` drives the capture with a scripted engine and the repository's tiny Whisper model, so it proves the setting, format conversion, and device-change handling, not how much music macOS voice processing removes. `RecordControlTests` and `ShareReadyRenderTests` render the record control, dictation bar, and floating indicator offscreen with synthetic levels and History, so they prove colors, sizes, contrast, and Reduce Motion behavior, not how a real microphone sounds; set `TEST_RUNNER_WF_RENDER_DIR` to keep their PNGs. `SpeechActivityTests` and `SpeakingEfficiencyStoreTests` run the bundled speech detector on the repository's `jfk.wav` and synthetic silence, noise, and tones, so they prove the measurement and its wiring, not how a real microphone and room sound. `DictationLearningFlowTests`, `PreferenceLearningFlowTests`, `CustomFilterImmediacyTests`, and `RewriteOnlyContractTests` use scripted stand-ins for the recognizer and providers, so they prove the plumbing and the guard, not real provider quality. `UpgradeChainPressureTests` takes an older History and preferences through every later migration and three relaunches; `NativeProviderJourneyTests` sends queued dictations, regenerations, provider failures, and Learn through the production provider factory to in-process OpenAI, Anthropic, Bedrock, and OpenAI-compatible replies; and `BurstAndLateReplyPressureTests` holds replies to check that queued bursts keep the filter they captured and a late reply never pastes over a newer dictation. They use scripted speech and placeholder keys, so they prove persistence, request shape, and ordering, not real speech, paste, or provider quality. `SpeechSegmenterTests`, `SegmentedTranscriberTests`, `GrowingWAVReaderTests`, `LiveTranscriptionTests`, and `LiveTranscriptionServiceTests` write recordings with AVAudioFile, the recorder's own file writer, and stand a scripted recognizer in for Parakeet, so they prove that a dictation recognized while it records gets exactly the pieces and text of the finished file and falls back to the file whenever the audio, engine, or language differs, not how a real microphone's file grows or how well Parakeet hears; `Scripts/dictation-benchmark` measures that with the real model.
+
+4. Install the app. The WorkFlow ivory ribbon icon is already included in the repository:
+
+   ```bash
+   ./Scripts/install-local.sh
+   open /Applications/WorkFlow.app
+   ```
+
+5. On macOS 26 or newer, the installer may reuse the exact trusted signer from a working WorkFlow or earlier Chat installation. If it reports no acceptable identity, direct the user to Xcode → Settings → Accounts → Manage Certificates → `+` → Apple Development. Retry only after the user completes that step.
+6. Ask the user to approve WorkFlow under Microphone and Accessibility. Input Monitoring is also required when the user selects `Fn`, `Control`+`Fn`, or another single-modifier shortcut. Upgrades must re-grant these permissions because macOS ties them to the old app identity. Do not automate privacy approval.
+7. Verify `WorkFlow.app` is running, its visible version is current, and its bundle identifier is `com.picturesuo.WorkFlow`. For an upgrade, confirm preferences and History were copied from the legacy identity; never delete the legacy data automatically.
+8. Have the user perform one short dictation with their selected shortcut in a disposable text field. Confirm the newest spoken text appears and History contains the same result.
+9. Set **Technical** in the WorkFlow menu-bar menu and have the user dictate a verbose technical request. Confirm History labels it Technical and, once its active speech is measured, shows its time saved and how many times faster than the assumed typing speed. Repeat with Homework only when the user wants to validate long-form behavior; do not fabricate samples in their History.
+10. For Bedrock, OpenAI, Anthropic, or Azure OpenAI, open **Settings → Provider & Cost**, let the user enter the key, then let the user choose **Save & Test**. For Azure, the user also enters the resource endpoint and deployment name. Confirm a successful status with token counts. Leave the key field blank in all captured logs and screenshots.
+11. To verify Writing mode or learning, let the user select **Writing** (or another mode), dictate into a disposable document, edit it, then paste the whole finished document under **Settings → Personalize → Learn from finished writing** (also reached from **Learn…** beside the dictation mode in the main window) and select **Check matches**, then **Learn**. Confirm the outcome names the matched dictations, **Details** shows each matched edit with the mode or filter it teaches, and the learned preferences are listed for that mode or filter. Do not fabricate samples in their History.
+12. To verify custom filters, let the user create one under **Settings → Cleanup → Custom filters** (for example **Everyday with digits**, which turns on **Write quantities as digits**), select it in the menu-bar menu without restarting, and dictate a sentence with a spoken quantity such as "fifteen percent". Confirm the result shows 15% and History labels it with the filter name. Do not fabricate samples in their History. To verify AI drafting, let the user choose **Create with AI**, type or speak a request (and optionally paste a finished example), press **Send**, review the proposal, and save it.
+
+## Definition of done
+
+- `/Applications/WorkFlow.app` launches and remains available in the menu bar.
+- The app has Microphone and Accessibility permissions, plus Input Monitoring when a single-modifier or `Control`+`Fn` shortcut is selected.
+- A short hold/release with the selected shortcut produces the newest transcript in the original target.
+- The same transcript appears in History and remains available on the clipboard.
+- The dictation mode is selectable from the main window and menu bar; new dictations show time saved and how many times faster than the assumed typing speed, by estimated active speech, never token ratios.
+- If remote cleanup is requested, the in-app connection test passes and the $0.25 monthly estimated-cost stop is enabled.
+- No credential appears in shell history, process arguments, source control, logs, or agent conversation.

@@ -1,0 +1,293 @@
+import AppKit
+import ApplicationServices
+import Carbon
+import Cocoa
+import Foundation
+import KeyboardShortcuts
+import SwiftUI
+
+extension KeyboardShortcuts.Name {
+    static let toggleRecord = Self("toggleRecord", default: .init(.backtick, modifiers: .option))
+    static let escape = Self("escape", default: .init(.escape))
+}
+
+class ShortcutManager {
+    static let shared = ShortcutManager()
+
+    private var activeVm: IndicatorViewModel?
+    private var holdWorkItem: DispatchWorkItem?
+    private let holdThreshold: TimeInterval = 0.3
+    private var holdMode = false
+    private var useModifierOnlyHotkey = false
+    private var useMouseButtonHotkey = false
+    private var lastPressDownTime: CFAbsoluteTime = 0
+    private var pressConsumed = false
+    private var pressStartedRecording = false
+
+    private init() {
+        print("ShortcutManager init")
+
+        setupKeyboardShortcuts()
+        setupRecordingTrigger()
+        
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(hotkeySettingsChanged),
+            name: .hotkeySettingsChanged,
+            object: nil
+        )
+        
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(indicatorWindowDidHide),
+            name: .indicatorWindowDidHide,
+            object: nil
+        )
+    }
+    
+    @objc private func indicatorWindowDidHide() {
+        activeVm = nil
+        holdMode = false
+    }
+    
+    @objc private func hotkeySettingsChanged() {
+        setupRecordingTrigger()
+    }
+    
+    private func setupKeyboardShortcuts() {
+        KeyboardShortcuts.onKeyDown(for: .toggleRecord) { [weak self] in
+            self?.handleKeyDown()
+        }
+
+        KeyboardShortcuts.onKeyUp(for: .toggleRecord) { [weak self] in
+            self?.handleKeyUp()
+        }
+
+        KeyboardShortcuts.onKeyUp(for: .escape) { [weak self] in
+            Task { @MainActor in
+                let indicatorState = IndicatorWindowManager.shared.viewModel?.state
+                if Self.escapeCancels(activeRecording: self?.activeVm != nil, indicatorState: indicatorState),
+                   IndicatorWindowManager.shared.requestCancel() {
+                    self?.activeVm = nil
+                }
+            }
+        }
+        KeyboardShortcuts.disable(.escape)
+    }
+    
+    /// Whether Esc reaches the indicator's cancel: a recording this manager
+    /// started, or a stopped dictation still transcribing, which the shortcut
+    /// no longer tracks but the indicator still shows.
+    static func escapeCancels(activeRecording: Bool, indicatorState: RecordingState?) -> Bool {
+        activeRecording || indicatorState == .decoding
+    }
+
+    private func setupRecordingTrigger() {
+        // The trigger modes are mutually exclusive. Tear all of them down
+        // first, then enable exactly the one the preferences resolve to.
+        ModifierKeyMonitor.shared.stop()
+        MouseButtonMonitor.shared.stop()
+
+        switch RecordingTriggerConfiguration() {
+        case .mouseButton(let mouseButton):
+            useMouseButtonHotkey = true
+            useModifierOnlyHotkey = false
+            KeyboardShortcuts.disable(.toggleRecord)
+
+            MouseButtonMonitor.shared.onButtonDown = { [weak self] in
+                self?.handleKeyDown()
+            }
+
+            MouseButtonMonitor.shared.onButtonUp = { [weak self] in
+                self?.handleKeyUp()
+            }
+
+            MouseButtonMonitor.shared.start(mouseButton: mouseButton)
+            print("ShortcutManager: Using mouse-button hotkey: \(mouseButton.displayName)")
+        case .chord(let chord):
+            prepareModifierKeyMonitor()
+            ModifierKeyMonitor.shared.start(chord: chord)
+            print("ShortcutManager: Using chord hotkey: \(chord.displayName) (double-press: \(AppPreferences.shared.doublePressToTrigger))")
+        case .modifierKeys(let modifierKey, let secondaryModifierKey):
+            prepareModifierKeyMonitor()
+            ModifierKeyMonitor.shared.start(modifierKeys: [modifierKey, secondaryModifierKey])
+            let secondaryDescription = secondaryModifierKey == .none ? "" : " or \(secondaryModifierKey.displayName)"
+            print("ShortcutManager: Using modifier-only hotkey: \(modifierKey.displayName)\(secondaryDescription) (double-press: \(AppPreferences.shared.doublePressToTrigger))")
+        case .keyCombination:
+            useMouseButtonHotkey = false
+            useModifierOnlyHotkey = false
+            KeyboardShortcuts.enable(.toggleRecord)
+            print("ShortcutManager: Using regular keyboard shortcut")
+        }
+    }
+
+    /// Modifier keys and chords share the event tap and the same press
+    /// handling as every other trigger.
+    private func prepareModifierKeyMonitor() {
+        useMouseButtonHotkey = false
+        useModifierOnlyHotkey = true
+        KeyboardShortcuts.disable(.toggleRecord)
+
+        ModifierKeyMonitor.shared.onKeyDown = { [weak self] in
+            self?.handleKeyDown()
+        }
+
+        ModifierKeyMonitor.shared.onKeyUp = { [weak self] in
+            self?.handleKeyUp()
+        }
+
+        ModifierKeyMonitor.shared.onChord = { [weak self] in
+            self?.handleChord()
+        }
+
+        lastPressDownTime = 0
+        pressConsumed = false
+    }
+    
+    private func handleKeyDown() {
+        // All trigger sources enter the same serial main-queue state machine.
+        // This guarantees a fast Fn release cannot overtake its press while
+        // the first indicator view is being prepared.
+        DispatchQueue.main.async { [weak self] in
+            self?.handleKeyDownOnMain()
+        }
+    }
+
+    @MainActor
+    private func handleKeyDownOnMain() {
+        holdWorkItem?.cancel()
+        holdMode = false
+
+        // Require a double-tap only when starting a new recording. Once recording is
+        // active, a single press stops it so the user isn't forced to double-tap again.
+        if AppPreferences.shared.doublePressToTrigger && activeVm == nil {
+            let now = CFAbsoluteTimeGetCurrent()
+            let threshold = NSEvent.doubleClickInterval
+            if lastPressDownTime > 0 && now - lastPressDownTime <= threshold {
+                lastPressDownTime = 0
+            } else {
+                lastPressDownTime = now
+                pressConsumed = false
+                return
+            }
+        }
+        pressConsumed = true
+
+        let holdToRecordEnabled = AppPreferences.shared.holdToRecord
+        let isStartingRecording = activeVm == nil
+        pressStartedRecording = isStartingRecording
+        let pasteTarget = isStartingRecording ? PasteTarget.captureFrontmost() : nil
+
+        if activeVm == nil {
+            // Start recording immediately: resolving the caret position talks to
+            // the focused app via AX IPC and can hang for seconds if that app
+            // is busy — the first words must not be lost because of it.
+            let vm = IndicatorWindowManager.shared.prepare(pasteTarget: pasteTarget)
+            vm.startRecording()
+            activeVm = vm
+
+            Task { @MainActor [weak self, weak vm] in
+                guard let self, let vm else { return }
+                let cursorPosition = FocusUtils.getCurrentCursorPosition()
+                let anchorPoint = await Self.resolveAnchorPoint(timeoutNanoseconds: 150_000_000)
+                let indicatorPoint = anchorPoint ?? cursorPosition
+
+                guard self.activeVm === vm else { return }
+                IndicatorWindowManager.shared.presentWindow(for: vm, nearPoint: indicatorPoint)
+            }
+        } else if !holdMode {
+            IndicatorWindowManager.shared.stopRecording()
+            activeVm = nil
+        }
+
+        // Arm hold mode only when this press starts a recording. Arming it on the
+        // stopping press would trigger a second stop on key-up.
+        if holdToRecordEnabled && isStartingRecording {
+            let workItem = DispatchWorkItem { [weak self] in
+                self?.holdMode = true
+            }
+            holdWorkItem = workItem
+            DispatchQueue.main.asyncAfter(deadline: .now() + holdThreshold, execute: workItem)
+        }
+    }
+
+    /// Resolves the input anchor without letting a slow focused app delay the
+    /// indicator: whichever finishes first wins — the AX resolution or the
+    /// deadline. On timeout the caller falls back to the mouse position; the
+    /// late AX result is simply discarded.
+    private static func resolveAnchorPoint(timeoutNanoseconds: UInt64) async -> NSPoint? {
+        await withCheckedContinuation { (continuation: CheckedContinuation<NSPoint?, Never>) in
+            let gate = AnchorGate(continuation)
+            Task.detached {
+                let point = FocusUtils.getInputAnchorPoint()
+                await gate.resume(point)
+            }
+            Task.detached {
+                try? await Task.sleep(nanoseconds: timeoutNanoseconds)
+                await gate.resume(nil)
+            }
+        }
+    }
+
+    private actor AnchorGate {
+        private var continuation: CheckedContinuation<NSPoint?, Never>?
+
+        init(_ continuation: CheckedContinuation<NSPoint?, Never>) {
+            self.continuation = continuation
+        }
+
+        func resume(_ value: NSPoint?) {
+            continuation?.resume(returning: value)
+            continuation = nil
+        }
+    }
+
+    /// The trigger modifier was used as part of a shortcut (⌃C, ⌃-click,
+    /// Fn+arrow). Undo whatever this press did so stray recordings never start.
+    private func handleChord() {
+        DispatchQueue.main.async { [weak self] in
+            self?.handleChordOnMain()
+        }
+    }
+
+    @MainActor
+    private func handleChordOnMain() {
+        holdWorkItem?.cancel()
+        holdWorkItem = nil
+        holdMode = false
+        lastPressDownTime = 0
+
+        guard pressConsumed else { return }
+        pressConsumed = false
+
+        if pressStartedRecording, activeVm != nil {
+            IndicatorWindowManager.shared.stopForce()
+            activeVm = nil
+        }
+        pressStartedRecording = false
+    }
+
+    private func handleKeyUp() {
+        DispatchQueue.main.async { [weak self] in
+            self?.handleKeyUpOnMain()
+        }
+    }
+
+    @MainActor
+    private func handleKeyUpOnMain() {
+        holdWorkItem?.cancel()
+        holdWorkItem = nil
+
+        guard pressConsumed else { return }
+        pressConsumed = false
+        pressStartedRecording = false
+
+        let holdToRecordEnabled = AppPreferences.shared.holdToRecord
+
+        if holdToRecordEnabled && holdMode && activeVm != nil {
+            IndicatorWindowManager.shared.stopRecording()
+            activeVm = nil
+        }
+        holdMode = false
+    }
+}
