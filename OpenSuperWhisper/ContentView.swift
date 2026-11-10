@@ -1500,7 +1500,6 @@ struct PermissionsView: View {
             VStack(spacing: 20) {
                 Text("Permissions needed")
                     .font(.title2.weight(.semibold))
-                    .padding()
 
                 if didMigrateFromChat {
                     Text("WorkFlow now has its own macOS identity. Your settings and History were preserved, but macOS needs these permissions once more.")
