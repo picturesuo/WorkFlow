@@ -55,5 +55,5 @@ All times are milliseconds on a monotonic clock. p95 is nearest-rank, so with 11
 macOS does not keep these signposts in the stored log, so either run `Scripts/perf/field-report.sh --watch 600` while dictating (it streams the live log for that many seconds, then reports), or launch the app with `WF_PERF_OUT=<file>` in its environment and read the JSON lines.
 `field-report.sh --last DURATION` (default `1h`) reads the stored log instead, for whatever macOS happened to keep.
 It pairs each interval's begin and end per process and prints one row per flow and outcome code, plus the `launch_ready`, `launch_window_appeared` and `engine_ready` events, with n, median, p95 (nearest rank), min and max in milliseconds.
-This is where `trigger_to_mic_live`, `trigger_to_indicator_visible`, `cancel_after_start` and cold launch come from, since the benchmark cannot measure them.
+This is where `trigger_to_mic_live`, `trigger_to_indicator_visible` and cold launch come from, since the benchmark cannot measure them.
 It prints only signpost names, outcome codes, counts and durations.
