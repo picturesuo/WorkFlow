@@ -86,10 +86,11 @@ final class ProcessExitGate: @unchecked Sendable {
                 }
             }
         }
-        condition.unlock()
+        // Still holding the lock, so no other caller returns before the abandon action has run.
         if effects.contains(.abandon) {
             onAbandon()
         }
+        condition.unlock()
     }
 
     /// Applies one event through the reducer and returns its effects.
@@ -97,7 +98,7 @@ final class ProcessExitGate: @unchecked Sendable {
     private func send(_ event: ExitGateCore.Event) -> [ExitGateCore.Effect] {
         let (next, effects) = ExitGateCore.reduce(state, event)
         state = next
-        if effects.contains(.drained) {
+        if effects.contains(.drained) || effects.contains(.abandon) {
             condition.broadcast()
         }
         return effects

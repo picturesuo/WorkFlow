@@ -165,7 +165,7 @@ final class ProcessExitGateTests: XCTestCase {
 
     func testTwoShutdownsPastTheTimeoutBothReturnAndAbandonOnce() {
         let abandons = Locked(0)
-        let gate = gate(timeout: 0.1, abandons: abandons)
+        let gate = gate(timeout: 0.2, abandons: abandons)
         let entered = DispatchSemaphore(value: 0)
         let left = DispatchSemaphore(value: 0)
         Thread.detachNewThread {
@@ -178,16 +178,24 @@ final class ProcessExitGateTests: XCTestCase {
         entered.wait()
 
         let start = Date()
+        let returns = Locked<[Date]>([])
         let group = DispatchGroup()
-        for _ in 0..<2 {
+        for delay in [0.0, 0.05] {
             group.enter()
             Thread.detachNewThread {
+                Thread.sleep(forTimeInterval: delay)
                 gate.shutdown()
+                returns.update { $0.append(Date()) }
                 group.leave()
             }
         }
         XCTAssertEqual(group.wait(timeout: .now() + 5), .success)
-        XCTAssertLessThan(Date().timeIntervalSince(start), 0.9, "Both returned on the timeout, before the body finished")
+        let returned = returns.read()
+        XCTAssertEqual(returned.count, 2)
+        if let first = returned.min(), let last = returned.max() {
+            XCTAssertLessThan(last.timeIntervalSince(first), 0.1, "The later caller is released with the first, not at its own deadline")
+            XCTAssertLessThan(last.timeIntervalSince(start), 0.9, "Both returned on the timeout, before the body finished")
+        }
         XCTAssertEqual(abandons.read(), 1)
 
         XCTAssertEqual(left.wait(timeout: .now() + 5), .success)
