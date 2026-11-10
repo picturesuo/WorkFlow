@@ -125,11 +125,13 @@ class IndicatorViewModel: ObservableObject {
 
     func startRecording() {
         if MeetingSessionController.shared.isRecording {
+            ShortcutManager.endTriggerFlows(outcome: "busy")
             showBusyMessage()
             return
         }
 
         if isTranscriptionBusy {
+            ShortcutManager.endTriggerFlows(outcome: "busy")
             showBusyMessage()
             return
         }
@@ -137,6 +139,7 @@ class IndicatorViewModel: ObservableObject {
         // getActiveMicrophone() only reads the cached currentMicrophone, so
         // this guard costs no CoreAudio HAL round-trip on the main thread.
         guard MicrophoneService.shared.getActiveMicrophone() != nil else {
+            ShortcutManager.endTriggerFlows(outcome: "no_microphone")
             showAutoDismissingMessage(.noMicrophone)
             return
         }
@@ -149,6 +152,7 @@ class IndicatorViewModel: ObservableObject {
         let sessionID = UUID()
         guard recorder.startRecording(sessionID: sessionID, completion: { [weak self] startError in
             guard startError != nil else { return }
+            PerfSignpost.end(.triggerToMicLive, outcome: "failed")
             Task { @MainActor in
                 guard let self, self.recorderSessionID == sessionID else { return }
                 self.recorderSessionID = nil
@@ -162,6 +166,7 @@ class IndicatorViewModel: ObservableObject {
                 )
             }
         }) else {
+            ShortcutManager.endTriggerFlows(outcome: "busy")
             showBusyMessage()
             return
         }
@@ -214,9 +219,11 @@ class IndicatorViewModel: ObservableObject {
         resetCancelConfirmation()
         guard let sessionID = recorderSessionID else { return }
         recorderSessionID = nil
+        let stopInterval = PerfSignpost.begin(.stopToDelivered)
         let live = takeLiveTranscription()
         
         if transcriptionQueue.isProcessing {
+            PerfSignpost.end(.stopToDelivered, outcome: "queued", id: stopInterval)
             Self.cancel(live)
             // Queue work (imports, meetings, regenerations) can hold the engine
             // for minutes: keep the user's audio and queue it instead of deleting
@@ -226,7 +233,10 @@ class IndicatorViewModel: ObservableObject {
             // Transcription is serialized, so it waits and is delivered.
             Task { [weak self] in
                 guard let self = self else { return }
-                if let tempURL = await self.recorder.stopRecording(sessionID: sessionID) {
+                let stopTailInterval = PerfSignpost.begin(.stopTail)
+                let stopped = await self.recorder.stopRecording(sessionID: sessionID)
+                PerfSignpost.end(.stopTail, outcome: stopped == nil ? "no_audio" : "ok", id: stopTailInterval)
+                if let tempURL = stopped {
                     let rule = TargetAppRuleStore.rule(for: self.pasteTarget?.bundleID)
                     await self.transcriptionQueue.addFileToQueue(
                         url: tempURL,
@@ -252,15 +262,20 @@ class IndicatorViewModel: ObservableObject {
             guard let self = self else { return }
             let generation = self.dictationGeneration ?? self.latestDictationGate.begin()
             
-            if let tempURL = await self.recorder.stopRecording(sessionID: sessionID) {
+            let stopTailInterval = PerfSignpost.begin(.stopTail)
+            let stopped = await self.recorder.stopRecording(sessionID: sessionID)
+            PerfSignpost.end(.stopTail, outcome: stopped == nil ? "no_audio" : "ok", id: stopTailInterval)
+            if let tempURL = stopped {
                 await self.finishDictation(
                     audioAt: tempURL,
                     generation: generation,
                     recordingStartedAt: recordingStartedAt,
                     stoppedAt: stoppedAt,
-                    live: live
+                    live: live,
+                    stopInterval: stopInterval
                 )
             } else {
+                PerfSignpost.end(.stopToDelivered, outcome: "no_audio", id: stopInterval)
                 Self.cancel(live)
                 print("!!! Not found record url !!!")
                 self.finishDecoding()
@@ -275,28 +290,51 @@ class IndicatorViewModel: ObservableObject {
         generation: UInt64,
         recordingStartedAt: Date?,
         stoppedAt: ContinuousClock.Instant? = nil,
-        live: LiveTranscription? = nil
+        live: LiveTranscription? = nil,
+        stopInterval: UInt64? = nil
     ) async {
+        let finishInterval = PerfSignpost.begin(.finishDictation)
+        // Every exit ends both intervals with what happened; the paths below
+        // set it, and an exit that sets nothing is a failure.
+        var perfOutcome = "failed"
+        defer {
+            PerfSignpost.end(.finishDictation, outcome: perfOutcome, id: finishInterval)
+            if let stopInterval {
+                PerfSignpost.end(.stopToDelivered, outcome: perfOutcome, id: stopInterval)
+            }
+        }
         let duration = await AudioUtil.audioDuration(url: tempURL)
         do {
             print("start decoding...")
-            let rawText = try await transcriptionService.transcribeAudio(url: tempURL, settings: Settings(), live: live)
+            let transcribeInterval = PerfSignpost.begin(.transcribe)
+            let rawText: String
+            do {
+                rawText = try await transcriptionService.transcribeAudio(url: tempURL, settings: Settings(), live: live)
+                PerfSignpost.end(.transcribe, id: transcribeInterval)
+            } catch {
+                PerfSignpost.end(.transcribe, outcome: error is CancellationError ? "cancelled" : "failed", id: transcribeInterval)
+                throw error
+            }
             
             if rawText.isEmpty {
+                perfOutcome = "discarded_empty"
                 try? FileManager.default.removeItem(at: tempURL)
                 print("No speech detected, dictation discarded")
             } else {
                 let plan = cleanupPipeline.selectedPlan()
                 self.isFinalizing = true
+                let cleanupInterval = PerfSignpost.begin(.cleanup)
                 let cleanup = await self.cleanupPipeline.finalize(
                     rawText,
                     targetBundleID: self.pasteTarget?.bundleID,
                     filterPlan: plan
                 )
+                PerfSignpost.end(.cleanup, id: cleanupInterval)
                 self.isFinalizing = false
 
                 let text = cleanup.text
                 guard !text.isEmpty else {
+                    perfOutcome = "discarded_empty"
                     try? FileManager.default.removeItem(at: tempURL)
                     print("Cleanup produced an empty dictation; discarded")
                     self.finishDecoding()
@@ -342,9 +380,19 @@ class IndicatorViewModel: ObservableObject {
                 // claimIfCurrent is process-wide and one-shot, so an older
                 // session finishing late cannot paste over a newer dictation.
                 let isCurrent = !isDeliveryCancelled && self.latestDictationGate.claimIfCurrent(generation)
-                let disposition: DictationDisposition = isCurrent
-                    ? (delivery ?? deliver)(text)
-                    : isDeliveryCancelled ? .cancelled : .staleSkipped
+                let disposition: DictationDisposition
+                if isCurrent {
+                    let deliverInterval = PerfSignpost.begin(.deliver)
+                    disposition = (delivery ?? deliver)(text)
+                    PerfSignpost.end(.deliver, outcome: Self.perfOutcome(disposition), id: deliverInterval)
+                } else {
+                    disposition = isDeliveryCancelled ? .cancelled : .staleSkipped
+                }
+                perfOutcome = Self.perfOutcome(disposition)
+                PerfSignpost.end(.finishDictation, outcome: perfOutcome, id: finishInterval)
+                if let stopInterval {
+                    PerfSignpost.end(.stopToDelivered, outcome: perfOutcome, id: stopInterval)
+                }
                 let attemptedDelivery = [.pasteSent, .pasteFailed, .copiedOnly].contains(disposition)
                 let source = DictationSource(
                     recordingID: recordingId,
@@ -385,6 +433,7 @@ class IndicatorViewModel: ObservableObject {
                 )
             }
         } catch is CancellationError {
+            perfOutcome = "cancelled"
             self.isFinalizing = false
             print("Audio transcription cancelled.")
             try? FileManager.default.removeItem(at: tempURL)
@@ -411,6 +460,19 @@ class IndicatorViewModel: ObservableObject {
         }
         
         finishDecoding()
+    }
+
+    /// A fixed code for the perf signposts, never user content.
+    private static func perfOutcome(_ disposition: DictationDisposition) -> String {
+        switch disposition {
+        case .pasteSent: "paste_sent"
+        case .pasteFailed: "paste_failed"
+        case .copiedOnly: "copied_only"
+        case .savedOnly: "saved_only"
+        case .staleSkipped: "stale_skipped"
+        case .cancelled: "cancelled"
+        default: "other"
+        }
     }
 
     /// Hides the indicator, first saying so briefly if the capture stopped

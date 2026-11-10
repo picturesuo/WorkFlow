@@ -77,6 +77,7 @@ class TranscriptionService: ObservableObject {
                 self.currentEngine = engine
                 self.engineLoadTask = nil
                 self.isLoading = false
+                PerfSignpost.eventSinceProcessStart("engine_ready")
                 print("Engine loaded: \(selectedEngine)")
             } catch {
                 guard let self, self.engineLoadGeneration == generation else { return }

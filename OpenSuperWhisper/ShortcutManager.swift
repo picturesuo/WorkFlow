@@ -144,7 +144,10 @@ class ShortcutManager {
         pressConsumed = false
     }
     
-    private func handleKeyDown() {
+    /// Also the perf harness entry point.
+    func handleKeyDown() {
+        PerfSignpost.begin(.triggerToMicLive)
+        PerfSignpost.begin(.triggerToIndicatorVisible)
         // All trigger sources enter the same serial main-queue state machine.
         // This guarantees a fast Fn release cannot overtake its press while
         // the first indicator view is being prepared.
@@ -168,6 +171,7 @@ class ShortcutManager {
             } else {
                 lastPressDownTime = now
                 pressConsumed = false
+                Self.endTriggerFlows(outcome: "not_a_start")
                 return
             }
         }
@@ -195,9 +199,12 @@ class ShortcutManager {
                 guard self.activeVm === vm else { return }
                 IndicatorWindowManager.shared.presentWindow(for: vm, nearPoint: indicatorPoint)
             }
-        } else if !holdMode {
-            IndicatorWindowManager.shared.stopRecording()
-            activeVm = nil
+        } else {
+            Self.endTriggerFlows(outcome: "not_a_start")
+            if !holdMode {
+                IndicatorWindowManager.shared.stopRecording()
+                activeVm = nil
+            }
         }
 
         // Arm hold mode only when this press starts a recording. Arming it on the
@@ -209,6 +216,12 @@ class ShortcutManager {
             holdWorkItem = workItem
             DispatchQueue.main.asyncAfter(deadline: .now() + holdThreshold, execute: workItem)
         }
+    }
+
+    /// Ends the trigger intervals begun by a press that started no recording.
+    static func endTriggerFlows(outcome: String) {
+        PerfSignpost.end(.triggerToMicLive, outcome: outcome)
+        PerfSignpost.end(.triggerToIndicatorVisible, outcome: outcome)
     }
 
     /// Resolves the input anchor without letting a slow focused app delay the
@@ -267,7 +280,8 @@ class ShortcutManager {
         pressStartedRecording = false
     }
 
-    private func handleKeyUp() {
+    /// Also the perf harness entry point.
+    func handleKeyUp() {
         DispatchQueue.main.async { [weak self] in
             self?.handleKeyUpOnMain()
         }

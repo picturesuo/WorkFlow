@@ -181,6 +181,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
         Task { @MainActor in
             await RecordingStore.shared.backfillMissingDurations()
         }
+        PerfSignpost.eventSinceProcessStart("launch_ready")
     }
 
     private func migrateLegacyCredentialsInBackground() {
@@ -578,6 +579,9 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
             mainWindow = Self.resolveMainWindow()
         }
 
+        if mainWindow?.isVisible != true {
+            PerfSignpost.begin(.historyOpen)
+        }
         if let window = mainWindow {
             if !window.isVisible {
                 window.makeKeyAndOrderFront(nil)

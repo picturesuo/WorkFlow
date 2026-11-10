@@ -291,6 +291,8 @@ class AudioRecorder: NSObject, ObservableObject {
                 updateRecordingState(isRecording: false, isConnecting: false)
                 return "The microphone declined the recording request."
             }
+            // The capture has begun. A no-op unless a dictation press is timed.
+            PerfSignpost.end(.triggerToMicLive)
             capture = audioRecorder
             startLevelMetering()
             if monitorConnection {
@@ -328,6 +330,7 @@ class AudioRecorder: NSObject, ObservableObject {
                 }
             }
             try voiceCapture.start()
+            PerfSignpost.end(.triggerToMicLive)
             capture = voiceCapture
             startLevelMetering()
             Self.publishBackgroundAudioReduction(.active)

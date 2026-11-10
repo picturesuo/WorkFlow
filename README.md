@@ -98,6 +98,8 @@ xcodebuild test \
 
 The skipped suites launch TextEdit, switch the keyboard layout, or show a panel, and the skipped `ClipboardRestoreTests` case overwrites the system clipboard; run them interactively, by hand. The separate bundle identifier keeps the test host out of WorkFlow's own preferences, and the shell PID suffix gives each run its own preferences domain so concurrent runs do not overwrite each other. Pass the same `WORKFLOW_TEST_BUNDLE_ID` to `build-for-testing` and `test-without-building` when you split the steps. Releases follow [docs/RELEASING.md](docs/RELEASING.md).
 
+The pure state-machine cores in `DictationCore/` have their own fast suite: `swift test --package-path DictationCore` (add `--sanitize=thread` for Thread Sanitizer). The flow benchmark is in `Scripts/perf/`, and its numbers are in [docs/perf/baseline.md](docs/perf/baseline.md).
+
 </details>
 
 ## License
