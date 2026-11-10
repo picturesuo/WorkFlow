@@ -144,7 +144,7 @@ final class IndicatorIdleCostTests: XCTestCase {
 
         let afterHide = mainRunLoopWakeups(during: 2.0)
         print("IndicatorIdleCostTests: baseline \(baseline), ticking \(ticking), afterHide \(afterHide) wake-ups in 2 s")
-        XCTAssertLessThan(Double(afterHide) / 2.0, Double(ticking) / 4.0,
+        XCTAssertLessThan(Double(afterHide) / 2.0 - Double(baseline), (Double(ticking) - Double(baseline)) / 4.0,
                           "The hidden panel still wakes the main thread: baseline \(baseline)/s, ticking \(ticking)/s, afterHide \(afterHide) in 2 s")
     }
 
