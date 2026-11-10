@@ -1,32 +1,43 @@
 #!/bin/zsh
 # Prints WorkFlow's perf signpost durations from this Mac's unified log.
-# Usage: Scripts/perf/field-report.sh [--last DURATION]   (default 1h, any `log show --last` value)
+# Usage: Scripts/perf/field-report.sh [--last DURATION | --watch SECONDS]
+#   --last DURATION  read the stored log (default 1h, any `log show --last` value)
+#   --watch SECONDS  stream the live log for that many seconds, then report
+# macOS usually does not keep these signposts in the stored log, so --watch
+# while using the app is the reliable mode.
 # Only signpost names, outcome codes, counts and durations are printed, never other log content.
 set -euo pipefail
 
+usage="usage: $0 [--last DURATION | --watch SECONDS]"
 duration="1h"
+watch=""
 while (( $# > 0 )); do
     case "$1" in
         --last)
-            (( $# >= 2 )) || { print -u2 "usage: $0 [--last DURATION]"; exit 2; }
+            (( $# >= 2 )) || { print -u2 "$usage"; exit 2; }
             duration="$2"
             shift 2
             ;;
+        --watch)
+            (( $# >= 2 )) && [[ $2 == <1-> ]] || { print -u2 "$usage"; exit 2; }
+            watch="$2"
+            shift 2
+            ;;
         -h|--help)
-            print "usage: $0 [--last DURATION]"
+            print "$usage"
             exit 0
             ;;
         *)
-            print -u2 "usage: $0 [--last DURATION]"
+            print -u2 "$usage"
             exit 2
             ;;
     esac
 done
 
-# zsh has a `log` builtin, so call the system tool by path.
-/usr/bin/log show --last "$duration" --signpost --style ndjson \
-    --predicate 'subsystem == "com.picturesuo.WorkFlow.perf"' |
-python3 -I -c '
+predicate='subsystem == "com.picturesuo.WorkFlow.perf"'
+
+report() {
+    python3 -I -c '
 import ctypes
 import json
 import math
@@ -95,3 +106,18 @@ for label in sorted(rows):
     p95 = values[max(0, math.ceil(0.95 * len(values)) - 1)]
     print(f"{label:<{width}}  {len(values):>5}  {median(values):>10.1f}  {p95:>10.1f}  {values[0]:>10.1f}  {values[-1]:>10.1f}")
 '
+}
+
+# zsh has a `log` builtin, so call the system tool by path.
+if [[ -n $watch ]]; then
+    capture=$(mktemp "${TMPDIR:-/tmp}/workflow-field-report.XXXXXX")
+    trap 'rm -f -- "$capture"' EXIT
+    /usr/bin/log stream --signpost --style ndjson --predicate "$predicate" > "$capture" 2>/dev/null &
+    stream_pid=$!
+    sleep "$watch"
+    kill -INT $stream_pid 2>/dev/null || true
+    wait $stream_pid 2>/dev/null || true
+    report < "$capture"
+else
+    /usr/bin/log show --last "$duration" --signpost --style ndjson --predicate "$predicate" | report
+fi

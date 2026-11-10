@@ -10,7 +10,8 @@ import Foundation
 ///
 /// | Event | Condition | Transition | Effects |
 /// |---|---|---|---|
-/// | `enter` | `phase == .open` | `inFlight += 1` | `admit` |
+/// | `enter` | `phase == .open`, `inFlight < Int.max` | `inFlight += 1` | `admit` |
+/// | `enter` | `phase == .open`, `inFlight == Int.max` | unchanged | `refuse` |
 /// | `enter` | otherwise | unchanged | `refuse` |
 /// | `leave` | `inFlight > 0`, `phase == .closing`, `inFlight` becomes 0 | `inFlight -= 1`, `phase = .closed` | `drained` |
 /// | `leave` | `inFlight > 0`, otherwise | `inFlight -= 1` | none |

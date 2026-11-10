@@ -10,8 +10,8 @@ How it is measured: `Scripts/perf/run-benchmark.sh` runs each flow 12 times insi
 - Paste goes to a private pasteboard and no Cmd+V is posted, so the target app's own handling is not included.
 - "Cloud" is the real OpenAI provider code against an in-process stub that answers at once: it shows WorkFlow's own overhead, not a provider's round trip.
 - History renders in a fully transparent window so nothing appears on screen.
-- **Not measured: trigger key down until the microphone is live, and cancel right after start.** The test identity has no microphone permission (`not_determined`), and asking would raise a system prompt. The signposts `trigger_to_mic_live`, `trigger_to_indicator_visible` and `cancel_after_start` are in the app; `Scripts/perf/field-report.sh` reads them from the installed app's own log after real dictations.
-- **Not measured here: cold launch.** A separately identified build would still query WorkFlow's real Keychain items at launch, so the benchmark refuses to launch one. Cold launch is read from the installed app's `launch_ready` and `engine_ready` signposts with `Scripts/perf/field-report.sh`.
+- **Not measured: trigger key down until the microphone is live, and cancel right after start.** The test identity has no microphone permission (`not_determined`), and asking would raise a system prompt. The signposts `trigger_to_mic_live`, `trigger_to_indicator_visible` and `cancel_after_start` are in the app and are read from the installed app with `Scripts/perf/field-report.sh --watch` or by launching it with `WF_PERF_OUT` set, during real dictations.
+- **Not measured here: cold launch.** A separately identified build would still query WorkFlow's real Keychain items at launch, so the benchmark refuses to launch one. Cold launch (the `launch_ready` and `engine_ready` signposts) is read from the installed app with `Scripts/perf/field-report.sh --watch` or by launching it with `WF_PERF_OUT` set.
 
 ## Flows (n = 11 each unless noted)
 

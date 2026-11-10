@@ -37,13 +37,17 @@ final class PerfBenchOutput {
         reader = FileHandle(forReadingAtPath: path)
     }
 
+    /// One write(2) per line on an O_APPEND descriptor, the same as
+    /// PerfSignpost, so concurrent records never overwrite each other.
     func append(_ object: [String: Any]) {
-        guard var data = try? JSONSerialization.data(withJSONObject: object, options: [.sortedKeys]),
-              let handle = FileHandle(forWritingAtPath: url.path) else { return }
-        data.append(0x0A)
-        handle.seekToEndOfFile()
-        handle.write(data)
-        try? handle.close()
+        guard let json = try? JSONSerialization.data(withJSONObject: object, options: [.sortedKeys]) else { return }
+        let bytes = Array(json) + [0x0A]
+        let fd = Darwin.open(url.path, O_WRONLY | O_APPEND | O_CREAT, 0o644)
+        guard fd >= 0 else { return }
+        defer { Darwin.close(fd) }
+        bytes.withUnsafeBytes { buffer in
+            while Darwin.write(fd, buffer.baseAddress, buffer.count) < 0, errno == EINTR {}
+        }
     }
 
     func marker(_ name: String, section: String? = nil, index: Int? = nil) {

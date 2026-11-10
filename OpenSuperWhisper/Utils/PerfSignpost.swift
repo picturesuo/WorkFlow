@@ -35,17 +35,18 @@ enum PerfSignpost {
         let state: OSSignpostIntervalState
         let start: ContinuousClock.Instant
         let token: String?
+        let id: UInt64
     }
 
     private struct State {
         var intervals: [PerfFlow: Interval] = [:]
         var seq = 0
         var firedOnce: Set<String> = []
-        var output: FileHandle?
+        var nextID: UInt64 = 0
     }
 
     private static let signposter = OSSignposter(subsystem: "com.picturesuo.WorkFlow.perf", category: "flow")
-    /// Guards `State`; held only for dictionary updates and the file append.
+    /// Guards `State`; held only for dictionary updates, never for file I/O.
     private final class Locked: @unchecked Sendable {
         private let lock = NSLock()
         private var value = State()
@@ -58,40 +59,70 @@ enum PerfSignpost {
     }
 
     private static let state = Locked()
+
+    /// The `WF_PERF_OUT` file, opened once for appending. Guarded by its own
+    /// lock so interval bookkeeping never waits on the disk.
+    private final class Output: @unchecked Sendable {
+        private let lock = NSLock()
+        private var descriptor: Int32?
+
+        func append(_ bytes: [UInt8], to path: String) {
+            lock.lock()
+            defer { lock.unlock() }
+            if descriptor == nil {
+                let fd = Darwin.open(path, O_WRONLY | O_APPEND | O_CREAT, 0o644)
+                guard fd >= 0 else { return }
+                descriptor = fd
+            }
+            guard let fd = descriptor else { return }
+            // One write(2) per record, so O_APPEND keeps each line whole.
+            bytes.withUnsafeBytes { buffer in
+                while Darwin.write(fd, buffer.baseAddress, buffer.count) < 0, errno == EINTR {}
+            }
+        }
+    }
+
+    private static let output = Output()
     private static let outputPath: String? = {
         guard let path = ProcessInfo.processInfo.environment["WF_PERF_OUT"], !path.isEmpty else { return nil }
         return path
     }()
 
     /// Starts `flow`. One still in flight is first ended as "superseded".
-    static func begin(_ flow: PerfFlow, token: String? = nil) {
-        let now = ContinuousClock.now
-        let id = signposter.makeSignpostID()
-        let newState = beginInterval(flow, id: id)
-        let superseded: (Interval, Int)? = state.withLock { state in
+    /// Returns a process-unique id that `end(_:outcome:token:id:)` can match.
+    @discardableResult
+    static func begin(_ flow: PerfFlow, token: String? = nil) -> UInt64 {
+        let signpostID = signposter.makeSignpostID()
+        let newState = beginInterval(flow, id: signpostID)
+        let (id, now, superseded): (UInt64, ContinuousClock.Instant, (Interval, Int)?) = state.withLock { state in
+            // Taken under the lock, so a superseded interval never ends before it began.
+            let now = ContinuousClock.now
+            state.nextID += 1
             let previous = state.intervals[flow]
-            state.intervals[flow] = Interval(state: newState, start: now, token: token)
-            guard let previous else { return nil }
+            state.intervals[flow] = Interval(state: newState, start: now, token: token, id: state.nextID)
+            guard let previous else { return (state.nextID, now, nil) }
             state.seq += 1
-            return (previous, state.seq)
+            return (state.nextID, now, (previous, state.seq))
         }
         if let (previous, seq) = superseded {
             finish(flow, previous, outcome: "superseded", seq: seq, at: now)
         }
+        return id
     }
 
     /// Ends `flow` if it is in flight. With a token, only the interval begun
-    /// with the same token ends.
-    static func end(_ flow: PerfFlow, outcome: String = "ok", token: String? = nil) {
-        let now = ContinuousClock.now
-        let ended: (Interval, Int)? = state.withLock { state in
+    /// with the same token ends; with an id, only the interval whose `begin`
+    /// returned that id.
+    static func end(_ flow: PerfFlow, outcome: String = "ok", token: String? = nil, id: UInt64? = nil) {
+        let ended: (Interval, Int, ContinuousClock.Instant)? = state.withLock { state in
             guard let interval = state.intervals[flow] else { return nil }
             if let token, interval.token != token { return nil }
+            if let id, interval.id != id { return nil }
             state.intervals[flow] = nil
             state.seq += 1
-            return (interval, state.seq)
+            return (interval, state.seq, ContinuousClock.now)
         }
-        if let (interval, seq) = ended {
+        if let (interval, seq, now) = ended {
             finish(flow, interval, outcome: outcome, seq: seq, at: now)
         }
     }
@@ -150,18 +181,7 @@ enum PerfSignpost {
     private static func write(_ object: [String: Any]) {
         guard let outputPath,
               let json = try? JSONSerialization.data(withJSONObject: object, options: [.sortedKeys]) else { return }
-        let line = json + Data([0x0A])
-        state.withLock { state in
-            if state.output == nil {
-                if !FileManager.default.fileExists(atPath: outputPath) {
-                    FileManager.default.createFile(atPath: outputPath, contents: nil)
-                }
-                state.output = FileHandle(forWritingAtPath: outputPath)
-            }
-            guard let output = state.output else { return }
-            output.seekToEndOfFile()
-            output.write(line)
-        }
+        output.append(Array(json) + [0x0A], to: outputPath)
     }
 
     /// From the kernel's record of when this process started.

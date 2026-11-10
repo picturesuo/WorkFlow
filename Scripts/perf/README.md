@@ -13,7 +13,7 @@ The script builds Release for testing into `build/perf-dd` under a per-run bundl
 
 - `--skip-build` reuses the last build and its bundle id.
 - `--skip-launch` skips the cold-launch step.
-- `--trace` runs the suite once more with xctrace attached (Time Profiler, Hangs, os_signpost) and saves `flows.trace`. The suite waits up to 120 s for the trace to start (`WF_PERF_WAIT_FOR_TRACE=1`).
+- `--trace` runs the suite once more with xctrace attached (Time Profiler, Hangs, os_signpost) and saves it as `flows-<date>-<time>.trace` next to the results, so an earlier trace is never deleted or overwritten. The suite waits up to 120 s for the trace to start (`WF_PERF_WAIT_FOR_TRACE=1`).
 
 `python3 -I Scripts/perf/report.py <results folder>` rebuilds the summary from `flows.jsonl` and `cold_launch.jsonl`.
 
@@ -52,7 +52,8 @@ All times are milliseconds on a monotonic clock. p95 is nearest-rank, so with 11
 
 ## Field numbers from the installed app
 
-`Scripts/perf/field-report.sh [--last DURATION]` (default `1h`) reads the same signposts from this Mac's unified log, so it works on the installed WorkFlow after real use.
+macOS does not keep these signposts in the stored log, so either run `Scripts/perf/field-report.sh --watch 600` while dictating (it streams the live log for that many seconds, then reports), or launch the app with `WF_PERF_OUT=<file>` in its environment and read the JSON lines.
+`field-report.sh --last DURATION` (default `1h`) reads the stored log instead, for whatever macOS happened to keep.
 It pairs each interval's begin and end per process and prints one row per flow and outcome code, plus the `launch_ready`, `launch_window_appeared` and `engine_ready` events, with n, median, p95 (nearest rank), min and max in milliseconds.
 This is where `trigger_to_mic_live`, `trigger_to_indicator_visible`, `cancel_after_start` and cold launch come from, since the benchmark cannot measure them.
-It prints only signpost names, outcome codes, counts and durations; macOS keeps signposts for a limited time, so run it soon after the dictations or launches you want to read.
+It prints only signpost names, outcome codes, counts and durations.

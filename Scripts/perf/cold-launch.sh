@@ -77,6 +77,13 @@ cleanup_identity() {
         rm -rf -- "$support"
     fi
 }
+
+# Cleanup deletes this identity's preferences and Application Support folder,
+# so refuse an identity that already has either: it was not created here.
+if defaults read "$BUNDLE_ID" >/dev/null 2>&1 || [[ -e "$HOME/Library/Application Support/$BUNDLE_ID" ]]; then
+    print -u2 "cold-launch: identity $BUNDLE_ID already has data; refusing so nothing this run did not create is deleted"
+    exit 2
+fi
 trap cleanup_identity EXIT
 
 scratch=$(mktemp -d "${TMPDIR:-/tmp}/workflow-cold-launch.XXXXXX")

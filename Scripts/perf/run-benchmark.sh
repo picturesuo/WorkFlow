@@ -112,17 +112,18 @@ fi
 
 if $trace; then
     print "Recording a trace (time-boxed) ..."
-    trace_flows="$out/trace-flows.jsonl"
-    rm -f "$trace_flows" "$trace_flows.pid" "$trace_flows.go"
-    rm -rf "$out/flows.trace"
-    run_suite "$trace_flows" "$out/trace-test.log" TEST_RUNNER_WF_PERF_WAIT_FOR_TRACE=1 &
+    # Fresh names per run, so --trace never deletes or overwrites an earlier one.
+    stamp=$(date +%Y%m%d-%H%M%S)
+    trace_flows="$out/trace-flows-$stamp.jsonl"
+    trace_file="$out/flows-$stamp.trace"
+    run_suite "$trace_flows" "$out/trace-test-$stamp.log" TEST_RUNNER_WF_PERF_WAIT_FOR_TRACE=1 &
     suite_pid=$!
     deadline=$(( SECONDS + 600 ))
     while [[ ! -s $trace_flows.pid ]] && (( SECONDS < deadline )); do sleep 1; done
     if [[ -s $trace_flows.pid ]]; then
         host_pid=$(<"$trace_flows.pid")
         xcrun xctrace record --template 'Time Profiler' --instrument 'Hangs' --instrument 'os_signpost' \
-            --attach "$host_pid" --output "$out/flows.trace" --time-limit 20m > "$out/xctrace.log" 2>&1 &
+            --attach "$host_pid" --output "$trace_file" --time-limit 20m > "$out/xctrace.log" 2>&1 &
         trace_pid=$!
         sleep 15
         touch "$trace_flows.go"
