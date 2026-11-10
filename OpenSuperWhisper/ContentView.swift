@@ -16,7 +16,11 @@ final class RecordingHistoryModel: ObservableObject {
     typealias Loader = @MainActor (String, Int, Int) async throws -> [Recording]
 
     @Published var recordings: [Recording] = []
+    /// True while a later page loads: the spinner below the list.
     @Published private(set) var isLoadingMore = false
+    /// True while the first page loads into an empty list. A first page
+    /// loading over rows already on screen shows nothing until it arrives.
+    @Published private(set) var isInitialLoading = false
     @Published private(set) var canLoadMore = true
     @Published private(set) var errorMessage: String?
     private(set) var query = ""
@@ -27,6 +31,8 @@ final class RecordingHistoryModel: ObservableObject {
     private var nextOffset = 0
     private var generation = UUID()
     private var loadTask: Task<Void, Never>?
+    /// A page request is in flight. Not published: only the spinners are.
+    private var isLoading = false
 
     init(pageSize: Int = 100, loader: @escaping Loader) {
         self.pageSize = pageSize
@@ -34,42 +40,54 @@ final class RecordingHistoryModel: ObservableObject {
         self.loader = loader
     }
 
+    /// Starts a new query from its first page. The current rows stay until
+    /// that page arrives.
     @discardableResult
     func search(query: String) -> Task<Void, Never> {
         self.query = query
-        recordings = []
         nextOffset = 0
-        return refresh()
+        return startFirstPage(limit: pageSize)
     }
 
     @discardableResult
     func refresh() -> Task<Void, Never> {
-        // Even a refresh of the same query supersedes every older page request.
-        generation = UUID()
-        loadTask?.cancel()
-        isLoadingMore = false
-        initialPageLimit = max(pageSize, max(recordings.count, nextOffset))
-        nextOffset = 0
-        canLoadMore = true
-        return loadMore()!
+        startFirstPage(limit: max(pageSize, max(recordings.count, nextOffset)))
     }
 
     @discardableResult
     func loadMore() -> Task<Void, Never>? {
-        guard !isLoadingMore && canLoadMore else { return nil }
-        isLoadingMore = true
-        errorMessage = nil
+        guard !isLoading && canLoadMore else { return nil }
+        return startLoad()
+    }
+
+    private func startFirstPage(limit: Int) -> Task<Void, Never> {
+        // Even a refresh of the same query supersedes every older page request.
+        generation = UUID()
+        loadTask?.cancel()
+        isLoading = false
+        initialPageLimit = limit
+        nextOffset = 0
+        return startLoad()
+    }
+
+    private func startLoad() -> Task<Void, Never> {
+        isLoading = true
         let requestGeneration = generation
         let requestQuery = query
         let offset = nextOffset
         let limit = offset == 0 ? initialPageLimit : pageSize
+        setIfChanged(\.isLoadingMore, offset > 0)
+        setIfChanged(\.isInitialLoading, offset == 0 && recordings.isEmpty)
+        setIfChanged(\.errorMessage, nil)
 
         let task = Task { [weak self] in
             guard let self else { return }
             defer {
                 // An obsolete completion must not hide a newer request's spinner.
                 if self.generation == requestGeneration {
-                    self.isLoadingMore = false
+                    self.isLoading = false
+                    self.setIfChanged(\.isLoadingMore, false)
+                    self.setIfChanged(\.isInitialLoading, false)
                     self.loadTask = nil
                 }
             }
@@ -78,21 +96,29 @@ final class RecordingHistoryModel: ObservableObject {
                 let page = try await self.loader(requestQuery, limit, offset)
                 guard self.generation == requestGeneration else { return }
                 if offset == 0 {
-                    self.recordings = page
+                    if self.recordings != page { self.recordings = page }
                     PerfSignpost.endAfterRender(.searchKeystroke, token: requestQuery)
                     PerfSignpost.endAfterRender(.historyOpen)
                 } else {
                     self.recordings.append(contentsOf: page)
                 }
                 self.nextOffset = offset + page.count
-                self.canLoadMore = page.count == limit
+                self.setIfChanged(\.canLoadMore, page.count == limit)
             } catch {
                 guard self.generation == requestGeneration else { return }
-                self.errorMessage = "History couldn't load. Try again."
+                // A failed first page can always be retried.
+                if offset == 0 { self.setIfChanged(\.canLoadMore, true) }
+                self.setIfChanged(\.errorMessage, "History couldn't load. Try again.")
             }
         }
         loadTask = task
         return task
+    }
+
+    /// Assigns a published property only when the value changes, so an
+    /// unchanged flag never invalidates the views that observe this model.
+    private func setIfChanged<Value: Equatable>(_ keyPath: ReferenceWritableKeyPath<RecordingHistoryModel, Value>, _ value: Value) {
+        if self[keyPath: keyPath] != value { self[keyPath: keyPath] = value }
     }
 }
 
@@ -110,6 +136,7 @@ class ContentViewModel: ObservableObject {
         set { history.recordings = newValue }
     }
     var isLoadingMore: Bool { history.isLoadingMore }
+    var isInitialLoading: Bool { history.isInitialLoading }
     var canLoadMore: Bool { history.canLoadMore }
     var historyError: String? { history.errorMessage }
     @Published private(set) var recordingStartedAt: Date?
@@ -511,7 +538,7 @@ struct ContentView: View {
     private var historyList: some View {
         if viewModel.recordings.isEmpty {
             Group {
-                if viewModel.isLoadingMore {
+                if viewModel.isInitialLoading {
                     ProgressView("Loading history…")
                 } else if let error = viewModel.historyError {
                     HistoryLoadError(message: error, onRetry: viewModel.retryLoading)
@@ -523,52 +550,60 @@ struct ContentView: View {
             .padding(WFSpace.xl)
         } else {
             VStack(spacing: 0) {
-                ScrollView {
-                    LazyVStack(alignment: .leading, spacing: 0, pinnedViews: [.sectionHeaders]) {
-                        ForEach(HistoryDay.group(viewModel.recordings)) { day in
-                            Section {
-                                ForEach(day.recordings) { recording in
-                                    RecordingRow(
-                                        recording: recording,
-                                        searchQuery: debouncedSearchText,
-                                        onDelete: {
-                                            viewModel.deleteRecording(recording)
-                                        },
-                                        onRegenerate: {
-                                            Task {
-                                                await TranscriptionQueue.shared.requeueRecording(recording)
+                ScrollViewReader { proxy in
+                    ScrollView {
+                        LazyVStack(alignment: .leading, spacing: 0, pinnedViews: [.sectionHeaders]) {
+                            ForEach(HistoryDay.group(viewModel.recordings)) { day in
+                                Section {
+                                    ForEach(day.recordings) { recording in
+                                        RecordingRow(
+                                            recording: recording,
+                                            searchQuery: debouncedSearchText,
+                                            onDelete: {
+                                                viewModel.deleteRecording(recording)
+                                            },
+                                            onRegenerate: {
+                                                Task {
+                                                    await TranscriptionQueue.shared.requeueRecording(recording)
+                                                }
+                                            },
+                                            onRegenerateWith: { selection in
+                                                Task {
+                                                    await TranscriptionQueue.shared.requeueRecording(recording, with: selection)
+                                                }
+                                            },
+                                            regenerationFilters: writingFilter.filters
+                                        )
+                                        .id(recording.id)
+                                        .onAppear {
+                                            if recording.id == viewModel.recordings.last?.id {
+                                                viewModel.loadMore()
                                             }
-                                        },
-                                        onRegenerateWith: { selection in
-                                            Task {
-                                                await TranscriptionQueue.shared.requeueRecording(recording, with: selection)
-                                            }
-                                        },
-                                        regenerationFilters: writingFilter.filters
-                                    )
-                                    .id(recording.id)
-                                    .onAppear {
-                                        if recording.id == viewModel.recordings.last?.id {
-                                            viewModel.loadMore()
+                                        }
+                                        if recording.id != day.recordings.last?.id {
+                                            HistoryRowSeparator()
                                         }
                                     }
-                                    if recording.id != day.recordings.last?.id {
-                                        HistoryRowSeparator()
-                                    }
+                                } header: {
+                                    HistoryDayHeader(title: day.title)
                                 }
-                            } header: {
-                                HistoryDayHeader(title: day.title)
+                            }
+
+                            if viewModel.isLoadingMore {
+                                ProgressView()
+                                    .controlSize(.small)
+                                    .frame(maxWidth: .infinity)
+                                    .padding(WFSpace.md)
                             }
                         }
-
-                        if viewModel.isLoadingMore {
-                            ProgressView()
-                                .controlSize(.small)
-                                .frame(maxWidth: .infinity)
-                                .padding(WFSpace.md)
+                        .padding(.bottom, WFSpace.sm)
+                    }
+                    // A new query starts at the top, as it did when the list was rebuilt.
+                    .onChange(of: debouncedSearchText) { _, _ in
+                        if let first = viewModel.recordings.first?.id {
+                            proxy.scrollTo(first, anchor: .top)
                         }
                     }
-                    .padding(.bottom, WFSpace.sm)
                 }
                 if let error = viewModel.historyError {
                     HistoryLoadError(message: error, onRetry: viewModel.retryLoading)
