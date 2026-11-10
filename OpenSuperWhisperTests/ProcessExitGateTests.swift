@@ -22,6 +22,12 @@ final class ProcessExitGateTests: XCTestCase {
         ProcessExitGate(drainTimeout: timeout, onAbandon: { abandons.update { $0 += 1 } })
     }
 
+    /// The hosted bundle's principal class closes the shared gate when the
+    /// run ends, before XCTest calls exit.
+    func testTheExitDrainObserverIsInstalled() {
+        XCTAssertTrue(TestRunExitDrain.isInstalled)
+    }
+
     func testAdmitsAndRunsBeforeShutdown() {
         let gate = gate()
         XCTAssertEqual(gate.run { 42 }, 42)

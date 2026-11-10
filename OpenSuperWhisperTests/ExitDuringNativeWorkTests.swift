@@ -4,8 +4,9 @@ import XCTest
 
 /// Opt-in end-to-end reproduction: the test host exits while bundled speech
 /// detectors are inside whisper.cpp on background threads. Without
-/// ProcessExitGate, exit destroys ggml's statics under the running call and
-/// the host aborts; with it, exit waits for the call to return.
+/// ProcessExitGate, exit destroys ggml's statics under the running calls;
+/// with it, TestRunExitDrain closes the gate when the run ends and waits for
+/// the calls to return before XCTest calls exit.
 ///
 /// Run alone, with `TEST_RUNNER_WF_EXIT_REPRO=1`. Optional
 /// `TEST_RUNNER_WF_EXIT_REPRO_LOG` names a file that receives timestamped
@@ -41,7 +42,7 @@ final class ExitDuringNativeWorkTests: XCTestCase {
 
     func testHostExitsWhileTheDetectorIsInsideWhisperCpp() async throws {
         Self.logPath = ProcessInfo.processInfo.environment["WF_EXIT_REPRO_LOG"]
-        // Registered after the app's own handler, so it runs first at exit.
+        // Only a marker of when exit begins; it never waits.
         atexit { ExitDuringNativeWorkTests.mark("exit begins") }
 
         // At least the requested minutes of 16 kHz mono speech, from jfk.wav repeated.
@@ -86,6 +87,6 @@ final class ExitDuringNativeWorkTests: XCTestCase {
         let inFlight = ProcessExitGate.shared.inFlightCount
         XCTAssertGreaterThanOrEqual(inFlight, 1, "A detection is inside whisper.cpp")
         Self.mark("test returns with \(inFlight) detection(s) in flight")
-        // Returning now lets XCTest exit the host while the call runs.
+        // Returning now ends the run while the calls are still running.
     }
 }
