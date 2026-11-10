@@ -144,8 +144,15 @@ final class UIScreenshotCatalogTests: XCTestCase {
             "autoDeleteRecordingsEnabled": false,
             "autoDeleteRecordingsAfterDays": 30,
             SpeakingEfficiency.typingWPMKey: 40.0,
+            // Overlay scroll bars whether or not a mouse is connected, so a
+            // scroll view never reserves a legacy scroller's width in one run
+            // and not in another. AppKit reads this once, at its first use,
+            // which comes after this first setUp.
+            "AppleShowScrollBars": "WhenScrolling",
         ]
         for (key, value) in values { standard.set(value, forKey: key) }
+        XCTAssertEqual(NSScroller.preferredScrollerStyle, .overlay,
+                       "Renders use overlay scroll bars; something read the scroll bar style before the catalog set it")
         VocabularyStore.save(Catalog.vocabulary)
         TargetAppRuleStore.save(Catalog.appRules)
         CustomCleanupFilterStore.select(.builtIn(.everyday))
