@@ -159,7 +159,7 @@ final class RecordingHistoryModel: ObservableObject {
                 guard self.generation == requestGeneration else { return }
                 // A failed first page can always be retried.
                 if offset == 0 { self.setIfChanged(\.canLoadMore, true) }
-                self.setIfChanged(\.errorMessage, "History couldn't load. Try again.")
+                self.setIfChanged(\.errorMessage, "History couldn’t load. Try again.")
             }
         }
         loadTask = task
@@ -897,8 +897,7 @@ struct HistoryList: View {
                     }
                 }
                 if let error = history.errorMessage {
-                    HistoryLoadError(message: error, onRetry: { history.loadMore() })
-                        .padding(WFSpace.md)
+                    HistoryLoadError(message: error, onRetry: { history.loadMore() }, compact: true)
                 }
             }
         }
@@ -1005,11 +1004,12 @@ struct MainToolbar: View {
 struct InputMonitoringNotice: View {
     let shortcut: String
     let onEnable: () -> Void
+    @Environment(\.colorScheme) private var colorScheme
 
     var body: some View {
         HStack(spacing: WFSpace.sm) {
             Image(systemName: "exclamationmark.triangle.fill")
-                .foregroundStyle(.orange)
+                .foregroundStyle(ThemePalette.caution(colorScheme))
                 .accessibilityHidden(true)
             Text("Enable Input Monitoring to use \(shortcut).")
                 .font(.callout)
@@ -1021,7 +1021,7 @@ struct InputMonitoringNotice: View {
         }
         .padding(.horizontal, WFSpace.lg)
         .padding(.vertical, WFSpace.sm)
-        .background(Color.orange.opacity(0.10))
+        .background(ThemePalette.caution(colorScheme).opacity(0.10))
         .overlay(alignment: .bottom) { WFHairline() }
     }
 }
@@ -1078,15 +1078,38 @@ struct HistoryRowSeparator: View {
 struct HistoryLoadError: View {
     let message: String
     let onRetry: () -> Void
+    /// A single-line bar under rows already on screen, instead of the
+    /// centered message an empty History shows.
+    var compact = false
+    @Environment(\.colorScheme) private var colorScheme
 
     var body: some View {
-        VStack(spacing: WFSpace.sm) {
-            Label("Couldn’t load history", systemImage: "exclamationmark.triangle")
-                .font(.headline)
-            Text(message).font(.callout).foregroundStyle(.secondary)
-            Button("Try Again", action: onRetry)
+        if compact {
+            HStack(spacing: WFSpace.sm) {
+                Image(systemName: "exclamationmark.triangle")
+                    .font(.callout)
+                    .foregroundStyle(ThemePalette.caution(colorScheme))
+                    .accessibilityHidden(true)
+                Text("Couldn’t load more history")
+                    .font(.callout)
+                    .lineLimit(1)
+                Spacer(minLength: WFSpace.sm)
+                Button("Try Again", action: onRetry)
+                    .controlSize(.small)
+            }
+            .padding(.horizontal, WFSpace.lg)
+            .padding(.vertical, WFSpace.sm)
+            .background(ThemePalette.chromeBackground(colorScheme))
+            .overlay(alignment: .top) { WFHairline() }
+        } else {
+            VStack(spacing: WFSpace.sm) {
+                Label("Couldn’t load history", systemImage: "exclamationmark.triangle")
+                    .font(.headline)
+                Text(message).font(.callout).foregroundStyle(.secondary)
+                Button("Try Again", action: onRetry)
+            }
+            .multilineTextAlignment(.center)
         }
-        .multilineTextAlignment(.center)
     }
 }
 
@@ -1356,22 +1379,41 @@ struct DictationDock: View {
                     .lineLimit(1)
                     .truncationMode(.tail)
             }
-            Text(detailText)
-                .font(.subheadline)
-                .foregroundStyle(.secondary)
-                .monospacedDigit()
-                .lineLimit(1)
-                .truncationMode(.middle)
+            detailLine
         }
         .accessibilityElement(children: .combine)
     }
 
     /// While recording under Auto, the filter is not known yet: it is chosen
     /// from the words once they are transcribed.
-    private var detailText: String {
+    private var autoSuffix: String? {
+        guard status.isRecording, writingAuto?.wrappedValue == true else { return nil }
+        return " · Auto picks the filter after"
+    }
+
+    /// The detail, cut at its end if it must be. The Auto hint is dropped
+    /// whole when it does not fit, and VoiceOver always reads it.
+    @ViewBuilder
+    private var detailLine: some View {
         let detail = status.detail(shortcut: shortcut)
-        guard status.isRecording, writingAuto?.wrappedValue == true else { return detail }
-        return "\(detail) · Auto picks the filter after"
+        if let autoSuffix {
+            ViewThatFits(in: .horizontal) {
+                detailText(detail + autoSuffix).fixedSize()
+                detailText(detail)
+            }
+            .accessibilityLabel(detail + autoSuffix)
+        } else {
+            detailText(detail)
+        }
+    }
+
+    private func detailText(_ text: String) -> some View {
+        Text(text)
+            .font(.subheadline)
+            .foregroundStyle(.secondary)
+            .monospacedDigit()
+            .lineLimit(1)
+            .truncationMode(.tail)
     }
 
     private var recordControls: some View {
@@ -1452,33 +1494,38 @@ struct PermissionsView: View {
 
     var body: some View {
         VStack(spacing: 20) {
-            Text("Permissions needed")
-                .font(.title2.weight(.semibold))
-                .padding()
+            Spacer()
 
-            if didMigrateFromChat {
-                Text("WorkFlow now has its own macOS identity. Your settings and History were preserved, but macOS needs these permissions once more.")
-                    .font(.callout)
-                    .foregroundStyle(.secondary)
-                    .multilineTextAlignment(.center)
-                    .accessibilityLabel("WorkFlow was renamed. Settings and History were preserved. Grant permissions once more.")
-            }
+            // Centered in the window and no wider than a readable column.
+            VStack(spacing: 20) {
+                Text("Permissions needed")
+                    .font(.title2.weight(.semibold))
 
-            PermissionRow(
-                isGranted: permissionsManager.isMicrophonePermissionGranted,
-                title: "Microphone Access",
-                description: "Required for audio recording",
-                action: {
-                    permissionsManager.requestMicrophonePermissionOrOpenSystemPreferences()
+                if didMigrateFromChat {
+                    Text("WorkFlow now has its own macOS identity. Your settings and History were preserved, but macOS needs these permissions once more.")
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                        .multilineTextAlignment(.center)
+                        .accessibilityLabel("WorkFlow was renamed. Settings and History were preserved. Grant permissions once more.")
                 }
-            )
 
-            PermissionRow(
-                isGranted: permissionsManager.isAccessibilityPermissionGranted,
-                title: "Accessibility Access",
-                description: "Required to paste transcriptions into other apps",
-                action: { permissionsManager.openSystemPreferences(for: .accessibility) }
-            )
+                PermissionRow(
+                    isGranted: permissionsManager.isMicrophonePermissionGranted,
+                    title: "Microphone Access",
+                    description: "Required for audio recording",
+                    action: {
+                        permissionsManager.requestMicrophonePermissionOrOpenSystemPreferences()
+                    }
+                )
+
+                PermissionRow(
+                    isGranted: permissionsManager.isAccessibilityPermissionGranted,
+                    title: "Accessibility Access",
+                    description: "Required to paste transcriptions into other apps",
+                    action: { permissionsManager.openSystemPreferences(for: .accessibility) }
+                )
+            }
+            .frame(maxWidth: 480)
 
             Spacer()
         }
@@ -1494,28 +1541,29 @@ struct PermissionRow: View {
     @Environment(\.colorScheme) private var colorScheme
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack {
-                Image(systemName: isGranted ? "checkmark.circle.fill" : "exclamationmark.circle.fill")
-                    .foregroundColor(isGranted ? .green : .orange)
+        // The description sits under its title, not under the icon.
+        HStack(alignment: .firstTextBaseline, spacing: 10) {
+            Image(systemName: isGranted ? "checkmark.circle.fill" : "exclamationmark.circle.fill")
+                .foregroundColor(isGranted ? .green : ThemePalette.caution(colorScheme))
+                .font(.headline)
 
+            VStack(alignment: .leading, spacing: 4) {
                 Text(title)
                     .font(.headline)
-
-                Spacer()
-
-                if !isGranted {
-                    Button("Grant Access") {
-                        action()
-                    }
-                    .buttonStyle(.borderedProminent)
-                    .accessibilityLabel("Grant \(title)")
-                }
+                Text(description)
+                    .font(.subheadline)
+                    .foregroundColor(.secondary)
             }
 
-            Text(description)
-                .font(.subheadline)
-                .foregroundColor(.secondary)
+            Spacer(minLength: WFSpace.md)
+
+            if !isGranted {
+                Button("Grant Access") {
+                    action()
+                }
+                .buttonStyle(.borderedProminent)
+                .accessibilityLabel("Grant \(title)")
+            }
         }
         .padding()
         .surfaceCard()
@@ -1688,6 +1736,13 @@ struct HistoryRow: View {
     }
 
     private var displayText: String { Self.displayText(for: recording) }
+
+    /// A failed row's message without the "Failed to transcribe: " prefix,
+    /// which the row's title already says. Display only.
+    static func failureDetail(_ text: String) -> String {
+        let prefix = "Failed to transcribe: "
+        return text.hasPrefix(prefix) ? String(text.dropFirst(prefix.count)) : text
+    }
 
     var cleanupBadgeLabel: String? {
         guard recording.status == .completed else { return nil }
@@ -1876,6 +1931,8 @@ struct HistoryRow: View {
             .help("More actions")
             .accessibilityLabel("More actions")
         }
+        // A lone actions menu centers in the same 24 points as one beside a button.
+        .frame(height: 24)
         .fixedSize()
     }
 
@@ -1911,8 +1968,10 @@ struct HistoryRow: View {
         Text(text)
     }
 
+    /// The same spaced dot that separates parts inside a badge, so gaps
+    /// between groups match gaps within them.
     private var separatorDot: some View {
-        Text("·").accessibilityHidden(true)
+        Text(" · ").accessibilityHidden(true)
     }
 
     /// Time, length, and how the text was produced, on one line when it fits.
@@ -1920,7 +1979,7 @@ struct HistoryRow: View {
         // Formatted once for the three layouts below.
         let time = "\(recording.timestamp.formatted(date: .omitted, time: .shortened)) · \(TextUtil.formatDuration(recording.duration))"
         return ViewThatFits(in: .horizontal) {
-            HStack(spacing: 5) {
+            HStack(spacing: 0) {
                 timeLabel(time)
                 if cleanupBadgeLabel != nil { separatorDot; cleanupBadge }
                 if speakingBadgeLabel != nil { separatorDot; speakingBadge }
@@ -1929,7 +1988,7 @@ struct HistoryRow: View {
             VStack(alignment: .leading, spacing: 2) {
                 timeLabel(time)
                 if hasBadges {
-                    HStack(spacing: 5) {
+                    HStack(spacing: 0) {
                         cleanupBadge
                         if cleanupBadgeLabel != nil && speakingBadgeLabel != nil { separatorDot }
                         speakingBadge
@@ -1950,7 +2009,12 @@ struct HistoryRow: View {
 
     private var progressLabel: some View {
         HStack(spacing: 6) {
-            ProgressView().controlSize(.small).scaleEffect(0.6).frame(width: 12, height: 12)
+            if recording.status == .pending {
+                // Waiting is not work in progress: a still clock, not a spinner.
+                Image(systemName: "clock").font(.system(size: 11)).frame(width: 12, height: 12)
+            } else {
+                ProgressView().controlSize(.small).scaleEffect(0.6).frame(width: 12, height: 12)
+            }
             Text(isRegenerating ? "Updating transcription · \(statusText)" : statusText)
             if recording.status != .pending {
                 Text("\(Int(recording.progress * 100))%")
@@ -1992,10 +2056,11 @@ struct HistoryRow: View {
                         .font(.body.weight(.medium))
                         .foregroundStyle(ThemePalette.signalText(colorScheme))
                     if !recording.transcription.isEmpty {
-                        Text(recording.transcription)
+                        Text(Self.failureDetail(recording.transcription))
                             .font(.callout)
                             .foregroundStyle(.secondary)
                             .textSelection(.enabled)
+                            .accessibilityLabel(recording.transcription)
                     }
                 }
                 .fixedSize(horizontal: false, vertical: true)
