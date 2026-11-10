@@ -90,6 +90,16 @@ if [[ ! -d "$source_app" ]]; then
     exit 1
 fi
 
+# A shipped build must not carry LLVM code-coverage instrumentation
+# (counters on every code region and a .profraw write at exit).
+for binary in "$source_app"/Contents/MacOS/*(N.) "$source_app"/Contents/Frameworks/**/*(N.); do
+    load_commands=$(otool -l "$binary" 2>/dev/null || true)
+    if [[ "$load_commands" == *"sectname __llvm_prf_cnts"* ]]; then
+        echo "Release build is instrumented for code coverage: $binary" >&2
+        exit 1
+    fi
+done
+
 install_stage=$(mktemp -d /tmp/workflow-install.XXXXXX)
 cleanup() {
     if [[ "$install_stage" == /tmp/workflow-install.* && -d "$install_stage" ]]; then

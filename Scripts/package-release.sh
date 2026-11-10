@@ -33,6 +33,16 @@ if [[ ! -d "$source_app" ]]; then
     exit 1
 fi
 
+# A shipped build must not carry LLVM code-coverage instrumentation
+# (counters on every code region and a .profraw write at exit).
+for binary in "$source_app"/Contents/MacOS/*(N.) "$source_app"/Contents/Frameworks/**/*(N.); do
+    load_commands=$(otool -l "$binary" 2>/dev/null || true)
+    if [[ "$load_commands" == *"sectname __llvm_prf_cnts"* ]]; then
+        echo "Release build is instrumented for code coverage: $binary" >&2
+        exit 1
+    fi
+done
+
 app_version=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$source_app/Contents/Info.plist")
 if [[ "$app_version" != "$version" ]]; then
     echo "Requested release $version does not match app version $app_version." >&2
