@@ -15,6 +15,10 @@ import Foundation
 /// in `ggml_cpu_extra_work_size` in 30 runs). The app closes it in
 /// `applicationWillTerminate`; the hosted test bundle closes it when the test
 /// run ends; a host that calls `exit` without either is not covered.
+///
+/// Past its timeout a test host exits normally with calls still running,
+/// which is what happened before this gate existed. The timeout is measured
+/// on the wall clock.
 final class ProcessExitGate: @unchecked Sendable {
     /// The app waits up to 3 s, then leaves without running static
     /// destructors. A test host waits up to 120 s and never forces its exit.
@@ -31,6 +35,8 @@ final class ProcessExitGate: @unchecked Sendable {
     private let drainTimeout: TimeInterval
     private let onAbandon: @Sendable () -> Void
 
+    /// `onAbandon` runs once, with the gate's lock held, before any shutdown
+    /// caller returns, so it must not call back into the gate.
     init(drainTimeout: TimeInterval, onAbandon: @escaping @Sendable () -> Void) {
         self.drainTimeout = drainTimeout
         self.onAbandon = onAbandon

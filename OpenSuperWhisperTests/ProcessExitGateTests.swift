@@ -165,7 +165,7 @@ final class ProcessExitGateTests: XCTestCase {
 
     func testTwoShutdownsPastTheTimeoutBothReturnAndAbandonOnce() {
         let abandons = Locked(0)
-        let gate = gate(timeout: 0.2, abandons: abandons)
+        let gate = gate(timeout: 0.3, abandons: abandons)
         let entered = DispatchSemaphore(value: 0)
         let left = DispatchSemaphore(value: 0)
         Thread.detachNewThread {
@@ -180,7 +180,7 @@ final class ProcessExitGateTests: XCTestCase {
         let start = Date()
         let returns = Locked<[Date]>([])
         let group = DispatchGroup()
-        for delay in [0.0, 0.05] {
+        for delay in [0.0, 0.15] {
             group.enter()
             Thread.detachNewThread {
                 Thread.sleep(forTimeInterval: delay)
