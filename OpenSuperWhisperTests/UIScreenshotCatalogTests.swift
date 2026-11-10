@@ -206,12 +206,12 @@ final class UIScreenshotCatalogTests: XCTestCase {
                     beforeShow: { lock.hold($0) },
                     method: "The first History page is held by a database write lock",
                     prepare: { window in
-                        window.host.settle(0.3, timeout: 2) { window.model.isLoadingMore }
-                        return window.model.isLoadingMore && window.model.recordings.isEmpty
+                        window.host.settle(0.3, timeout: 2) { window.model.history.isInitialLoading }
+                        return window.model.history.isInitialLoading && window.model.recordings.isEmpty
                     },
                     finish: { window in
                         lock.release()
-                        window.host.settle(0.1, timeout: 3) { !window.model.isLoadingMore }
+                        window.host.settle(0.1, timeout: 3) { !window.model.history.isInitialLoading }
                     }
                 )
                 try windowShot(
@@ -350,8 +350,10 @@ final class UIScreenshotCatalogTests: XCTestCase {
         for (state, search, recording, inProgress, available, note) in toolbarCases {
             for width in [CGFloat(560), 440] {
                 for scheme in schemes {
+                    let toolbarSearch = HistorySearch(onQuery: { _ in })
+                    toolbarSearch.text = search
                     let toolbar = MainToolbar(
-                        searchText: .constant(search),
+                        search: toolbarSearch,
                         meetingLabel: recording ? "Stop & save meeting" : "Start meeting",
                         isMeetingRecording: recording,
                         isMeetingInProgress: inProgress,
@@ -363,7 +365,7 @@ final class UIScreenshotCatalogTests: XCTestCase {
                         toolbar, screen: "main-toolbar", state: state, scheme: scheme,
                         size: CGSize(width: width, height: WFChrome.titleBarHeight),
                         background: ThemePalette.chromeBackground(scheme), family: CatalogFamily.main,
-                        view: "MainToolbar", method: "MainToolbar(searchText:meetingLabel:isMeetingRecording:isMeetingInProgress:...)",
+                        view: "MainToolbar", method: "MainToolbar(search:meetingLabel:isMeetingRecording:isMeetingInProgress:...)",
                         note: [note, "Standalone, so the window's traffic lights are not drawn"].filter { !$0.isEmpty }.joined(separator: "; ")
                     )
                 }
@@ -1829,7 +1831,9 @@ private final class CatalogWindow {
         let host = CatalogHost(content, size: size, scheme: scheme, titled: true)
         let window = CatalogWindow(host: host, model: model, store: store, database: database, service: service)
         if waitForHistory {
-            host.settle(0.3, timeout: 6) { model.recordings.count == rowCount && !model.isLoadingMore }
+            host.settle(0.3, timeout: 6) {
+                model.recordings.count == rowCount && !model.history.isInitialLoading && !model.isLoadingMore
+            }
         } else {
             host.settle(0.3)
         }
@@ -1854,7 +1858,9 @@ private final class CatalogWindow {
         let previous = model.recordings.map(\.id)
         field.stringValue = query
         field.delegate?.controlTextDidChange?(Notification(name: NSControl.textDidChangeNotification, object: field))
-        host.settle(0.2, timeout: 3) { self.model.recordings.map(\.id) != previous && !self.model.isLoadingMore }
+        host.settle(0.2, timeout: 3) {
+            self.model.recordings.map(\.id) != previous && !self.model.history.isInitialLoading && !self.model.isLoadingMore
+        }
         host.settle(0.6)
     }
 
