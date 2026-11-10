@@ -62,8 +62,11 @@ final class ExitGateCoreTests: XCTestCase {
         check(state(.open, 2), .shutdown, state(.closing, 2), [.awaitDrain])
     }
 
-    func testShutdownAgainDoesNothing() {
-        check(state(.closing, 2), .shutdown, state(.closing, 2), [])
+    func testShutdownWhileClosingAwaitsTheSameDrain() {
+        check(state(.closing, 2), .shutdown, state(.closing, 2), [.awaitDrain])
+    }
+
+    func testShutdownWhenClosedDoesNothing() {
         check(state(.closed, 0), .shutdown, state(.closed, 0), [])
     }
 
@@ -82,7 +85,7 @@ final class ExitGateCoreTests: XCTestCase {
 }
 
 /// Native calls that enter and later leave, a shutdown, and a timeout, in any
-/// order, plus stray leaves. Checks E1-E4.
+/// order, plus stray leaves. Checks E1-E5.
 struct ExitGateModel: PropertyModel {
     typealias Step = ExitGateCore.Event
 
@@ -141,6 +144,10 @@ struct ExitGateModel: PropertyModel {
         // E4
         if shutdownSeen, outstanding == 0 || timeoutAfterShutdown, terminals != 1 {
             v.append("E4: shutdown settled but \(terminals) of drained/abandon were emitted")
+        }
+        // E5: every shutdown that leaves the gate closing, first or repeated, awaits the drain.
+        if event == .shutdown, post.phase == .closing, effects != [.awaitDrain] {
+            v.append("E5: shutdown while closing emitted \(effects)")
         }
         return v
     }

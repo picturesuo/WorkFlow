@@ -29,37 +29,46 @@ public struct WhisperVadSegment {
 public class MyWhisperVadContext {
     private var vctx: OpaquePointer?
     
+    /// Nil when the model can't be loaded or the process is exiting.
     public init?(modelPath: String) {
-        let params = whisper_vad_default_context_params()
-        vctx = modelPath.withCString { whisper_vad_init_from_file_with_params($0, params) }
-        guard vctx != nil else { return nil }
+        let loaded = ProcessExitGate.shared.run {
+            let params = whisper_vad_default_context_params()
+            return modelPath.withCString { whisper_vad_init_from_file_with_params($0, params) }
+        } ?? nil
+        guard let loaded else { return nil }
+        vctx = loaded
     }
     
     deinit {
         if let vctx = vctx {
-            whisper_vad_free(vctx)
+            // Refused while the process exits: the free is skipped, since
+            // the process is going away and its statics may be gone.
+            _ = ProcessExitGate.shared.run { whisper_vad_free(vctx) }
         }
     }
     
+    /// Nil when detection fails or the process is exiting.
     public func speechSegments(in samples: [Float]) -> [WhisperVadSegment]? {
         guard let vctx = vctx else { return nil }
         
-        let segmentsPtr = samples.withUnsafeBufferPointer { buffer in
-            whisper_vad_segments_from_samples(vctx, whisper_vad_default_params(), buffer.baseAddress, Int32(buffer.count))
-        }
-        guard let segmentsPtr = segmentsPtr else { return nil }
-        defer { whisper_vad_free_segments(segmentsPtr) }
-        
-        let count = Int(whisper_vad_segments_n_segments(segmentsPtr))
-        var result: [WhisperVadSegment] = []
-        result.reserveCapacity(count)
-        for i in 0..<count {
-            result.append(WhisperVadSegment(
-                startCs: Int64(whisper_vad_segments_get_segment_t0(segmentsPtr, Int32(i))),
-                endCs: Int64(whisper_vad_segments_get_segment_t1(segmentsPtr, Int32(i)))
-            ))
-        }
-        return result
+        return ProcessExitGate.shared.run { () -> [WhisperVadSegment]? in
+            let segmentsPtr = samples.withUnsafeBufferPointer { buffer in
+                whisper_vad_segments_from_samples(vctx, whisper_vad_default_params(), buffer.baseAddress, Int32(buffer.count))
+            }
+            guard let segmentsPtr = segmentsPtr else { return nil }
+            defer { whisper_vad_free_segments(segmentsPtr) }
+            
+            let count = Int(whisper_vad_segments_n_segments(segmentsPtr))
+            var result: [WhisperVadSegment] = []
+            result.reserveCapacity(count)
+            for i in 0..<count {
+                result.append(WhisperVadSegment(
+                    startCs: Int64(whisper_vad_segments_get_segment_t0(segmentsPtr, Int32(i))),
+                    endCs: Int64(whisper_vad_segments_get_segment_t1(segmentsPtr, Int32(i)))
+                ))
+            }
+            return result
+        } ?? nil
     }
 }
 
@@ -84,28 +93,32 @@ public class MyWhisperContext {
     
     public static func initFromFile(path: String, params: WhisperContextParams) -> MyWhisperContext? {
         let cParams = params.toC()
-        let context = path.withCString { whisper_init_from_file_with_params($0, cParams) }
+        // Nil when the process is exiting, as when loading fails.
+        let context = ProcessExitGate.shared.run { path.withCString { whisper_init_from_file_with_params($0, cParams) } } ?? nil
         guard let context = context else { return nil }
         return MyWhisperContext(context: context)
     }
     
     public static func initFromBuffer(buffer: UnsafeRawPointer, size: Int, params: WhisperContextParams) -> MyWhisperContext? {
         let cParams = params.toC()
-        let context = whisper_init_from_buffer_with_params(UnsafeMutableRawPointer(mutating: buffer), size, cParams)
+        // Nil when the process is exiting, as when loading fails.
+        let context = ProcessExitGate.shared.run { whisper_init_from_buffer_with_params(UnsafeMutableRawPointer(mutating: buffer), size, cParams) } ?? nil
         guard let context = context else { return nil }
         return MyWhisperContext(context: context)
     }
     
     public static func initFromFileNoState(path: String, params: WhisperContextParams) -> MyWhisperContext? {
         let cParams = params.toC()
-        let context = path.withCString { whisper_init_from_file_with_params_no_state($0, cParams) }
+        // Nil when the process is exiting, as when loading fails.
+        let context = ProcessExitGate.shared.run { path.withCString { whisper_init_from_file_with_params_no_state($0, cParams) } } ?? nil
         guard let context = context else { return nil }
         return MyWhisperContext(context: context)
     }
     
     public static func initFromBufferNoState(buffer: UnsafeRawPointer, size: Int, params: WhisperContextParams) -> MyWhisperContext? {
         let cParams = params.toC()
-        let context = whisper_init_from_buffer_with_params_no_state(UnsafeMutableRawPointer(mutating: buffer), size, cParams)
+        // Nil when the process is exiting, as when loading fails.
+        let context = ProcessExitGate.shared.run { whisper_init_from_buffer_with_params_no_state(UnsafeMutableRawPointer(mutating: buffer), size, cParams) } ?? nil
         guard let context = context else { return nil }
         return MyWhisperContext(context: context)
     }
@@ -122,14 +135,16 @@ public class MyWhisperContext {
     public func initState() -> Bool {
         guard let ctx = ctx else { return false }
         freeState()
-        guard let state = whisper_init_state(ctx) else { return false }
+        // False when the process is exiting, as when allocation fails.
+        guard let state = ProcessExitGate.shared.run({ whisper_init_state(ctx) }) ?? nil else { return false }
         self.state = state
         return true
     }
     
     public func freeState() {
         if let state = state {
-            whisper_free_state(state)
+            // Skipped while the process exits; see MyWhisperVadContext.deinit.
+            _ = ProcessExitGate.shared.run { whisper_free_state(state) }
             self.state = nil
         }
     }
@@ -162,7 +177,8 @@ public class MyWhisperContext {
 
     private func freeContext() {
         if let ctx = ctx {
-            whisper_free(ctx)
+            // Skipped while the process exits; see MyWhisperVadContext.deinit.
+            _ = ProcessExitGate.shared.run { whisper_free(ctx) }
             self.ctx = nil
         }
     }
@@ -672,9 +688,11 @@ public class MyWhisperContext {
         return params
     }
     
+    /// False when whisper fails or the process is exiting; a refused call
+    /// takes the same failure path, which keeps the recording.
     public func full(samples: [Float], params: inout whisper_full_params) -> Bool {
         guard let ctx = ctx else { return false }
-        let result = samples.withUnsafeBufferPointer { buffer in
+        let result = ProcessExitGate.shared.run { samples.withUnsafeBufferPointer { buffer in
             let result: Int32
             if let state = state {
                 result = whisper_full_with_state(ctx, state, params, buffer.baseAddress, Int32(samples.count))
@@ -698,17 +716,18 @@ public class MyWhisperContext {
                 free(UnsafeMutableRawPointer(mutating: baseAddress))
             }
             return result
-        }
+        } }
         
         return result == 0
     }
     
+    /// False when whisper fails or the process is exiting.
     public func fullParallel(samples: [Float], params: inout WhisperFullParams, nProcessors: Int) -> Bool {
         guard let ctx = ctx else { return false }
         let cParams = params.toC()
-        let result = samples.withUnsafeBufferPointer { buffer in
+        let result = ProcessExitGate.shared.run { samples.withUnsafeBufferPointer { buffer in
             whisper_full_parallel(ctx, cParams, buffer.baseAddress, Int32(samples.count), Int32(nProcessors))
-        }
+        } }
         // Free c-allocated strings
         if let suppressRegex = cParams.suppress_regex {
             free(UnsafeMutablePointer(mutating: suppressRegex))

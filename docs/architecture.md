@@ -34,7 +34,7 @@ event sources            pure core                    effect runner             
 |---|---|---|
 | Who owns the microphone, capture phase | `AudioRecordingSessionGate` + `capture` + `currentRecordingURL` + two published flags, spread over a lock, a queue and the main thread | `RecorderCore` state inside `AudioRecorder` |
 | Hotkey gesture (press, hold, double-press, chord) | six vars in `ShortcutManager`, one of them a mirror of the session | `TriggerCore` state inside `ShortcutManager`; "is a dictation capturing" is asked of the session owner, never mirrored |
-| In-flight native library calls at exit | nobody | `ExitGateCore` state inside `ProcessExitGate` |
+| In-flight native library calls at exit | `ProcessExitGate` (`ExitGateCore` state) | `ExitGateCore` state inside `ProcessExitGate` |
 | Dictation session phase (capturing, stopping, transcribing, refining, notice) | `IndicatorViewModel` flags and timers, duplicated in `ContentViewModel` | one `DictationSessionCore` store that the capsule and the main-window dock both render |
 | Paste arbitration between overlapping dictations | `LatestDictationGate` | folded into the session store |
 | History list paging and search | `RecordingHistoryModel` (already close to explicit) | same, as a core if it changes again |
@@ -43,7 +43,7 @@ event sources            pure core                    effect runner             
 
 1. **Measure**: signposts on the four flows and a repeatable benchmark (done first; `Scripts/perf/`).
 2. **Recorder**: `AudioRecorder` drives its ownership and capture lifecycle from `RecorderCore`. Fixes a capture that dies on its own deleting the audio and leaving the UI "listening", and cancel blocking the main thread.
-3. **Process exit**: native whisper.cpp calls pass through `ProcessExitGate`, so quitting waits for them instead of aborting in a static destructor.
+3. **Process exit** (done): native whisper.cpp calls pass through `ProcessExitGate`, so quitting waits for them instead of aborting in a static destructor. `DictationCore` is now linked into the app target for `ExitGateCore`; `RecorderCore` and `TriggerCore` are written but not yet wired.
 4. **Trigger**: `ShortcutManager` drives gestures from `TriggerCore` and stops mirroring the session.
 5. **Session**: `IndicatorViewModel`'s flags become one `DictationSessionCore` phase; the main-window dock renders the same store instead of its own copy. `LatestDictationGate` folds in.
 6. **Queue and engine reservation** (`TranscriptionQueue`, `TranscriptionService`): same treatment, only if they show up in a trace or a bug again.
