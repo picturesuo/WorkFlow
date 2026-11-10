@@ -876,7 +876,7 @@ struct ProviderCostSettingsView: View {
                 SettingsDivider()
                 SettingsDisclosureRow(
                     title: "Usage this month",
-                    detail: "\(countLabel(usage.cleanedDictations, singular: "dictation", plural: "dictations")) cleaned · \(usage.inputTokens + usage.outputTokens) tokens",
+                    detail: "\(countLabel(usage.cleanedDictations, singular: "dictation", plural: "dictations")) cleaned · \((usage.inputTokens + usage.outputTokens).formatted(.number)) tokens",
                     isExpanded: $showsUsage
                 )
                 if showsUsage {
@@ -919,7 +919,7 @@ struct ProviderCostSettingsView: View {
             valueRow("Filter drafts", "\(usage.filterDraftRequests)")
         }
         SettingsDivider()
-        valueRow("Tokens", "\(usage.inputTokens) in · \(usage.outputTokens) out")
+        valueRow("Tokens", "\(usage.inputTokens.formatted(.number)) in · \(usage.outputTokens.formatted(.number)) out")
         if usage.unpricedDictations > 0 {
             SettingsDivider()
             SettingsNotice(
@@ -976,7 +976,7 @@ struct ProviderCostSettingsView: View {
                 }
             }
             let tokenCount = (result.inputTokens ?? 0) + (result.outputTokens ?? 0)
-            providerStatus = tokenCount > 0 ? "Connected · \(tokenCount) tokens for this test." : "Connected successfully."
+            providerStatus = tokenCount > 0 ? "Connected · \(tokenCount.formatted(.number)) tokens for this test." : "Connected successfully."
         } catch {
             let reason = Self.connectionFailureReason(error)
             if account != nil, !enteredKey.isEmpty {
