@@ -60,6 +60,13 @@ struct Recording: Identifiable, Codable, FetchableRecord, PersistableRecord, Equ
         case cleanupFilterReason, cleanupFilterAuto
     }
 
+    /// `==` plus the stored properties it leaves out, for deciding whether a
+    /// freshly read row differs from the one on screen.
+    func hasSameContent(as other: Recording) -> Bool {
+        self == other && timestamp == other.timestamp && fileName == other.fileName
+            && duration == other.duration && sourceFileURL == other.sourceFileURL
+    }
+
     static func == (lhs: Recording, rhs: Recording) -> Bool {
         return lhs.id == rhs.id &&
                lhs.status == rhs.status &&

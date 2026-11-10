@@ -18,7 +18,7 @@ final class RecordingHistoryModel: ObservableObject {
     @Published var recordings: [Recording] = [] {
         didSet {
             // Grouped once per change, not on every render of the list.
-            if recordings != oldValue { days = HistoryDay.group(recordings) }
+            if !Self.sameContent(recordings, oldValue) { days = HistoryDay.group(recordings) }
         }
     }
     /// `recordings` grouped by calendar day, newest first.
@@ -43,14 +43,25 @@ final class RecordingHistoryModel: ObservableObject {
     /// The unsearched first page, read as soon as the model exists so the
     /// read overlaps the window's first layout.
     private var prefetch: Task<[Recording], Error>?
+    private var prefetchStartedAt: ContinuousClock.Instant?
+    private let now: () -> ContinuousClock.Instant
+    /// A prefetch older than this is read again rather than shown.
+    private static let prefetchFreshness: Duration = .seconds(2)
 
     /// With `prefetchesFirstPage`, the unsearched first page starts loading
-    /// now and the list's first request uses it.
-    init(pageSize: Int = 100, prefetchesFirstPage: Bool = false, loader: @escaping Loader) {
+    /// now and the list's first request uses it if it asks within 2 seconds.
+    init(
+        pageSize: Int = 100,
+        prefetchesFirstPage: Bool = false,
+        now: @escaping () -> ContinuousClock.Instant = { .now },
+        loader: @escaping Loader
+    ) {
         self.pageSize = pageSize
         self.initialPageLimit = pageSize
         self.loader = loader
+        self.now = now
         if prefetchesFirstPage {
+            prefetchStartedAt = now()
             prefetch = Task { try await loader("", pageSize, 0) }
         }
     }
@@ -95,11 +106,18 @@ final class RecordingHistoryModel: ObservableObject {
         setIfChanged(\.isInitialLoading, offset == 0 && recordings.isEmpty)
         setIfChanged(\.errorMessage, nil)
         // The prefetch answers only the first unsearched page at the normal
-        // size; any first-page load discards it, so it is never shown stale.
+        // size, and only while fresh; any first-page load discards it, so it
+        // is never shown stale.
         var prefetched: Task<[Recording], Error>?
         if offset == 0 {
-            if requestQuery.isEmpty && limit == pageSize { prefetched = prefetch }
+            let isFresh = prefetchStartedAt.map { $0.duration(to: now()) < Self.prefetchFreshness } ?? false
+            if requestQuery.isEmpty && limit == pageSize && isFresh {
+                prefetched = prefetch
+            } else {
+                prefetch?.cancel()
+            }
             prefetch = nil
+            prefetchStartedAt = nil
         }
 
         let task = Task { [weak self] in
@@ -124,7 +142,7 @@ final class RecordingHistoryModel: ObservableObject {
                 }
                 guard self.generation == requestGeneration else { return }
                 if offset == 0 {
-                    if self.recordings != page { self.recordings = page }
+                    if !Self.sameContent(self.recordings, page) { self.recordings = page }
                     PerfSignpost.endAfterRender(.searchKeystroke, token: requestQuery)
                     PerfSignpost.endAfterRender(.historyOpen)
                 } else {
@@ -141,6 +159,11 @@ final class RecordingHistoryModel: ObservableObject {
         }
         loadTask = task
         return task
+    }
+
+    /// Whether two pages show exactly the same stored values, row by row.
+    private static func sameContent(_ a: [Recording], _ b: [Recording]) -> Bool {
+        a.count == b.count && zip(a, b).allSatisfy { $0.hasSameContent(as: $1) }
     }
 
     /// Assigns a published property only when the value changes, so an

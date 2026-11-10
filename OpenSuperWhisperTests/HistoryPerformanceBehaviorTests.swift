@@ -25,6 +25,23 @@ final class HistoryPerformanceBehaviorTests: XCTestCase {
         XCTAssertEqual(counter.count, 0, "The window's size queries never measure the content")
     }
 
+    /// The app's WindowGroup keeps its `.frame` minimum (onboarding needs it);
+    /// around the constant layout that frame still measures nothing inside.
+    func testOuterWindowFrameDoesNotMeasureTheConstantLayoutsContent() {
+        let counter = MeasureCounter()
+        let controller = NSHostingController(rootView: FixedMinimumSizeLayout(
+            minimum: CGSize(width: 440, height: 460), ideal: CGSize(width: 560, height: 720)
+        ) {
+            MeasuringProbe(counter: counter) { Color.clear }
+        }
+        .frame(minWidth: 440, idealWidth: 560, minHeight: 460))
+
+        XCTAssertEqual(controller.sizeThatFits(in: .zero), CGSize(width: 440, height: 460))
+        XCTAssertEqual(controller.sizeThatFits(in: CGSize(width: 10_000, height: 10_000)),
+                       CGSize(width: 10_000, height: 10_000))
+        XCTAssertEqual(counter.count, 0, "The outer frame's size queries never reach the content")
+    }
+
     func testMainWindowMinimumMatchesWhatItsContentNeeds() async throws {
         let minimum = CGSize(width: 440, height: 460)
         let store = try temporaryStore()
@@ -131,6 +148,46 @@ final class HistoryPerformanceBehaviorTests: XCTestCase {
         XCTAssertEqual(history.recordings.count, 1)
     }
 
+    // MARK: A refresh shows every changed stored value
+
+    func testRefreshShowsAChangedDurationOrAudioLocation() async {
+        let original = [row("alpha"), row("bravo"), row("charlie")]
+        let longer = Recording(id: original[1].id, timestamp: original[1].timestamp, fileName: original[1].fileName,
+                               transcription: original[1].transcription, duration: 42,
+                               status: original[1].status, progress: original[1].progress)
+        var moved = original[2]
+        moved.sourceFileURL = "/tmp/moved.wav"
+
+        for (name, changed) in [("duration", [original[0], longer, original[2]]),
+                                ("audio location", [original[0], original[1], moved])] {
+            let loader = SuspendingHistoryLoader()
+            let history = RecordingHistoryModel(loader: loader.load)
+            let firstTask = history.refresh()
+            await loader.nextRequest().succeed(original)
+            await firstTask.value
+
+            let changes = ChangeCounter(history.objectWillChange)
+            let refreshTask = history.refresh()
+            await loader.nextRequest().succeed(changed)
+            await refreshTask.value
+            XCTAssertGreaterThan(changes.count, 0, "\(name): the changed row publishes")
+            XCTAssertTrue(history.recordings.elementsEqual(changed) { $0.hasSameContent(as: $1) }, "\(name): the list shows it")
+            let shown = history.days.flatMap(\.recordings)
+            XCTAssertTrue(shown.elementsEqual(changed) { $0.hasSameContent(as: $1) }, "\(name): the day groups show it")
+
+            changes.count = 0
+            let sameTask = history.refresh()
+            await loader.nextRequest().succeed(changed)
+            await sameTask.value
+            XCTAssertEqual(changes.count, 0, "\(name): an identical page still publishes nothing")
+        }
+    }
+
+    func testRecordingContentComparisonCoversEveryStoredProperty() {
+        XCTAssertEqual(Mirror(reflecting: row("alpha")).children.count, 27,
+                       "Recording's stored properties changed: extend Recording.hasSameContent(as:) to compare the new ones, then update this count")
+    }
+
     // MARK: The first page is read early
 
     func testFirstPageIsReadOnceAndBeforeTheListAsksForIt() async {
@@ -147,6 +204,25 @@ final class HistoryPerformanceBehaviorTests: XCTestCase {
 
         await history.refresh().value
         XCTAssertEqual(loader.calls.count, 2, "A later refresh reads again")
+    }
+
+    func testPrefetchIsUsedOnlyWhileFresh() async {
+        for (elapsed, expectedCalls) in [(1, 1), (3, 2)] {
+            let start = ContinuousClock.now
+            var clock = start
+            let loader = CountingHistoryLoader(page: [row("alpha")])
+            let history = RecordingHistoryModel(prefetchesFirstPage: true, now: { clock }, loader: loader.load)
+            await Task.yield()
+            await Task.yield()
+            XCTAssertEqual(loader.calls.count, 1)
+            clock = start.advanced(by: .seconds(elapsed))
+            loader.page = [row("fresh")]
+            await history.refresh().value
+            XCTAssertEqual(loader.calls.count, expectedCalls,
+                           "A first page asked for \(elapsed) s after init \(expectedCalls == 1 ? "uses" : "rereads") the prefetch")
+            XCTAssertEqual(history.recordings.map(\.transcription), [expectedCalls == 1 ? "alpha" : "fresh"],
+                           "A stale prefetch is never shown")
+        }
     }
 
     // MARK: History changes stay inside the list
@@ -280,7 +356,7 @@ private final class CountingHistoryLoader {
         let offset: Int
     }
 
-    let page: [Recording]
+    var page: [Recording]
     private(set) var calls: [Call] = []
 
     init(page: [Recording]) { self.page = page }
