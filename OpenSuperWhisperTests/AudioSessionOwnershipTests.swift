@@ -56,21 +56,78 @@ final class AudioSessionOwnershipTests: XCTestCase {
 
     // MARK: Dictating during a meeting
 
-    func testDictationAndMeetingSessionsNeverConsumeEachOther() {
-        // The recorder keeps one gate per purpose, so a dictation can start,
-        // stop, and cancel while a meeting records.
-        let meetingGate = AudioRecordingSessionGate()
-        let dictationGate = AudioRecordingSessionGate()
+    func testDictationStartsStopsAndCancelsWhileAMeetingRecords() {
+        let sessions = RecordingSessionLanes()
         let meeting = UUID()
         let dictation = UUID()
 
-        XCTAssertTrue(meetingGate.reserve(meeting))
-        XCTAssertTrue(dictationGate.reserve(dictation), "Before this change the shortcut was refused for the whole meeting")
-        XCTAssertFalse(meetingGate.take(ifMatching: dictation), "Stopping the dictation never stops the meeting")
-        XCTAssertTrue(dictationGate.take(ifMatching: dictation))
-        XCTAssertTrue(meetingGate.isCurrent(meeting))
-        XCTAssertTrue(dictationGate.reserve(UUID()), "The next dictation starts while the meeting still records")
-        XCTAssertTrue(meetingGate.take(ifMatching: meeting))
+        XCTAssertTrue(sessions.reserve(meeting, for: .meeting))
+        XCTAssertTrue(sessions.reserve(dictation, for: .dictation), "The shortcut works for the whole meeting")
+        XCTAssertTrue(sessions.owns(meeting))
+        XCTAssertTrue(sessions.owns(dictation))
+
+        XCTAssertFalse(sessions.take(ifMatching: dictation, for: .meeting), "Stopping the dictation never stops the meeting")
+        XCTAssertTrue(sessions.takeDictationForStop(dictation))
+        sessions.dictationStopTailFinished()
+        XCTAssertFalse(sessions.owns(dictation))
+        XCTAssertTrue(sessions.owns(meeting))
+
+        let next = UUID()
+        XCTAssertTrue(sessions.reserve(next, for: .dictation), "The next dictation starts while the meeting still records")
+        XCTAssertTrue(sessions.take(ifMatching: next, for: .dictation), "Cancelling it")
+        XCTAssertTrue(sessions.owns(meeting), "leaves the meeting recording")
+    }
+
+    func testMeetingEndingLeavesTheDictationRecording() {
+        let sessions = RecordingSessionLanes()
+        let meeting = UUID()
+        let dictation = UUID()
+        XCTAssertTrue(sessions.reserve(meeting, for: .meeting))
+        XCTAssertTrue(sessions.reserve(dictation, for: .dictation))
+
+        XCTAssertFalse(sessions.take(ifMatching: meeting, for: .dictation))
+        XCTAssertTrue(sessions.take(ifMatching: meeting, for: .meeting))
+        XCTAssertTrue(sessions.owns(dictation))
+        XCTAssertTrue(sessions.isCurrent(dictation, for: .dictation))
+        XCTAssertFalse(sessions.reserve(UUID(), for: .dictation), "Only one dictation records at a time")
+    }
+
+    func testMeetingCannotStartWhileADictationIsActive() {
+        let sessions = RecordingSessionLanes()
+        let dictation = UUID()
+        let meeting = UUID()
+        XCTAssertTrue(sessions.reserve(dictation, for: .dictation))
+
+        XCTAssertFalse(sessions.reserve(meeting, for: .meeting), "Starting a meeting during a dictation stays blocked")
+        XCTAssertFalse(sessions.owns(meeting))
+        XCTAssertTrue(sessions.owns(dictation), "The refused meeting leaves the dictation recording")
+
+        XCTAssertTrue(sessions.take(ifMatching: dictation, for: .dictation))
+        XCTAssertTrue(sessions.reserve(meeting, for: .meeting), "A cancelled dictation frees the meeting to start")
+    }
+
+    func testMeetingCannotStartDuringADictationsStopTail() {
+        let sessions = RecordingSessionLanes()
+        let dictation = UUID()
+        let meeting = UUID()
+        XCTAssertTrue(sessions.reserve(dictation, for: .dictation))
+        XCTAssertTrue(sessions.takeDictationForStop(dictation))
+
+        XCTAssertFalse(sessions.reserve(meeting, for: .meeting), "The stopped dictation is still capturing its last word")
+        XCTAssertTrue(sessions.reserve(UUID(), for: .dictation), "The next dictation can start during the tail")
+        sessions.dictationStopTailFinished()
+        XCTAssertFalse(sessions.reserve(meeting, for: .meeting), "That next dictation still blocks the meeting")
+    }
+
+    func testMeetingStartsOnceTheDictationsStopTailHasFinished() {
+        let sessions = RecordingSessionLanes()
+        let dictation = UUID()
+        XCTAssertTrue(sessions.reserve(dictation, for: .dictation))
+        XCTAssertFalse(sessions.takeDictationForStop(UUID()), "A stale stop holds nothing back")
+        XCTAssertTrue(sessions.takeDictationForStop(dictation))
+        sessions.dictationStopTailFinished()
+
+        XCTAssertTrue(sessions.reserve(UUID(), for: .meeting))
     }
 
     func testDictationDuringAMeetingKeepsTheMeetingsInput() {

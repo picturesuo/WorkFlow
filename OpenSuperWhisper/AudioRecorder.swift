@@ -25,6 +25,12 @@ final class AudioRecordingSessionGate {
         return sessionID == id
     }
 
+    var isReserved: Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return sessionID != nil
+    }
+
     /// Consumes ownership atomically; a rejected or stale owner cannot stop a newer session.
     func take(ifMatching id: UUID?) -> Bool {
         lock.lock()
@@ -32,6 +38,62 @@ final class AudioRecordingSessionGate {
         guard let current = sessionID, id == nil || id == current else { return false }
         sessionID = nil
         return true
+    }
+}
+
+/// Gives dictation and a meeting their own session each. A dictation starts
+/// beside a meeting; a meeting never starts beside a dictation, its stop tail
+/// included, because that dictation may be voice processed.
+final class RecordingSessionLanes {
+    private let lock = NSLock()
+    private let dictation = AudioRecordingSessionGate()
+    private let meeting = AudioRecordingSessionGate()
+    private var dictationStopTails = 0
+
+    func reserve(_ id: UUID, for purpose: RecordingPurpose) -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        switch purpose {
+        case .dictation:
+            return dictation.reserve(id)
+        case .meeting:
+            guard !dictation.isReserved, dictationStopTails == 0 else { return false }
+            return meeting.reserve(id)
+        }
+    }
+
+    func isCurrent(_ id: UUID, for purpose: RecordingPurpose) -> Bool {
+        gate(for: purpose).isCurrent(id)
+    }
+
+    func owns(_ id: UUID) -> Bool {
+        dictation.isCurrent(id) || meeting.isCurrent(id)
+    }
+
+    func take(ifMatching id: UUID?, for purpose: RecordingPurpose) -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return gate(for: purpose).take(ifMatching: id)
+    }
+
+    /// Ends the dictation session while its capture records a final tail;
+    /// `dictationStopTailFinished` must follow once that capture has closed.
+    func takeDictationForStop(_ id: UUID) -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        guard dictation.take(ifMatching: id) else { return false }
+        dictationStopTails += 1
+        return true
+    }
+
+    func dictationStopTailFinished() {
+        lock.lock()
+        defer { lock.unlock() }
+        dictationStopTails = max(0, dictationStopTails - 1)
+    }
+
+    private func gate(for purpose: RecordingPurpose) -> AudioRecordingSessionGate {
+        purpose == .meeting ? meeting : dictation
     }
 }
 
@@ -82,10 +144,9 @@ class AudioRecorder: NSObject, ObservableObject {
     // Serializes all recording state mutations (start/stop/cancel/connection monitoring)
     // so a stop arriving right after a start can never overtake it.
     private let workQueue = DispatchQueue(label: "com.opensuperwhisper.audiorecorder")
-    private let sessionGate = AudioRecordingSessionGate()
     /// A meeting records in its own lane beside dictation, so the shortcut
     /// keeps working for the whole meeting.
-    private let meetingGate = AudioRecordingSessionGate()
+    private let sessions = RecordingSessionLanes()
 
     /// The open dictation: AVAudioRecorder, or the voice-processed engine.
     private var capture: RecordingCapture?
@@ -239,8 +300,7 @@ class AudioRecorder: NSObject, ObservableObject {
         completion: ((String?) -> Void)? = nil,
         started: ((URL) -> Void)? = nil
     ) -> Bool {
-        let gate = gate(for: purpose)
-        guard gate.reserve(sessionID) else { return false }
+        guard sessions.reserve(sessionID, for: purpose) else { return false }
 
         // Everything below costs CoreAudio HAL round-trips (device queries,
         // AudioQueue start for the notification sound) — 20-35 ms that used to
@@ -251,7 +311,7 @@ class AudioRecorder: NSObject, ObservableObject {
         workQueue.async {
             guard let activeMic = MicrophoneService.shared.getActiveMicrophone() else {
                 print("Cannot start recording - no audio input available")
-                _ = gate.take(ifMatching: sessionID)
+                _ = self.sessions.take(ifMatching: sessionID, for: purpose)
                 DispatchQueue.main.async {
                     completion?("The selected microphone is no longer available.")
                 }
@@ -284,10 +344,6 @@ class AudioRecorder: NSObject, ObservableObject {
         return true
     }
 
-    private func gate(for purpose: RecordingPurpose) -> AudioRecordingSessionGate {
-        purpose == .meeting ? meetingGate : sessionGate
-    }
-
     private func performStart(activeMic: MicrophoneService.AudioDevice, configuration: MicrophoneCaptureConfiguration, monitorConnection: Bool, sessionID: UUID) -> String? {
         let fileURL = temporaryDirectory.appendingPathComponent(Self.recordingFileName())
         currentRecordingURL = fileURL
@@ -299,9 +355,9 @@ class AudioRecorder: NSObject, ObservableObject {
         // hears, and it ducks the call's audio, so a dictation during a
         // meeting records the microphone as is, like the meeting does.
         var configuration = configuration
-        if configuration == .voiceProcessing, meetingCapture != nil {
+        let offDuringMeeting = configuration == .voiceProcessing && meetingCapture != nil
+        if offDuringMeeting {
             configuration = .standard
-            Self.publishBackgroundAudioReduction(.offDuringMeeting)
         }
 
         // If voice processing can't start, this recording uses the
@@ -318,7 +374,7 @@ class AudioRecorder: NSObject, ObservableObject {
                 currentRecordingURL = nil
                 try? FileManager.default.removeItem(at: fileURL)
                 releaseSharedInputIfUnused()
-                _ = sessionGate.take(ifMatching: sessionID)
+                _ = sessions.take(ifMatching: sessionID, for: .dictation)
                 updateRecordingState(isRecording: false, isConnecting: false)
                 return "The microphone declined the recording request."
             }
@@ -327,6 +383,9 @@ class AudioRecorder: NSObject, ObservableObject {
             capture = audioRecorder
             inputLease.acquire()
             refreshLevelMetering()
+            if offDuringMeeting {
+                Self.publishBackgroundAudioReduction(.offDuringMeeting)
+            }
             if monitorConnection {
                 startConnectionMonitoring()
             } else {
@@ -338,7 +397,7 @@ class AudioRecorder: NSObject, ObservableObject {
             print("Failed to start recording.")
             currentRecordingURL = nil
             releaseSharedInputIfUnused()
-            _ = sessionGate.take(ifMatching: sessionID)
+            _ = sessions.take(ifMatching: sessionID, for: .dictation)
             updateRecordingState(isRecording: false, isConnecting: false)
             return error.localizedDescription
         }
@@ -356,7 +415,7 @@ class AudioRecorder: NSObject, ObservableObject {
                 print("Failed to start meeting recording: AVAudioRecorder declined the request")
                 try? FileManager.default.removeItem(at: fileURL)
                 releaseSharedInputIfUnused()
-                _ = meetingGate.take(ifMatching: sessionID)
+                _ = sessions.take(ifMatching: sessionID, for: .meeting)
                 return "The microphone declined the recording request."
             }
             meetingCapture = audioRecorder
@@ -367,7 +426,7 @@ class AudioRecorder: NSObject, ObservableObject {
         } catch {
             print("Failed to start meeting recording.")
             releaseSharedInputIfUnused()
-            _ = meetingGate.take(ifMatching: sessionID)
+            _ = sessions.take(ifMatching: sessionID, for: .meeting)
             return error.localizedDescription
         }
     }
@@ -398,7 +457,7 @@ class AudioRecorder: NSObject, ObservableObject {
             voiceCapture.onStopped = { [weak self, weak voiceCapture] reason in
                 Self.publishBackgroundAudioReduction(.stopped(reason))
                 guard let self, let voiceCapture, voiceCapture === self.capture,
-                      self.sessionGate.isCurrent(sessionID) else { return }
+                      self.sessions.isCurrent(sessionID, for: .dictation) else { return }
                 self.stopConnectionMonitoring()
                 // A meeting still recording keeps the meter on its level.
                 if self.meetingCapture == nil {
@@ -436,22 +495,24 @@ class AudioRecorder: NSObject, ObservableObject {
     }
 
     func ownsRecordingSession(_ sessionID: UUID) -> Bool {
-        sessionGate.isCurrent(sessionID) || meetingGate.isCurrent(sessionID)
+        sessions.owns(sessionID)
     }
 
     func stopRecording(sessionID: UUID) async -> URL? {
         await withCheckedContinuation { continuation in
             workQueue.async {
-                if self.meetingGate.take(ifMatching: sessionID) {
+                if self.sessions.take(ifMatching: sessionID, for: .meeting) {
                     self.stopMeeting(resuming: continuation)
                     return
                 }
-                guard self.sessionGate.take(ifMatching: sessionID) else {
+                guard self.sessions.takeDictationForStop(sessionID) else {
                     continuation.resume(returning: nil)
                     return
                 }
                 guard let capture = self.capture, let url = self.currentRecordingURL else {
-                    continuation.resume(returning: self.performStop(discard: false))
+                    let kept = self.performStop(discard: false)
+                    self.sessions.dictationStopTailFinished()
+                    continuation.resume(returning: kept)
                     return
                 }
 
@@ -466,6 +527,7 @@ class AudioRecorder: NSObject, ObservableObject {
 
                 self.workQueue.asyncAfter(deadline: .now() + Self.stopTailDuration) {
                     let recordedDuration = capture.finish()
+                    self.sessions.dictationStopTailFinished()
                     // A recording that started during the tail, or a meeting
                     // still running, keeps the shared input open.
                     self.closeSharedInput()
@@ -503,11 +565,11 @@ class AudioRecorder: NSObject, ObservableObject {
 
     func cancelRecording(sessionID: UUID) {
         workQueue.sync {
-            if meetingGate.take(ifMatching: sessionID) {
+            if sessions.take(ifMatching: sessionID, for: .meeting) {
                 discardMeeting()
                 return
             }
-            guard sessionGate.take(ifMatching: sessionID) else { return }
+            guard sessions.take(ifMatching: sessionID, for: .dictation) else { return }
             _ = performStop(discard: true)
         }
     }
@@ -737,12 +799,12 @@ extension AudioRecorder: AVAudioRecorderDelegate {
         guard !flag else { return }
         workQueue.async {
             if recorder === self.meetingCapture {
-                _ = self.meetingGate.take(ifMatching: nil)
+                _ = self.sessions.take(ifMatching: nil, for: .meeting)
                 self.discardMeeting()
                 return
             }
             guard recorder === self.capture else { return }
-            _ = self.sessionGate.take(ifMatching: nil)
+            _ = self.sessions.take(ifMatching: nil, for: .dictation)
             _ = self.performStop(discard: true)
         }
     }
