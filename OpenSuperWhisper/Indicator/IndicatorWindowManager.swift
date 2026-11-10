@@ -187,7 +187,10 @@ class IndicatorWindowManager: IndicatorViewDelegate {
     func presentWindow(for presentedViewModel: IndicatorViewModel, nearPoint point: NSPoint?) {
         // The recording may already be cancelled/hidden by the time the caret
         // position is resolved.
-        guard viewModel === presentedViewModel else { return }
+        guard viewModel === presentedViewModel else {
+            PerfSignpost.end(.triggerToIndicatorVisible, outcome: "not_presented")
+            return
+        }
         
         // Prefer the screen containing the point, then the screen of the window
         // with input focus (NSScreen.main is useless for a background app — it
@@ -199,13 +202,19 @@ class IndicatorWindowManager: IndicatorViewDelegate {
         
         // Never show the window without positioning it: an unpositioned panel
         // appears at its default origin (0,0) — the bottom-left corner.
-        guard let screen = targetScreen else { return }
+        guard let screen = targetScreen else {
+            PerfSignpost.end(.triggerToIndicatorVisible, outcome: "not_presented")
+            return
+        }
         
         // Normally prepared in prepare(); recreate only if hide() tore it down.
         if window?.contentView == nil {
             ensureWindowContent(for: presentedViewModel)
         }
-        guard let window = window else { return }
+        guard let window = window else {
+            PerfSignpost.end(.triggerToIndicatorVisible, outcome: "not_presented")
+            return
+        }
         
         let windowFrame = window.frame
         let screenFrame = screen.frame
@@ -258,6 +267,7 @@ class IndicatorWindowManager: IndicatorViewDelegate {
         }
         
         window.orderFront(nil)
+        PerfSignpost.end(.triggerToIndicatorVisible)
         
         // Start the appear animation one runloop turn after the first
         // (fully transparent) frame is committed: springing a layer tree

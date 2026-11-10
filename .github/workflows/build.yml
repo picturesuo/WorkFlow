@@ -23,6 +23,8 @@ jobs:
         run: brew install cmake libomp rust
       - name: Build with run.sh
         run: ./run.sh build
+      - name: Run DictationCore tests
+        run: swift test --package-path DictationCore
       # The real-detector indicator case (SpeakingEfficiencyStoreTests/
       # testIndicatorDictationOfRealSpeechMeasuresItWithTheBundledDetector) is
       # skipped here and runs only in the full local suite: on this runner the

@@ -79,6 +79,8 @@ final class RecordingHistoryModel: ObservableObject {
                 guard self.generation == requestGeneration else { return }
                 if offset == 0 {
                     self.recordings = page
+                    PerfSignpost.endAfterRender(.searchKeystroke, token: requestQuery)
+                    PerfSignpost.endAfterRender(.historyOpen)
                 } else {
                     self.recordings.append(contentsOf: page)
                 }
@@ -475,6 +477,7 @@ struct ContentView: View {
     }
     
     private func performSearch(_ query: String) {
+        PerfSignpost.begin(.searchKeystroke, token: query)
         searchTask?.cancel()
         
         if query.isEmpty {
@@ -657,6 +660,7 @@ struct ContentView: View {
         .background(ThemePalette.chromeBackground(colorScheme))
         .background(WindowChromeConfigurator())
         .onAppear {
+            PerfSignpost.eventSinceProcessStartOnce("launch_window_appeared")
             viewModel.loadInitialData()
         }
         .onReceive(NotificationCenter.default.publisher(for: RecordingStore.recordingProgressDidUpdateNotification)) { notification in
