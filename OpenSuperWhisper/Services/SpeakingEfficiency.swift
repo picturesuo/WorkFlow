@@ -82,6 +82,16 @@ enum SpeakingEfficiency {
         return count
     }
 
+    /// `wordCount(text) > 0`, stopping at the first word.
+    static func hasWord(_ text: String) -> Bool {
+        var found = false
+        text.enumerateSubstrings(in: text.startIndex..<text.endIndex, options: [.byWords, .substringNotRequired]) { _, _, _, stop in
+            found = true
+            stop = true
+        }
+        return found
+    }
+
     /// Seconds from a Duration, for the measured processing time.
     static func seconds(_ duration: Duration) -> TimeInterval {
         let parts = duration.components
@@ -104,9 +114,8 @@ enum SpeakingEfficiency {
         case .live: break
         }
         guard recording.duration.isFinite, recording.duration > 0 else { return .excluded(.invalidDuration) }
-        let spoken = wordCount(recognizerText)
-        let produced = wordCount(emittedText)
-        guard spoken > 0, produced > 0 else { return .excluded(.emptyText) }
+        // Same order as before; only rows that reach the sample are word-counted.
+        guard hasWord(recognizerText), hasWord(emittedText) else { return .excluded(.emptyText) }
         let active: TimeInterval
         switch source.speechActivity {
         case nil: return .excluded(.speechNotMeasured)
@@ -119,6 +128,8 @@ enum SpeakingEfficiency {
             }
             active = seconds
         }
+        let spoken = wordCount(recognizerText)
+        let produced = wordCount(emittedText)
         let processing = source.processingSeconds.flatMap { $0.isFinite && $0 >= 0 ? $0 : nil }
         return .eligible(SpeakingSample(
             recordingSeconds: recording.duration,

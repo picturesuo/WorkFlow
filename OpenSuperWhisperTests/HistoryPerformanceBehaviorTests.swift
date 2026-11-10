@@ -193,6 +193,38 @@ final class HistoryPerformanceBehaviorTests: XCTestCase {
         withExtendedLifetime(viewModel) {}
     }
 
+    // MARK: Row formatting and word counting
+
+    func testDurationFormattingIsUnchanged() {
+        // Captured from the per-call DateComponentsFormatter before it was shared.
+        let expected: [(TimeInterval, String)] = [
+            (0, "0s"), (0.4, "0s"), (7, "7s"), (59, "59s"), (60, "1m 0s"), (61, "1m 1s"),
+            (599, "9m 59s"), (3600, "1h 0m 0s"), (3661, "1h 1m 1s"),
+        ]
+        for (seconds, text) in expected {
+            XCTAssertEqual(TextUtil.formatDuration(seconds), text, "\(seconds) s")
+        }
+    }
+
+    func testHasWordMatchesAPositiveWordCount() {
+        let long = Array(repeating: "word", count: 2_000).joined(separator: " ")
+        for text in ["", "   \n\t", "…", "a", "hello world", long, "😀🎉", "12345"] {
+            XCTAssertEqual(SpeakingEfficiency.hasWord(text), SpeakingEfficiency.wordCount(text) > 0,
+                           "\(text.prefix(20).debugDescription)")
+        }
+    }
+
+    func testDaysFollowTheRows() {
+        let history = RecordingHistoryModel { _, _, _ in [] }
+        let rows = [row("today"), row("also today"), row("yesterday", daysAgo: 1)]
+        history.recordings = rows
+        XCTAssertEqual(history.days, HistoryDay.group(rows))
+        history.recordings[2].transcription = "edited"
+        XCTAssertEqual(history.days, HistoryDay.group(history.recordings), "An in-place change regroups")
+        history.recordings = []
+        XCTAssertEqual(history.days, [])
+    }
+
     // MARK: Fixtures
 
     /// An on-disk History in its own temporary folder.

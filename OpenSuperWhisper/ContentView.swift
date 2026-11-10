@@ -15,7 +15,14 @@ import UniformTypeIdentifiers
 final class RecordingHistoryModel: ObservableObject {
     typealias Loader = @MainActor (String, Int, Int) async throws -> [Recording]
 
-    @Published var recordings: [Recording] = []
+    @Published var recordings: [Recording] = [] {
+        didSet {
+            // Grouped once per change, not on every render of the list.
+            if recordings != oldValue { days = HistoryDay.group(recordings) }
+        }
+    }
+    /// `recordings` grouped by calendar day, newest first.
+    @Published private(set) var days: [HistoryDay] = []
     /// True while a later page loads: the spinner below the list.
     @Published private(set) var isLoadingMore = false
     /// True while the first page loads into an empty list. A first page
@@ -805,7 +812,7 @@ struct HistoryList: View {
                 ScrollViewReader { proxy in
                     ScrollView {
                         LazyVStack(alignment: .leading, spacing: 0, pinnedViews: [.sectionHeaders]) {
-                            ForEach(HistoryDay.group(history.recordings)) { day in
+                            ForEach(history.days) { day in
                                 Section {
                                     ForEach(day.recordings) { recording in
                                         RecordingRow(
@@ -988,7 +995,7 @@ struct InputMonitoringNotice: View {
 }
 
 /// Consecutive History rows from one calendar day, newest first.
-struct HistoryDay: Identifiable {
+struct HistoryDay: Identifiable, Equatable {
     let id: String
     let title: String
     var recordings: [Recording]
@@ -1868,8 +1875,8 @@ struct HistoryRow: View {
 
     private var hasBadges: Bool { cleanupBadgeLabel != nil || speakingBadgeLabel != nil }
 
-    private var timeLabel: some View {
-        Text("\(recording.timestamp.formatted(date: .omitted, time: .shortened)) · \(TextUtil.formatDuration(recording.duration))")
+    private func timeLabel(_ text: String) -> some View {
+        Text(text)
     }
 
     private var separatorDot: some View {
@@ -1878,15 +1885,17 @@ struct HistoryRow: View {
 
     /// Time, length, and how the text was produced, on one line when it fits.
     private var metadata: some View {
-        ViewThatFits(in: .horizontal) {
+        // Formatted once for the three layouts below.
+        let time = "\(recording.timestamp.formatted(date: .omitted, time: .shortened)) · \(TextUtil.formatDuration(recording.duration))"
+        return ViewThatFits(in: .horizontal) {
             HStack(spacing: 5) {
-                timeLabel
+                timeLabel(time)
                 if cleanupBadgeLabel != nil { separatorDot; cleanupBadge }
                 if speakingBadgeLabel != nil { separatorDot; speakingBadge }
             }
             .fixedSize()
             VStack(alignment: .leading, spacing: 2) {
-                timeLabel
+                timeLabel(time)
                 if hasBadges {
                     HStack(spacing: 5) {
                         cleanupBadge
@@ -1897,7 +1906,7 @@ struct HistoryRow: View {
                 }
             }
             VStack(alignment: .leading, spacing: 2) {
-                timeLabel
+                timeLabel(time)
                 cleanupBadge
                 speakingBadge
             }
