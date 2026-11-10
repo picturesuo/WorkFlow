@@ -41,10 +41,15 @@ for tool in otool od; do
         exit 1
     fi
 done
-for candidate in "$source_app"/**/*(N.); do
-    magic=$(od -An -tx1 -N4 -- "$candidate" | tr -d ' \n')
-    case "$magic" in
-        feedface|feedfacf|cefaedfe|cffaedfe|cafebabe|bebafeca|cafebabf|bfbafeca) ;;
+for candidate in "$source_app"/**/*(ND.); do
+    header=$(od -An -tx1 -N8 -- "$candidate" | tr -d ' \n')
+    case "${header[1,8]}" in
+        feedface|feedfacf|cefaedfe|cffaedfe) ;;
+        cafebabe|cafebabf)
+            # A fat Mach-O lists a handful of architectures here; a Java
+            # class file has its version (45 or more) in the same bytes.
+            if (( ${#header} < 16 || 16#${header[9,16]} > 30 )); then continue; fi
+            ;;
         *) continue ;;
     esac
     if ! load_commands=$(otool -l "$candidate" 2>&1); then
