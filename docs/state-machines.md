@@ -50,7 +50,7 @@ The original crash did not reproduce on demand (0 aborts in 45 runs before the c
 
 ## 2 and 3. Recorder (`RecorderCore`)
 
-**Today.** Ownership is `AudioRecordingSessionGate` (a lock). The capture, its URL, two timers and the system-input switch live on a serial queue. `isRecording` and `isConnecting` are published on the main thread. Four clients (capsule, main window, meeting, filter assistant) each keep their own session id and their own idea of the phase.
+**Today.** Ownership is `RecordingSessionLanes`: one `AudioRecordingSessionGate` (a lock) for dictation and one for a meeting, so a dictation records beside a meeting, while a meeting is refused beside a dictation or its stop tail. The table below describes one lane. Each lane's capture and URL, two timers and the shared system-input switch (`SharedInputLease`: the first capture sets the input, the last one to close restores it) live on a serial queue. `isRecording` and `isConnecting` are published on the main thread for the dictation lane only. Four clients (capsule, main window, meeting, filter assistant) each keep their own session id and their own idea of the phase.
 
 | Owner phase | Event | Next | Effects |
 |---|---|---|---|
@@ -107,7 +107,7 @@ Explicit model (one session):
 
 | Phase | Event | Next | Effects |
 |---|---|---|---|
-| idle | start, meeting or queue or engine busy | notice(busy) | scheduleDismiss |
+| idle | start, queue or engine busy | notice(busy) | scheduleDismiss |
 | idle | start, no microphone | notice(noMicrophone) | scheduleDismiss |
 | idle | start accepted by recorder | capturing(optimistic) | retire older deliveries |
 | capturing | recorder connecting | capturing(connecting) | |
