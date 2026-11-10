@@ -10,7 +10,8 @@ import XCTest
 /// Run alone, with `TEST_RUNNER_WF_EXIT_REPRO=1`. Optional
 /// `TEST_RUNNER_WF_EXIT_REPRO_LOG` names a file that receives timestamped
 /// marks, including one when exit begins and one when the call returns;
-/// the long recording is written next to it.
+/// the long recording is written next to it. `TEST_RUNNER_WF_EXIT_REPRO_MINUTES`
+/// sets the recording's length (default 10).
 final class ExitDuringNativeWorkTests: XCTestCase {
     private static let root = URL(fileURLWithPath: #filePath)
         .deletingLastPathComponent()
@@ -43,12 +44,15 @@ final class ExitDuringNativeWorkTests: XCTestCase {
         // Registered after the app's own handler, so it runs first at exit.
         atexit { ExitDuringNativeWorkTests.mark("exit begins") }
 
-        // At least 10 minutes of 16 kHz mono speech, from jfk.wav repeated.
+        // At least the requested minutes of 16 kHz mono speech, from jfk.wav repeated.
+        let minutes = Double(ProcessInfo.processInfo.environment["WF_EXIT_REPRO_MINUTES"] ?? "") ?? 10
+        let targetCount = Int(minutes * 60 * 16_000)
         let converted = try await WhisperEngine().convertAudioToPCM(fileURL: Self.root.appendingPathComponent("jfk.wav"))
         let jfk = try XCTUnwrap(converted)
         var samples: [Float] = []
-        samples.reserveCapacity(16_000 * 610)
-        while samples.count < 16_000 * 600 { samples += jfk }
+        samples.reserveCapacity(targetCount + jfk.count)
+        while samples.count < targetCount { samples += jfk }
+        Self.mark("recording seconds=\(samples.count / 16_000)")
         // Next to the log when one is named, so its owner can remove it after
         // the host has exited; the recording outlives this test by design.
         let folder = Self.logPath.map { URL(fileURLWithPath: $0).deletingLastPathComponent() }
