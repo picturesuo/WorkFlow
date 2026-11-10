@@ -233,15 +233,33 @@ struct ToolbarGlyph: View {
     var tint: Color = .secondary
     var size: CGFloat = 28
     var symbolSize: CGFloat = 15
+    /// A small second symbol after the main one, such as a menu's chevron;
+    /// the glyph widens by 10 points to hold it.
+    var trailingSystemImage: String? = nil
+    var trailingSymbolSize: CGFloat = 8
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.isEnabled) private var isEnabled
     @State private var isHovered = false
 
+    @ViewBuilder
+    private var symbols: some View {
+        if let trailingSystemImage {
+            HStack(spacing: 1) {
+                Image(systemName: systemImage)
+                    .font(.system(size: symbolSize, weight: .regular))
+                Image(systemName: trailingSystemImage)
+                    .font(.system(size: trailingSymbolSize, weight: .semibold))
+            }
+        } else {
+            Image(systemName: systemImage)
+                .font(.system(size: symbolSize, weight: .regular))
+        }
+    }
+
     var body: some View {
-        Image(systemName: systemImage)
-            .font(.system(size: symbolSize, weight: .regular))
+        symbols
             .foregroundStyle(isHovered && isEnabled && tint == .secondary ? Color.primary : tint)
-            .frame(width: size, height: size)
+            .frame(width: trailingSystemImage == nil ? size : size + 10, height: size)
             .background(
                 RoundedRectangle(cornerRadius: 6, style: .continuous)
                     .fill(isHovered && isEnabled ? ThemePalette.ink(colorScheme).opacity(0.08) : Color.clear)
