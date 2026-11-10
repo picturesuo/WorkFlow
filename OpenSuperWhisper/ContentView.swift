@@ -749,7 +749,7 @@ struct ContentView: View {
                 _ = meetingController.start(title: meetingTitle)
             }
         } message: {
-            Text("\(AppIdentity.productName) records locally until you stop it. Meeting mode never pastes into another app, and your dictation shortcut keeps working while it records.")
+            Text("\(AppIdentity.productName) records locally until you stop it. Meeting mode never pastes into another app, and your dictation shortcut keeps working while it records. What you dictate is in the meeting recording too.")
         }
         .alert(
             "Meeting recording failed",
