@@ -31,9 +31,9 @@ public class MyWhisperVadContext {
     
     /// Nil when the model can't be loaded or the process is exiting.
     public init?(modelPath: String) {
-        let params = whisper_vad_default_context_params()
         let loaded = ProcessExitGate.shared.run {
-            modelPath.withCString { whisper_vad_init_from_file_with_params($0, params) }
+            let params = whisper_vad_default_context_params()
+            return modelPath.withCString { whisper_vad_init_from_file_with_params($0, params) }
         } ?? nil
         guard let loaded else { return nil }
         vctx = loaded
