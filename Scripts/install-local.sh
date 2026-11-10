@@ -90,6 +90,35 @@ if [[ ! -d "$source_app" ]]; then
     exit 1
 fi
 
+# A shipped build must not carry LLVM code-coverage instrumentation
+# (counters on every code region and a .profraw write at exit).
+for tool in otool od; do
+    if ! command -v "$tool" >/dev/null 2>&1; then
+        echo "Cannot check the build for coverage instrumentation: $tool is missing." >&2
+        exit 1
+    fi
+done
+for candidate in "$source_app"/**/*(ND.); do
+    header=$(od -An -tx1 -N8 -- "$candidate" | tr -d ' \n')
+    case "${header[1,8]}" in
+        feedface|feedfacf|cefaedfe|cffaedfe) ;;
+        cafebabe|cafebabf)
+            # A fat Mach-O lists a handful of architectures here; a Java
+            # class file has its version (45 or more) in the same bytes.
+            if (( ${#header} < 16 || 16#${header[9,16]} > 30 )); then continue; fi
+            ;;
+        *) continue ;;
+    esac
+    if ! load_commands=$(otool -l "$candidate" 2>&1); then
+        echo "Cannot inspect $candidate for coverage instrumentation." >&2
+        exit 1
+    fi
+    if [[ "$load_commands" == *"sectname __llvm_prf_cnts"* ]]; then
+        echo "Release build is instrumented for code coverage: $candidate" >&2
+        exit 1
+    fi
+done
+
 install_stage=$(mktemp -d /tmp/workflow-install.XXXXXX)
 cleanup() {
     if [[ "$install_stage" == /tmp/workflow-install.* && -d "$install_stage" ]]; then

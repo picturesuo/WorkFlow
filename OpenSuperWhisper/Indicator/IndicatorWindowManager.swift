@@ -413,8 +413,9 @@ class IndicatorWindowManager: IndicatorViewDelegate {
         }
         
         guard let window = window else { return }
-        // Reuse the hosting view across sessions: rebuilding the SwiftUI
-        // hierarchy (with its blur material) on every recording is wasted work.
+        // Reuse the hosting view within one dictation (prepare, then present):
+        // rebuilding the SwiftUI hierarchy (with its blur material) between
+        // them is wasted work. hide() replaces it with a fresh idle one.
         let rootView = IndicatorWindow(viewModel: presentedViewModel) { [weak self] width in
             self?.cardWidthDidChange(width)
         }
@@ -434,6 +435,16 @@ class IndicatorWindowManager: IndicatorViewDelegate {
         }
         window.setContentSize(IndicatorWindow.windowSize(forCardWidth: cardSize.width))
         window.contentView?.layoutSubtreeIfNeeded()
+    }
+    
+    /// Gives the hidden panel a freshly built hosting view on an idle model.
+    /// Rebinding the old one is not enough: if that render lands on a frame where
+    /// the transcribing wave's TimelineView is due, SwiftUI can keep the removed
+    /// TimelineView running and lay out the hidden panel every display frame.
+    /// A hosting view that never drew `.decoding` has nothing to keep running.
+    private func parkIdleContent() {
+        window?.contentView = nil
+        ensureWindowContent(for: IndicatorViewModel())
     }
     
     func stopRecording() {
@@ -475,8 +486,9 @@ class IndicatorWindowManager: IndicatorViewDelegate {
             // already returned and the shortcut stays enabled for it.
             KeyboardShortcuts.disable(.escape)
             
-            // The content view is kept alive and reused by the next session.
+            // The panel is kept; its hosting view is replaced by a fresh idle one.
             self.window?.orderOut(nil)
+            self.parkIdleContent()
             self.viewModel = nil
             
             NotificationCenter.default.post(name: .indicatorWindowDidHide, object: nil)

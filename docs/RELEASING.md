@@ -32,7 +32,7 @@ WORKFLOW_NOTARY_PROFILE=workflow-notary \
 ./Scripts/package-release.sh 0.5.1
 ```
 
-The packaging script verifies the certificate type and app version, builds Release, enables hardened runtime, signs nested code, submits to Apple, staples the ticket, runs Gatekeeper assessment, and writes `dist/WorkFlow-VERSION-macOS-arm64.zip`. The legacy `CHAT_SIGNING_IDENTITY` and `CHAT_NOTARY_PROFILE` aliases remain accepted only for migration during the 0.x series.
+The packaging script verifies the certificate type and app version, refuses a build whose bundle carries LLVM code-coverage instrumentation, builds Release, enables hardened runtime, signs nested code, submits to Apple, staples the ticket, runs Gatekeeper assessment, and writes `dist/WorkFlow-VERSION-macOS-arm64.zip`. The legacy `CHAT_SIGNING_IDENTITY` and `CHAT_NOTARY_PROFILE` aliases remain accepted only for migration during the 0.x series.
 
 Test the archive on a second Mac. Verify first-run permissions, a short and a rapid back-to-back `Fn` dictation, Bedrock and local fallback, targeted paste, clipboard fallback, vocabulary, per-app rules, meeting recording, History, VoiceOver labels, and launch at login.
 
