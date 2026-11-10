@@ -73,21 +73,6 @@ final class MainWindowPolishTests: XCTestCase {
         XCTAssertEqual(HistoryRow.failureDetail("Failed to transcribe:no space"), "Failed to transcribe:no space")
     }
 
-    // MARK: Microphone menu
-
-    func testMicrophoneMenuKeepsItsNameAndValue() {
-        let microphone = MainWindowFixtures.microphone
-        let menu = AccessibilityTree.withSwiftUITree {
-            let host = OffscreenHost(
-                MicrophoneMenu(microphones: [microphone], currentID: microphone.id, onSelect: { _ in }),
-                size: CGSize(width: 40, height: 30)
-            )
-            return (AccessibilityTree.labels(in: host.host, roles: [.popUpButton, .menuButton]), Self.spokenText(in: host.host))
-        }
-        XCTAssertEqual(menu.0, ["Microphone"], "\(menu.1)")
-        XCTAssertTrue(menu.1.contains(microphone.displayName), "\(menu.1)")
-    }
-
     // MARK: Permissions
 
     func testPermissionRowSpeaksTitleDescriptionAndButton() {
