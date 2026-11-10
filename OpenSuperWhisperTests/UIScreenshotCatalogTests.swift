@@ -1304,7 +1304,7 @@ final class UIScreenshotCatalogTests: XCTestCase {
             ("shortcut-right-option", true, .rightOption, "Right Option chosen earlier"),
         ]
         for (state, completed, key, note) in cases {
-            for size in [CGSize(width: 560, height: 720), CGSize(width: 440, height: 460)] {
+            for size in Catalog.onboardingSizes.map({ $0.size }) {
                 for scheme in schemes {
                     let standard = UserDefaults.standard
                     standard.set(completed, forKey: "hasCompletedOnboarding")
@@ -1315,7 +1315,7 @@ final class UIScreenshotCatalogTests: XCTestCase {
                         screen: "onboarding", state: state, scheme: scheme, size: size, background: nil,
                         family: CatalogFamily.other, view: "OnboardingView",
                         method: "OnboardingView() in a hidden-title-bar window; the shortcut is seeded through preferences",
-                        note: note + (size.width == 440 ? "; the window's minimum size" : "; the window's default size"),
+                        note: note + "; " + (Catalog.onboardingSizes.first { $0.size == size }?.label ?? ""),
                         titled: true, settle: 0.9
                     )
                 }
@@ -2379,6 +2379,12 @@ private enum Catalog {
     static let loudLevels: [CGFloat] = [0.18, 0.42, 0.66, 0.51, 0.83, 0.62, 0.74, 0.47, 0.58]
     static let syntheticAudioURL = FileManager.default.temporaryDirectory.appendingPathComponent("catalog-synthetic.wav")
     static let mainSizes = [CGSize(width: 440, height: 460), CGSize(width: 560, height: 720), CGSize(width: 900, height: 800)]
+    static let onboardingSizes: [(size: CGSize, label: String)] = [
+        (CGSize(width: 560, height: 720), "the window's default size"),
+        (CGSize(width: 440, height: 460), "the window's minimum size"),
+        (CGSize(width: 440, height: 720), "the narrowest width, tall enough to show the shortcut cards"),
+        (CGSize(width: 720, height: 720), "a wide window"),
+    ]
 
     static let longText = """
     The community garden on Elm Street opened its second season with forty raised beds, a shared tool shed, and a rain barrel system the volunteers built over the winter. Each bed is assigned for the full season, and the waiting list already has twelve names on it.
