@@ -32,7 +32,7 @@ done
 mkdir -p "$out"
 out=${out:A}
 
-DD="$ROOT/build/perf-dd"
+DD="$ROOT/build.noindex/perf-dd"
 APP="$DD/Build/Products/Release/WorkFlow.app"
 common=(-scheme OpenSuperWhisper -configuration Release -derivedDataPath "$DD"
         -clonedSourcePackagesDirPath SourcePackages -destination 'platform=macOS,arch=arm64'
@@ -53,7 +53,7 @@ if $skip_build; then
 else
     bundle_id="com.picturesuo.WorkFlow.fmtest.perf$$"
     print "Building Release for testing as $bundle_id ..."
-    xcodebuild build-for-testing "${common[@]}" ENABLE_TESTABILITY=YES \
+    xcodebuild build-for-testing -jobs 3 -enableCodeCoverage NO "${common[@]}" ENABLE_TESTABILITY=YES \
         PRODUCT_BUNDLE_IDENTIFIER="$bundle_id" > "$out/build.log" 2>&1 || {
         tail -40 "$out/build.log"; exit 1; }
 fi
@@ -91,7 +91,7 @@ run_suite() {
     local flows=$1 log=$2
     shift 2
     env TEST_RUNNER_WF_PERF_OUT="$flows" TEST_RUNNER_WF_PERF_ITERATIONS="$iterations" "$@" \
-        xcodebuild test-without-building "${common[@]}" PRODUCT_BUNDLE_IDENTIFIER="$bundle_id" \
+        xcodebuild test-without-building -jobs 3 -enableCodeCoverage NO "${common[@]}" PRODUCT_BUNDLE_IDENTIFIER="$bundle_id" \
         -only-testing:OpenSuperWhisperTests/PerfFlowBenchmarkTests > "$log" 2>&1
 }
 

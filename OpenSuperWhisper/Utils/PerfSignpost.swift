@@ -36,6 +36,9 @@ enum PerfSignpost {
         let start: ContinuousClock.Instant
         let token: String?
         let id: UInt64
+        /// The main thread's CPU clock at `begin`, recorded only when
+        /// `WF_PERF_OUT` is set and `begin` ran on the main thread.
+        let mainCPUStart: UInt64?
     }
 
     private struct State {
@@ -94,12 +97,13 @@ enum PerfSignpost {
     static func begin(_ flow: PerfFlow, token: String? = nil) -> UInt64 {
         let signpostID = signposter.makeSignpostID()
         let newState = beginInterval(flow, id: signpostID)
+        let mainCPUStart = outputPath != nil && Thread.isMainThread ? mainThreadCPUNanoseconds() : nil
         let (id, now, superseded): (UInt64, ContinuousClock.Instant, (Interval, Int)?) = state.withLock { state in
             // Taken under the lock, so a superseded interval never ends before it began.
             let now = ContinuousClock.now
             state.nextID += 1
             let previous = state.intervals[flow]
-            state.intervals[flow] = Interval(state: newState, start: now, token: token, id: state.nextID)
+            state.intervals[flow] = Interval(state: newState, start: now, token: token, id: state.nextID, mainCPUStart: mainCPUStart)
             guard let previous else { return (state.nextID, now, nil) }
             state.seq += 1
             return (state.nextID, now, (previous, state.seq))
@@ -175,7 +179,18 @@ enum PerfSignpost {
         guard outputPath != nil else { return }
         let duration = interval.start.duration(to: now)
         let ms = Double(duration.components.seconds) * 1_000 + Double(duration.components.attoseconds) / 1e15
-        write(["flow": flow.rawValue, "ms": ms, "outcome": outcome, "pid": Int(getpid()), "seq": seq])
+        var line: [String: Any] = ["flow": flow.rawValue, "ms": ms, "outcome": outcome, "pid": Int(getpid()), "seq": seq]
+        if let begin = interval.mainCPUStart, Thread.isMainThread {
+            let end = mainThreadCPUNanoseconds()
+            line["main_cpu_ms"] = Double(end &- begin) / 1e6
+        }
+        write(line)
+    }
+
+    /// CPU time the calling thread has used, in nanoseconds. Only meaningful
+    /// when compared with another reading on the same thread.
+    static func mainThreadCPUNanoseconds() -> UInt64 {
+        clock_gettime_nsec_np(CLOCK_THREAD_CPUTIME_ID)
     }
 
     private static func write(_ object: [String: Any]) {

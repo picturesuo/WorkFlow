@@ -66,6 +66,8 @@ __pycache__/
 # Distribution / packaging
 dist/
 build/
+build.noindex/
+*.trace
 *.egg-info/
 
 # Virtual environments

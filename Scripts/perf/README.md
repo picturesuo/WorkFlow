@@ -9,11 +9,13 @@ Times WorkFlow's user flows with the app's own `os_signpost` intervals (`OpenSup
 Scripts/perf/run-benchmark.sh --iterations 12 --label baseline --out <results folder>
 ```
 
-The script builds Release for testing into `build/perf-dd` under a per-run bundle id `com.picturesuo.WorkFlow.fmtest.perf<pid>`, so nothing reads WorkFlow's own preferences, History or Keychain. It then runs `PerfFlowBenchmarkTests` hosted in that build, runs `cold-launch.sh`, and writes `summary.md`, `summary.json` and `environment.json` (load average, Mac model, macOS, Xcode, commit) to the results folder.
+The script builds Release for testing into `build.noindex/perf-dd` under a per-run bundle id `com.picturesuo.WorkFlow.fmtest.perf<pid>`, so nothing reads WorkFlow's own preferences, History or Keychain. It then runs `PerfFlowBenchmarkTests` hosted in that build, runs `cold-launch.sh`, and writes `summary.md`, `summary.json` and `environment.json` (load average, Mac model, macOS, Xcode, commit) to the results folder.
 
 - `--skip-build` reuses the last build and its bundle id.
 - `--skip-launch` skips the cold-launch step.
 - `--trace` runs the suite once more with xctrace attached (Time Profiler, Hangs, os_signpost) and saves it as `flows-<date>-<time>.trace` next to the results, so an earlier trace is never deleted or overwritten. The suite waits up to 120 s for the trace to start (`WF_PERF_WAIT_FOR_TRACE=1`).
+
+  Trace files embed the traced process's environment variables, which can include secrets. Never share or commit a .trace bundle.
 
 `python3 -I Scripts/perf/report.py <results folder>` rebuilds the summary from `flows.jsonl` and `cold_launch.jsonl`.
 
