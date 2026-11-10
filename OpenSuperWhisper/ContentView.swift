@@ -822,6 +822,8 @@ struct HistoryList: View {
     let shortcut: String
     let onDelete: (Recording) -> Void
 
+    private static let topAnchor = "history-list-top"
+
     var body: some View {
         if history.recordings.isEmpty {
             Group {
@@ -840,6 +842,7 @@ struct HistoryList: View {
                 ScrollViewReader { proxy in
                     ScrollView {
                         LazyVStack(alignment: .leading, spacing: 0, pinnedViews: [.sectionHeaders]) {
+                            Color.clear.frame(height: 0).id(Self.topAnchor).accessibilityHidden(true)
                             ForEach(history.days) { day in
                                 Section {
                                     ForEach(day.recordings) { recording in
@@ -886,11 +889,11 @@ struct HistoryList: View {
                         .padding(.bottom, WFSpace.sm)
                     }
                     // A new query's results start at the top once they arrive,
-                    // as they did when the list was rebuilt.
+                    // as they did when the list was rebuilt. Scroll to the top
+                    // of the list, not to the first row: a row scrolled to the
+                    // top would sit under the pinned day header.
                     .onChange(of: history.shownQuery) { _, _ in
-                        if let first = history.recordings.first?.id {
-                            proxy.scrollTo(first, anchor: .top)
-                        }
+                        proxy.scrollTo(Self.topAnchor, anchor: .top)
                     }
                 }
                 if let error = history.errorMessage {
