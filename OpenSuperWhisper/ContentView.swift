@@ -159,7 +159,7 @@ final class RecordingHistoryModel: ObservableObject {
                 guard self.generation == requestGeneration else { return }
                 // A failed first page can always be retried.
                 if offset == 0 { self.setIfChanged(\.canLoadMore, true) }
-                self.setIfChanged(\.errorMessage, "History couldn't load. Try again.")
+                self.setIfChanged(\.errorMessage, "History couldn’t load. Try again.")
             }
         }
         loadTask = task
@@ -897,8 +897,7 @@ struct HistoryList: View {
                     }
                 }
                 if let error = history.errorMessage {
-                    HistoryLoadError(message: error, onRetry: { history.loadMore() })
-                        .padding(WFSpace.md)
+                    HistoryLoadError(message: error, onRetry: { history.loadMore() }, compact: true)
                 }
             }
         }
@@ -1079,15 +1078,38 @@ struct HistoryRowSeparator: View {
 struct HistoryLoadError: View {
     let message: String
     let onRetry: () -> Void
+    /// A single-line bar under rows already on screen, instead of the
+    /// centered message an empty History shows.
+    var compact = false
+    @Environment(\.colorScheme) private var colorScheme
 
     var body: some View {
-        VStack(spacing: WFSpace.sm) {
-            Label("Couldn’t load history", systemImage: "exclamationmark.triangle")
-                .font(.headline)
-            Text(message).font(.callout).foregroundStyle(.secondary)
-            Button("Try Again", action: onRetry)
+        if compact {
+            HStack(spacing: WFSpace.sm) {
+                Image(systemName: "exclamationmark.triangle")
+                    .font(.callout)
+                    .foregroundStyle(ThemePalette.caution(colorScheme))
+                    .accessibilityHidden(true)
+                Text("Couldn’t load more history")
+                    .font(.callout)
+                    .lineLimit(1)
+                Spacer(minLength: WFSpace.sm)
+                Button("Try Again", action: onRetry)
+                    .controlSize(.small)
+            }
+            .padding(.horizontal, WFSpace.lg)
+            .padding(.vertical, WFSpace.sm)
+            .background(ThemePalette.chromeBackground(colorScheme))
+            .overlay(alignment: .top) { WFHairline() }
+        } else {
+            VStack(spacing: WFSpace.sm) {
+                Label("Couldn’t load history", systemImage: "exclamationmark.triangle")
+                    .font(.headline)
+                Text(message).font(.callout).foregroundStyle(.secondary)
+                Button("Try Again", action: onRetry)
+            }
+            .multilineTextAlignment(.center)
         }
-        .multilineTextAlignment(.center)
     }
 }
 
