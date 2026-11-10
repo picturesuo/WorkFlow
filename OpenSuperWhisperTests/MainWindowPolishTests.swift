@@ -21,6 +21,45 @@ final class MainWindowPolishTests: XCTestCase {
         XCTAssertTrue(spoken.contains("Try Again"), "\(spoken)")
     }
 
+    // MARK: Dock status detail
+
+    func testDockStatusDetailStringsAreUnchanged() {
+        let shortcut = "⌃ / fn"
+        let expected: [(DictationDockStatus, String)] = [
+            (.ready, "Press ⌃ / fn to dictate anywhere"),
+            (.recording(7), "0:07 · Stop when you’re finished"),
+            (.meeting(3_725), "1:02:05 · Stop to save it to History"),
+            (.connecting, "Your microphone is getting ready"),
+            (.transcribing, "You can keep browsing your history"),
+            (.loadingModel, "You can keep browsing your history"),
+            (.processingQueue, "You can keep browsing your history"),
+            (.savingMeeting, "You can keep browsing your history"),
+            (.noMicrophone, "Connect a microphone to start dictating"),
+        ]
+        for (status, detail) in expected {
+            XCTAssertEqual(status.detail(shortcut: shortcut), detail, "\(status)")
+        }
+        XCTAssertEqual(DictationDockStatus.ready.detail(shortcut: ""), "Click the microphone to start")
+    }
+
+    /// The Auto hint may be dropped from the line when it does not fit, but
+    /// VoiceOver reads it at every width.
+    func testDockAutoHintIsAlwaysSpoken() {
+        let full = "0:07 · Stop when you’re finished · Auto picks the filter after"
+        for width in [360.0, 440, 560, 900] {
+            let spoken = AccessibilityTree.withSwiftUITree {
+                let dock = OffscreenHost(
+                    DictationDock(status: .recording(7), shortcut: "⌃⌥⇧⌘ Space / Middle mouse button",
+                                  writingSelection: .constant(.builtIn(.everyday)), writingAuto: .constant(true),
+                                  onRecord: {}),
+                    size: CGSize(width: width, height: 120)
+                )
+                return Self.spokenText(in: dock.host)
+            }
+            XCTAssertTrue(spoken.contains { $0.contains(full) }, "\(Int(width)) pt: \(spoken)")
+        }
+    }
+
     // MARK: Helpers
 
     /// Every label, title and string value VoiceOver can read below

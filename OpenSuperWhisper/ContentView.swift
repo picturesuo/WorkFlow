@@ -1379,22 +1379,41 @@ struct DictationDock: View {
                     .lineLimit(1)
                     .truncationMode(.tail)
             }
-            Text(detailText)
-                .font(.subheadline)
-                .foregroundStyle(.secondary)
-                .monospacedDigit()
-                .lineLimit(1)
-                .truncationMode(.middle)
+            detailLine
         }
         .accessibilityElement(children: .combine)
     }
 
     /// While recording under Auto, the filter is not known yet: it is chosen
     /// from the words once they are transcribed.
-    private var detailText: String {
+    private var autoSuffix: String? {
+        guard status.isRecording, writingAuto?.wrappedValue == true else { return nil }
+        return " · Auto picks the filter after"
+    }
+
+    /// The detail, cut at its end if it must be. The Auto hint is dropped
+    /// whole when it does not fit, and VoiceOver always reads it.
+    @ViewBuilder
+    private var detailLine: some View {
         let detail = status.detail(shortcut: shortcut)
-        guard status.isRecording, writingAuto?.wrappedValue == true else { return detail }
-        return "\(detail) · Auto picks the filter after"
+        if let autoSuffix {
+            ViewThatFits(in: .horizontal) {
+                detailText(detail + autoSuffix).fixedSize()
+                detailText(detail)
+            }
+            .accessibilityLabel(detail + autoSuffix)
+        } else {
+            detailText(detail)
+        }
+    }
+
+    private func detailText(_ text: String) -> some View {
+        Text(text)
+            .font(.subheadline)
+            .foregroundStyle(.secondary)
+            .monospacedDigit()
+            .lineLimit(1)
+            .truncationMode(.tail)
     }
 
     private var recordControls: some View {
