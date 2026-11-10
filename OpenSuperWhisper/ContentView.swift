@@ -1472,10 +1472,9 @@ struct MicrophoneMenu: View {
             }
         } label: {
             ToolbarGlyph(
-                systemImage: microphones.isEmpty ? "mic.slash" : "mic",
+                systemImage: microphones.isEmpty ? "mic.slash" : "chevron.down",
                 size: 22,
-                symbolSize: 13,
-                trailingSystemImage: microphones.isEmpty ? nil : "chevron.down"
+                symbolSize: microphones.isEmpty ? 13 : 9
             )
         }
         .menuStyle(.button)
