@@ -22,7 +22,11 @@ final class ProcessExitGate: @unchecked Sendable {
     /// destructors. A test host waits up to 120 s and never forces its exit.
     static let shared: ProcessExitGate = OpenSuperWhisperApp.isRunningTests
         ? ProcessExitGate(drainTimeout: 120, onAbandon: {})
-        : ProcessExitGate(drainTimeout: 3, onAbandon: { _exit(0) })
+        : ProcessExitGate(drainTimeout: 3, onAbandon: {
+            // _exit skips the exit handlers that would otherwise flush preferences.
+            CFPreferencesAppSynchronize(kCFPreferencesCurrentApplication)
+            _exit(0)
+        })
 
     private let condition = NSCondition()
     private var state = ExitGateCore.State()
