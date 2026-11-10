@@ -18,7 +18,8 @@ import Foundation
 /// | `leave` | `inFlight == 0` | ignored | none |
 /// | `shutdown` | `phase == .open`, `inFlight == 0` | `phase = .closed` | `drained` |
 /// | `shutdown` | `phase == .open`, `inFlight > 0` | `phase = .closing` | `awaitDrain` |
-/// | `shutdown` | otherwise | unchanged | none |
+/// | `shutdown` | `phase == .closing` | unchanged | `awaitDrain` |
+/// | `shutdown` | `phase == .closed` | unchanged | none |
 /// | `timeout` | `phase == .closing` | `phase = .closed` | `abandon` |
 /// | `timeout` | otherwise | unchanged | none |
 public enum ExitGateCore {
@@ -72,6 +73,8 @@ public enum ExitGateCore {
             return (s, [])
 
         case .shutdown:
+            // A later caller waits for the same drain as the first one.
+            if s.phase == .closing { return (s, [.awaitDrain]) }
             guard s.phase == .open else { return (s, []) }
             if s.inFlight == 0 {
                 s.phase = .closed

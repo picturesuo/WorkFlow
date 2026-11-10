@@ -120,6 +120,74 @@ final class ProcessExitGateTests: XCTestCase {
         XCTAssertEqual(abandons.read(), 0)
     }
 
+    func testTwoShutdownsBothWaitForTheInFlightBody() {
+        let abandons = Locked(0)
+        let gate = gate(timeout: 10, abandons: abandons)
+        let entered = DispatchSemaphore(value: 0)
+        let bodyFinished = Locked<Date?>(nil)
+        Thread.detachNewThread {
+            _ = gate.run {
+                entered.signal()
+                Thread.sleep(forTimeInterval: 0.3)
+                bodyFinished.update { $0 = Date() }
+            }
+        }
+        entered.wait()
+
+        let returns = Locked<[Date]>([])
+        let group = DispatchGroup()
+        for _ in 0..<2 {
+            group.enter()
+            Thread.detachNewThread {
+                gate.shutdown()
+                returns.update { $0.append(Date()) }
+                group.leave()
+            }
+        }
+        XCTAssertEqual(group.wait(timeout: .now() + 5), .success)
+
+        let finished = bodyFinished.read()
+        XCTAssertNotNil(finished, "The body finished")
+        XCTAssertEqual(returns.read().count, 2)
+        if let finished {
+            for returned in returns.read() {
+                XCTAssertGreaterThanOrEqual(returned, finished, "No shutdown returns before the body has finished")
+            }
+        }
+        XCTAssertEqual(abandons.read(), 0)
+    }
+
+    func testTwoShutdownsPastTheTimeoutBothReturnAndAbandonOnce() {
+        let abandons = Locked(0)
+        let gate = gate(timeout: 0.1, abandons: abandons)
+        let entered = DispatchSemaphore(value: 0)
+        let left = DispatchSemaphore(value: 0)
+        Thread.detachNewThread {
+            _ = gate.run {
+                entered.signal()
+                Thread.sleep(forTimeInterval: 1)
+            }
+            left.signal()
+        }
+        entered.wait()
+
+        let start = Date()
+        let group = DispatchGroup()
+        for _ in 0..<2 {
+            group.enter()
+            Thread.detachNewThread {
+                gate.shutdown()
+                group.leave()
+            }
+        }
+        XCTAssertEqual(group.wait(timeout: .now() + 5), .success)
+        XCTAssertLessThan(Date().timeIntervalSince(start), 0.9, "Both returned on the timeout, before the body finished")
+        XCTAssertEqual(abandons.read(), 1)
+
+        XCTAssertEqual(left.wait(timeout: .now() + 5), .success)
+        XCTAssertEqual(abandons.read(), 1)
+    }
+
     func testAThrowingBodyStillLeavesTheGate() {
         struct Failure: Error {}
         let gate = gate()
