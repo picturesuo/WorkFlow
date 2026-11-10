@@ -11,8 +11,8 @@ import Foundation
 /// The gate must be closed before `exit` begins: `exit` destroys ggml's
 /// function-local statics (the CPU extra-buffer-type list, the Metal device
 /// list) in reverse order of creation, before any handler registered at
-/// launch runs, so draining inside `exit` was tried and crashed (one SIGSEGV
-/// in `ggml_cpu_extra_work_size` in 30 runs). The app closes it in
+/// launch runs, so draining inside `exit` was tried and crashed (a SIGSEGV
+/// in `ggml_cpu_extra_work_size`). The app closes it in
 /// `applicationWillTerminate`; the hosted test bundle closes it when the test
 /// run ends; a host that calls `exit` without either is not covered.
 ///

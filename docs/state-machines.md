@@ -12,7 +12,7 @@ Order of work: what a user feels comes first (latency they wait through, hangs a
 
 | # | Machine | Finding | Harm | Evidence | Status |
 |---|---|---|---|---|---|
-| 1 | Process exit | Quitting while whisper.cpp runs on a background thread aborts in a static destructor | Crash report on quit; test host aborts after a green run | 8 crash reports on 2026-11-09, one signature | proven (trace) |
+| 1 | Process exit | Quitting while whisper.cpp runs on a background thread aborts in a static destructor | Crash report on quit; test host aborts after a green run | 8 crash reports on 2026-11-09, one signature | fixed in this change |
 | 2 | Recorder | A standard capture that fails on its own deletes the audio, frees the microphone, and tells nobody; the capsule keeps "listening"; a meeting keeps "recording" | Lost dictation or lost meeting with a lying UI | failing tests | proven (test) |
 | 3 | Recorder | Cancel waits on the recorder queue from the main thread, behind microphone start | Main-thread stall on every cancelled press (Esc, modifier used as a shortcut) | benchmark `cancel_after_start` | not measured yet: the test identity has no microphone permission (see perf/baseline.md); suspected |
 | 4 | Trigger | The shortcut keeps its own copy of "a dictation is active"; while the capsule shows a notice the next press is swallowed | A press that does nothing | failing test | proven (test) |
@@ -22,21 +22,30 @@ Order of work: what a user feels comes first (latency they wait through, hangs a
 
 ## 1. Process exit (`ExitGateCore`)
 
-**Today.** Nothing owns "native code is still running". `exit()` runs C++ static destructors on the main thread while a detached task is inside `whisper_vad_segments_from_samples` (speech-activity measurement after every dictation and at launch) or `whisper_full`. ggml then locks a destroyed mutex and the process aborts: `std::__1::mutex::lock()` <- `ggml_init` <- `ggml_graph_compute` <- `whisper_vad_detect_speech_no_reset` <- `SileroSpeechDetector` <- `RecordingStore.measureSpeechActivity`, with the main thread in `__cxa_finalize_ranges` <- `exit`.
+`ProcessExitGate` owns "native code is still running" by running `ExitGateCore`. Every whisper.cpp call in `Whis.swift` passes through `gate.run`: once shutdown begins new calls are refused and shutdown waits for the calls in flight, up to a timeout. The crash this fixed was `exit` running C++ static destructors on the main thread while a detached task was inside `whisper_vad_segments_from_samples`; ggml then locked a destroyed mutex and the process aborted (`std::__1::mutex::lock()` <- `ggml_init` <- ... <- `whisper_vad_segments_from_samples`, main thread in `__cxa_finalize_ranges` <- `exit`).
 
-| State | Event | Next | Effects |
+The gate is closed before exit begins, never inside it: the app closes it as the last statement of `applicationWillTerminate`; the hosted test bundle closes it from an `XCTestObservation` (principal class `TestRunExitDrain`) when the bundle finishes. There is deliberately no `atexit` handler, because draining inside `exit` was tried and crashed: `exit` destroys ggml's function-local statics before any handler registered at launch runs. The app waits at most 3 s, then flushes preferences and calls `_exit(0)` so static destructors never run under a live native call; a test host waits at most 120 s and never force-exits.
+
+| Event | Condition | Transition | Effects |
 |---|---|---|---|
-| open(n) | enter | open(n+1) | admit |
-| open(n>0) | leave | open(n-1) | |
-| open(0) | shutdown | closed | drained |
-| open(n>0) | shutdown | closing(n) | awaitDrain |
-| closing(n>1) | leave | closing(n-1) | |
-| closing(1) | leave | closed | drained |
-| closing(n) | timeout | closed | abandon (skip static destructors) |
-| closing, closed | enter | unchanged | refuse |
+| `enter` | `phase == .open`, `inFlight < Int.max` | `inFlight += 1` | `admit` |
+| `enter` | `phase == .open`, `inFlight == Int.max` | unchanged | `refuse` |
+| `enter` | otherwise | unchanged | `refuse` |
+| `leave` | `inFlight > 0`, `phase == .closing`, `inFlight` becomes 0 | `inFlight -= 1`, `phase = .closed` | `drained` |
+| `leave` | `inFlight > 0`, otherwise | `inFlight -= 1` | none |
+| `leave` | `inFlight == 0` | ignored | none |
+| `shutdown` | `phase == .open`, `inFlight == 0` | `phase = .closed` | `drained` |
+| `shutdown` | `phase == .open`, `inFlight > 0` | `phase = .closing` | `awaitDrain` |
+| `shutdown` | `phase == .closing` | unchanged | `awaitDrain` |
+| `shutdown` | `phase == .closed` | unchanged | none |
+| `timeout` | `phase == .closing` | `phase = .closed` | `abandon` |
+| `timeout` | otherwise | unchanged | none |
 
-Invariants: the in-flight count never goes negative; nothing is admitted after shutdown; exactly one of drained or abandon follows a shutdown; drained only at zero in flight.
-Illegal today: (exiting, native call in flight) is reachable and fatal.
+Invariants (tested in `ProcessExitGateTests` and `ExitGateCoreTests`): the in-flight count never goes negative; nothing is admitted after shutdown; exactly one of drained or abandon follows a shutdown; drained only at zero in flight; a second shutdown caller waits for the same drain, and on a timeout every waiting caller is released together after the abandon action has run once.
+
+Accepted limits: a host that calls `exit` without either hook is not covered; past the test-host timeout exit proceeds with calls still running; one hosted test bundle is assumed.
+
+The original crash did not reproduce on demand (0 aborts in 45 runs before the change); the opt-in `ExitDuringNativeWorkTests` showed 10 of 10 runs draining before exit with the new design.
 
 ## 2 and 3. Recorder (`RecorderCore`)
 
