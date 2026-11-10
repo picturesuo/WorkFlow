@@ -2,8 +2,8 @@ import Foundation
 import XCTest
 @testable import OpenSuperWhisper
 
-/// Opt-in end-to-end reproduction: the test host exits while the bundled
-/// speech detector is inside whisper.cpp on a background thread. Without
+/// Opt-in end-to-end reproduction: the test host exits while bundled speech
+/// detectors are inside whisper.cpp on background threads. Without
 /// ProcessExitGate, exit destroys ggml's statics under the running call and
 /// the host aborts; with it, exit waits for the call to return.
 ///
@@ -56,25 +56,32 @@ final class ExitDuringNativeWorkTests: XCTestCase {
         let long = folder.appendingPathComponent("exit-repro-\(UUID().uuidString).wav")
         try writeWAV(samples, to: long)
 
-        // Load the detector's model first, so the only native call left is
-        // the detection over the long recording.
-        let detector = SileroSpeechDetector()
-        _ = try await detector.detectSpeech(in: Self.root.appendingPathComponent("jfk.wav"))
+        // Four detectors at once, each with its own whisper.cpp context, so
+        // exit meets more calls into ggml. Each loads its model first, so the
+        // only native call left is its detection over the long recording.
+        var detectors: [SileroSpeechDetector] = []
+        for _ in 0..<4 {
+            let detector = SileroSpeechDetector()
+            _ = try await detector.detectSpeech(in: Self.root.appendingPathComponent("jfk.wav"))
+            detectors.append(detector)
+        }
         XCTAssertEqual(ProcessExitGate.shared.inFlightCount, 0)
 
-        Self.mark("detection starts")
-        Task.detached {
-            let detection = try? await detector.detectSpeech(in: long)
-            ExitDuringNativeWorkTests.mark("detection returned intervals=\(detection?.intervals.count ?? -1)")
+        Self.mark("detections start")
+        for (index, detector) in detectors.enumerated() {
+            Task.detached {
+                let detection = try? await detector.detectSpeech(in: long)
+                ExitDuringNativeWorkTests.mark("detection returned index=\(index) intervals=\(detection?.intervals.count ?? -1)")
+            }
         }
 
         let deadline = Date().addingTimeInterval(120)
         while ProcessExitGate.shared.inFlightCount == 0, Date() < deadline {
             try await Task.sleep(nanoseconds: 10_000_000)
         }
-        try await Task.sleep(nanoseconds: 500_000_000)
-        XCTAssertEqual(ProcessExitGate.shared.inFlightCount, 1, "The detection is inside whisper.cpp")
-        Self.mark("test returns with the detection in flight")
+        let inFlight = ProcessExitGate.shared.inFlightCount
+        XCTAssertGreaterThanOrEqual(inFlight, 1, "A detection is inside whisper.cpp")
+        Self.mark("test returns with \(inFlight) detection(s) in flight")
         // Returning now lets XCTest exit the host while the call runs.
     }
 }
