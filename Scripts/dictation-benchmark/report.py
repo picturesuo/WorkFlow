@@ -46,4 +46,5 @@ for cell, rows in sorted(cells.items()):
               if times else "")
     print(f"{cell:28} n {s['utts']:4} words {s['words']:6} S {s['S']:4} D {s['D']:4} I {s['I']:4} "
           f"WER {100 * s['wer']:.2f}% (95% {100 * s['wer95'][0]:.2f}-{100 * s['wer95'][1]:.2f}%) "
-          f"first {s['first_ok']}/{s['utts']} last {s['last_ok']}/{s['utts']} {timing}")
+          f"first {s['first_ok']}/{s['edge_utts']} last {s['last_ok']}/{s['edge_utts']} "
+          f"silence words {s['empty_ref_words']} in {s['empty_refs']} {timing}")

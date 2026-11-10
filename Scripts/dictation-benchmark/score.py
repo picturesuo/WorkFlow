@@ -74,11 +74,20 @@ def wilson(k, n, z=1.96):
     return (max(0, c - h), min(1, c + h))
 
 def score(pairs):
-    tot = collections.Counter(); first = last = n = 0
+    """Pooled counts. Words recognized on an empty reference (silence, noise)
+    are insertions in the pooled rate and are also counted on their own in
+    empty_refs and empty_ref_words. First and last words are checked only on
+    the edge_utts references that have words."""
+    tot = collections.Counter(); first = last = n = edges = empty = empty_words = 0
     for ref, hyp in pairs:
         r, h = normalize(ref), normalize(hyp)
         ops = align(r, h); tot += ops; tot["N"] += len(r); n += 1
+        if not r:
+            empty += 1; empty_words += len(h)
+            continue
+        edges += 1
         first += bool(h) and h[0] == r[0]; last += bool(h) and h[-1] == r[-1]
     errs = tot["S"] + tot["D"] + tot["I"]
     return dict(utts=n, words=tot["N"], S=tot["S"], D=tot["D"], I=tot["I"], wer=errs / max(tot["N"], 1),
-                wer95=wilson(errs, tot["N"]), first_ok=first, last_ok=last)
+                wer95=wilson(errs, tot["N"]), edge_utts=edges, first_ok=first, last_ok=last,
+                empty_refs=empty, empty_ref_words=empty_words)
