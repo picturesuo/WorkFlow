@@ -1005,11 +1005,12 @@ struct MainToolbar: View {
 struct InputMonitoringNotice: View {
     let shortcut: String
     let onEnable: () -> Void
+    @Environment(\.colorScheme) private var colorScheme
 
     var body: some View {
         HStack(spacing: WFSpace.sm) {
             Image(systemName: "exclamationmark.triangle.fill")
-                .foregroundStyle(.orange)
+                .foregroundStyle(ThemePalette.caution(colorScheme))
                 .accessibilityHidden(true)
             Text("Enable Input Monitoring to use \(shortcut).")
                 .font(.callout)
@@ -1021,7 +1022,7 @@ struct InputMonitoringNotice: View {
         }
         .padding(.horizontal, WFSpace.lg)
         .padding(.vertical, WFSpace.sm)
-        .background(Color.orange.opacity(0.10))
+        .background(ThemePalette.caution(colorScheme).opacity(0.10))
         .overlay(alignment: .bottom) { WFHairline() }
     }
 }
@@ -1497,7 +1498,7 @@ struct PermissionRow: View {
         VStack(alignment: .leading, spacing: 10) {
             HStack {
                 Image(systemName: isGranted ? "checkmark.circle.fill" : "exclamationmark.circle.fill")
-                    .foregroundColor(isGranted ? .green : .orange)
+                    .foregroundColor(isGranted ? .green : ThemePalette.caution(colorScheme))
 
                 Text(title)
                     .font(.headline)
