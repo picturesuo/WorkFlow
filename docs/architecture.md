@@ -32,7 +32,7 @@ event sources            pure core                    effect runner             
 
 | State | Owner today | Target owner |
 |---|---|---|
-| Who owns the microphone, capture phase | `AudioRecordingSessionGate` + `capture` + `currentRecordingURL` + two published flags, spread over a lock, a queue and the main thread | `RecorderCore` state inside `AudioRecorder` |
+| Who owns the microphone, capture phase | `RecordingSessionLanes` (an `AudioRecordingSessionGate` each for dictation and a meeting) + `capture` + `meetingCapture` + their URLs + two published flags, spread over a lock, a queue and the main thread | `RecorderCore` state inside `AudioRecorder` |
 | Hotkey gesture (press, hold, double-press, chord) | six vars in `ShortcutManager`, one of them a mirror of the session | `TriggerCore` state inside `ShortcutManager`; "is a dictation capturing" is asked of the session owner, never mirrored |
 | In-flight native library calls at exit | `ProcessExitGate` (`ExitGateCore` state) | `ExitGateCore` state inside `ProcessExitGate` |
 | Dictation session phase (capturing, stopping, transcribing, refining, notice) | `IndicatorViewModel` flags and timers, duplicated in `ContentViewModel` | one `DictationSessionCore` store that the capsule and the main-window dock both render |
