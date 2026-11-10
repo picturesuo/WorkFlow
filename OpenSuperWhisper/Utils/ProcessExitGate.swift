@@ -2,21 +2,19 @@ import DictationCore
 import Foundation
 
 /// Runs ExitGateCore: counts native library calls in flight, refuses new ones
-/// once the process is exiting, and lets exit wait for the rest.
+/// once the process is exiting, and lets shutdown wait for the rest.
 ///
-/// whisper.cpp and ggml keep C++ statics (a mutex, the backend registry)
-/// whose destructors run during `exit`. A call still running on another
-/// thread then touches destroyed state and aborts the process. Every call
-/// into those libraries goes through `run`. The app closes the gate in
-/// `applicationWillTerminate`, before exit begins; the atexit handler
-/// installed by `installAtExit` is the fallback for hosts that call `exit`
-/// directly, such as a test host.
+/// whisper.cpp and ggml keep C++ statics whose destructors run during `exit`;
+/// a call still running on another thread then touches destroyed state and
+/// crashes the process. Every call into those libraries goes through `run`.
 ///
-/// The atexit handler runs before the destructors of load-time statics (the
-/// mutex behind the crashes seen) but after those of function-local statics
-/// created later, such as ggml's backend registry and Metal device. So a host
-/// that calls `exit` directly during a Metal transcription is not covered;
-/// the app is, through `applicationWillTerminate`.
+/// The gate must be closed before `exit` begins: `exit` destroys ggml's
+/// function-local statics (the CPU extra-buffer-type list, the Metal device
+/// list) in reverse order of creation, before any handler registered at
+/// launch runs, so draining inside `exit` was tried and crashed (one SIGSEGV
+/// in `ggml_cpu_extra_work_size` in 30 runs). The app closes it in
+/// `applicationWillTerminate`; the hosted test bundle closes it when the test
+/// run ends; a host that calls `exit` without either is not covered.
 final class ProcessExitGate: @unchecked Sendable {
     /// The app waits up to 3 s, then leaves without running static
     /// destructors. A test host waits up to 120 s and never forces its exit.
@@ -93,17 +91,6 @@ final class ProcessExitGate: @unchecked Sendable {
             onAbandon()
         }
     }
-
-    /// Registers `shared.shutdown()` with atexit, once.
-    static func installAtExit() {
-        _ = atExitRegistration
-    }
-
-    private static let atExitRegistration: Void = {
-        atexit {
-            ProcessExitGate.shared.shutdown()
-        }
-    }()
 
     /// Applies one event through the reducer and returns its effects.
     /// Caller holds `condition`.

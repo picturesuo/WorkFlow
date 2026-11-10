@@ -52,9 +52,6 @@ struct OpenSuperWhisperApp: App {
     }
 
     init() {
-        // First, also under tests: registered after ggml's load-time statics,
-        // so at exit it runs before their destructors.
-        ProcessExitGate.installAtExit()
         guard !Self.isRunningTests else { return }
         do {
             try RenamedAppMigration.migrateApplicationSupport()
