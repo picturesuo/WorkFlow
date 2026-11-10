@@ -60,6 +60,19 @@ final class MainWindowPolishTests: XCTestCase {
         }
     }
 
+    // MARK: History rows
+
+    func testFailureDetailStripsOnlyTheKnownPrefix() {
+        XCTAssertEqual(HistoryRow.failureDetail("Failed to transcribe: The speech model could not process the audio."),
+                       "The speech model could not process the audio.")
+        XCTAssertEqual(HistoryRow.failureDetail("The speech model could not process the audio."),
+                       "The speech model could not process the audio.")
+        XCTAssertEqual(HistoryRow.failureDetail(""), "")
+        XCTAssertEqual(HistoryRow.failureDetail("Failed to transcribe: "), "")
+        XCTAssertEqual(HistoryRow.failureDetail("Retry: Failed to transcribe: the file"), "Retry: Failed to transcribe: the file")
+        XCTAssertEqual(HistoryRow.failureDetail("Failed to transcribe:no space"), "Failed to transcribe:no space")
+    }
+
     // MARK: Microphone menu
 
     func testMicrophoneMenuKeepsItsNameAndValue() {

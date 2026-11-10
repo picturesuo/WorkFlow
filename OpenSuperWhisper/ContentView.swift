@@ -1732,6 +1732,13 @@ struct HistoryRow: View {
 
     private var displayText: String { Self.displayText(for: recording) }
 
+    /// A failed row's message without the "Failed to transcribe: " prefix,
+    /// which the row's title already says. Display only.
+    static func failureDetail(_ text: String) -> String {
+        let prefix = "Failed to transcribe: "
+        return text.hasPrefix(prefix) ? String(text.dropFirst(prefix.count)) : text
+    }
+
     var cleanupBadgeLabel: String? {
         guard recording.status == .completed else { return nil }
         guard let source = recording.cleanupSource else { return nil }
@@ -1919,6 +1926,8 @@ struct HistoryRow: View {
             .help("More actions")
             .accessibilityLabel("More actions")
         }
+        // A lone actions menu centers in the same 24 points as one beside a button.
+        .frame(height: 24)
         .fixedSize()
     }
 
@@ -1954,8 +1963,10 @@ struct HistoryRow: View {
         Text(text)
     }
 
+    /// The same spaced dot that separates parts inside a badge, so gaps
+    /// between groups match gaps within them.
     private var separatorDot: some View {
-        Text("·").accessibilityHidden(true)
+        Text(" · ").accessibilityHidden(true)
     }
 
     /// Time, length, and how the text was produced, on one line when it fits.
@@ -1963,7 +1974,7 @@ struct HistoryRow: View {
         // Formatted once for the three layouts below.
         let time = "\(recording.timestamp.formatted(date: .omitted, time: .shortened)) · \(TextUtil.formatDuration(recording.duration))"
         return ViewThatFits(in: .horizontal) {
-            HStack(spacing: 5) {
+            HStack(spacing: 0) {
                 timeLabel(time)
                 if cleanupBadgeLabel != nil { separatorDot; cleanupBadge }
                 if speakingBadgeLabel != nil { separatorDot; speakingBadge }
@@ -1972,7 +1983,7 @@ struct HistoryRow: View {
             VStack(alignment: .leading, spacing: 2) {
                 timeLabel(time)
                 if hasBadges {
-                    HStack(spacing: 5) {
+                    HStack(spacing: 0) {
                         cleanupBadge
                         if cleanupBadgeLabel != nil && speakingBadgeLabel != nil { separatorDot }
                         speakingBadge
@@ -1993,7 +2004,12 @@ struct HistoryRow: View {
 
     private var progressLabel: some View {
         HStack(spacing: 6) {
-            ProgressView().controlSize(.small).scaleEffect(0.6).frame(width: 12, height: 12)
+            if recording.status == .pending {
+                // Waiting is not work in progress: a still clock, not a spinner.
+                Image(systemName: "clock").font(.system(size: 11)).frame(width: 12, height: 12)
+            } else {
+                ProgressView().controlSize(.small).scaleEffect(0.6).frame(width: 12, height: 12)
+            }
             Text(isRegenerating ? "Updating transcription · \(statusText)" : statusText)
             if recording.status != .pending {
                 Text("\(Int(recording.progress * 100))%")
@@ -2035,10 +2051,11 @@ struct HistoryRow: View {
                         .font(.body.weight(.medium))
                         .foregroundStyle(ThemePalette.signalText(colorScheme))
                     if !recording.transcription.isEmpty {
-                        Text(recording.transcription)
+                        Text(Self.failureDetail(recording.transcription))
                             .font(.callout)
                             .foregroundStyle(.secondary)
                             .textSelection(.enabled)
+                            .accessibilityLabel(recording.transcription)
                     }
                 }
                 .fixedSize(horizontal: false, vertical: true)
