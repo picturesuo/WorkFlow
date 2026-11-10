@@ -134,7 +134,20 @@ def summarize(out_dir):
         entry.update(stats(values))
         if flow == "search_keystroke":
             entry["minus_debounce"] = stats([v - SEARCH_DEBOUNCE_MS for v in values])
+        cpu = [float(r["main_cpu_ms"]) for r in measured
+               if r["outcome"] not in NOT_COMPLETIONS and r.get("main_cpu_ms") is not None]
+        if cpu:
+            entry["main_cpu_ms"] = stats(cpu)
         flow_rows.append(entry)
+
+    # Main-thread CPU of the scroll section, one metric line per iteration.
+    scroll_cpu = [float(m["value"]) for m in metrics
+                  if m.get("metric") == "main_cpu_ms" and m.get("section") == "history_scroll"
+                  and m.get("iteration") not in (None, 0)]
+    scroll_cpu_row = None
+    if scroll_cpu:
+        scroll_cpu_row = {"section": "history_scroll", "metric": "main_cpu_ms"}
+        scroll_cpu_row.update(stats(scroll_cpu))
 
     cold_rows = []
     measured_cold = [r for r in cold if not r.get("warmup") and "launch_ready_ms" in r]
@@ -148,12 +161,13 @@ def summarize(out_dir):
 
     hangs = [m for m in metrics if m.get("metric") == "hangs_over_250ms"]
     hitches = [m for m in metrics if m.get("metric") == "hitch_ratio_ms_per_s"]
-    other = [m for m in metrics if m.get("metric") not in ("hangs_over_250ms", "hitch_ratio_ms_per_s")]
+    other = [m for m in metrics if m.get("metric") not in ("hangs_over_250ms", "hitch_ratio_ms_per_s", "main_cpu_ms")]
     host_events = [e for e in events if "ms_since_process_start" in e]
 
     summary = {
         "label": environment.get("label"),
         "flows": flow_rows,
+        "history_scroll_main_cpu_ms": scroll_cpu_row,
         "cold_launch": cold_rows,
         "cold_launch_notes": cold_notes,
         "hangs": hangs,
@@ -171,16 +185,25 @@ def summarize(out_dir):
     lines.append("")
     lines.append("## Flows")
     lines.append("")
-    lines.append("| section | flow | n | median ms | p95 ms | min ms | max ms | outcomes |")
-    lines.append("|---|---|---:|---:|---:|---:|---:|---|")
+    lines.append("`main_cpu_ms` is CPU time the main thread used inside the interval, measured only when the "
+                 "interval began and ended on the main thread.")
+    lines.append("")
+    lines.append("| section | flow | n | median ms | p95 ms | min ms | max ms | main_cpu_ms median | main_cpu_ms p95 | outcomes |")
+    lines.append("|---|---|---:|---:|---:|---:|---:|---:|---:|---|")
     for r in flow_rows:
         outcomes = ", ".join(f"{k} {v}" for k, v in sorted(r["outcomes"].items()))
+        cpu = r.get("main_cpu_ms") or {}
         lines.append(f"| {r['section']} | {r['flow']} | {r['n']} | {fmt(r['median_ms'])} | {fmt(r['p95_ms'])} | "
-                     f"{fmt(r['min_ms'])} | {fmt(r['max_ms'])} | {outcomes} |")
+                     f"{fmt(r['min_ms'])} | {fmt(r['max_ms'])} | {fmt(cpu.get('median_ms'))} | {fmt(cpu.get('p95_ms'))} | "
+                     f"{outcomes} |")
         if "minus_debounce" in r:
             d = r["minus_debounce"]
             lines.append(f"| {r['section']} | search_keystroke minus {int(SEARCH_DEBOUNCE_MS)} ms debounce | {d['n']} | "
-                         f"{fmt(d['median_ms'])} | {fmt(d['p95_ms'])} | {fmt(d['min_ms'])} | {fmt(d['max_ms'])} | |")
+                         f"{fmt(d['median_ms'])} | {fmt(d['p95_ms'])} | {fmt(d['min_ms'])} | {fmt(d['max_ms'])} | - | - | |")
+    if scroll_cpu_row:
+        c = scroll_cpu_row
+        lines.append(f"| history_scroll | main_cpu_ms (2 s scroll) | {c['n']} | {fmt(c['median_ms'])} | {fmt(c['p95_ms'])} | "
+                     f"{fmt(c['min_ms'])} | {fmt(c['max_ms'])} | {fmt(c['median_ms'])} | {fmt(c['p95_ms'])} | |")
     lines.append("")
     lines.append("## Cold launch")
     lines.append("")

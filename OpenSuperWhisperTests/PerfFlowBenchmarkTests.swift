@@ -288,6 +288,32 @@ final class PerfFlowBenchmarkTests: XCTestCase {
         output.marker("iteration", section: section, index: index)
     }
 
+    /// Orders out every window of this test host except `window`, so the
+    /// host's own WindowGroup window never reaches the owner's screen.
+    private func hideOtherWindows(except window: NSWindow) {
+        for other in NSApp.windows where other !== window {
+            other.orderOut(nil)
+        }
+    }
+
+    private struct VisibleWindowError: Error {}
+
+    /// Fails hard if any on-screen window of this process is not fully
+    /// transparent.
+    private func assertNothingVisible() throws {
+        let info = CGWindowListCopyWindowInfo([.optionOnScreenOnly], kCGNullWindowID) as? [[String: Any]] ?? []
+        let pid = getpid()
+        let visible = info.filter { entry in
+            (entry[kCGWindowOwnerPID as String] as? NSNumber)?.int32Value == pid
+                && ((entry[kCGWindowAlpha as String] as? NSNumber)?.doubleValue ?? 0) > 0
+        }
+        guard visible.isEmpty else {
+            let names = visible.map { "\($0[kCGWindowNumber as String] ?? "?") alpha \($0[kCGWindowAlpha as String] ?? "?")" }
+            XCTFail("A test host window is visible on screen: \(names.joined(separator: ", "))")
+            throw VisibleWindowError()
+        }
+    }
+
     /// The shared service's real Parakeet engine, loaded before any timing.
     private func readyTranscriptionService() async throws -> TranscriptionService {
         let modelDirectory = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
@@ -516,13 +542,20 @@ final class PerfFlowBenchmarkTests: XCTestCase {
         _ = try await readyTranscriptionService()
         let scratch = FileManager.default.temporaryDirectory.appendingPathComponent("WorkFlowPerfHistory-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: scratch, withIntermediateDirectories: true)
-        defer { try? FileManager.default.removeItem(at: scratch) }
-        let store = try RecordingStore(
-            database: DatabaseQueue(path: scratch.appendingPathComponent("history.sqlite").path),
+        var database: DatabaseQueue? = try DatabaseQueue(path: scratch.appendingPathComponent("history.sqlite").path)
+        var store: RecordingStore? = try RecordingStore(
+            database: database!,
             recordingsDirectory: scratch.appendingPathComponent("recordings"),
             cancelQueuedRecording: { _ in }, stopPlayback: { _ in }
         )
-        try await seed(store, count: 1_200)
+        // The database is closed and released before its folder is removed.
+        defer {
+            store = nil
+            try? database?.close()
+            database = nil
+            try? FileManager.default.removeItem(at: scratch)
+        }
+        try await seed(store!, count: 1_200)
         let pasteboard = NSPasteboard(name: .init("workflow-perf-bench-history"))
         defer { pasteboard.releaseGlobally() }
 
@@ -550,7 +583,7 @@ final class PerfFlowBenchmarkTests: XCTestCase {
             window.ignoresMouseEvents = true
             window.collectionBehavior = [.transient, .ignoresCycle]
             window.isReleasedWhenClosed = false
-            let viewModel = ContentViewModel(recordingStore: store)
+            let viewModel = ContentViewModel(recordingStore: store!)
             let content = ContentView(
                 viewModel: viewModel,
                 permissionsManager: PermissionsManager(microphone: true, accessibility: true, inputMonitoring: true)
@@ -565,7 +598,10 @@ final class PerfFlowBenchmarkTests: XCTestCase {
             meter?.start(on: window)
             let openMark = output.poll()
             PerfSignpost.begin(.historyOpen)
+            hideOtherWindows(except: window)
             window.orderFrontRegardless()
+            hideOtherWindows(except: window)
+            try assertNothingVisible()
             let opened = try await waitForFlow(.historyOpen, after: openMark, timeout: 20)
             XCTAssertEqual(opened?["outcome"] as? String, "ok")
             try await Task.sleep(for: .milliseconds(300))
@@ -582,6 +618,7 @@ final class PerfFlowBenchmarkTests: XCTestCase {
             if let scrollView {
                 let clip = scrollView.contentView
                 let scrollStart = ContinuousClock.now
+                let cpuStart = PerfSignpost.mainThreadCPUNanoseconds()
                 while scrollStart.duration(to: .now) < .seconds(2) {
                     var origin = clip.bounds.origin
                     origin.y += clip.isFlipped ? 24 : -24
@@ -589,6 +626,9 @@ final class PerfFlowBenchmarkTests: XCTestCase {
                     scrollView.reflectScrolledClipView(clip)
                     try await Task.sleep(for: .milliseconds(8))
                 }
+                let cpuEnd = PerfSignpost.mainThreadCPUNanoseconds()
+                output.append(["metric": "main_cpu_ms", "section": "history_scroll",
+                               "value": Double(cpuEnd &- cpuStart) / 1e6, "iteration": index])
                 output.append(["metric": "scroll_offset", "section": "history_scroll", "y": Double(clip.bounds.origin.y)])
             }
             if let meter { addHitch("history_scroll", meter.stop()) }
@@ -622,6 +662,7 @@ final class PerfFlowBenchmarkTests: XCTestCase {
             window.contentView = nil
             window.close()
             try await Task.sleep(for: .milliseconds(200))
+            try assertNothingVisible()
         }
         for (section, hangs) in [("history_open", openHangs), ("history_scroll", scrollHangs), ("history_search", searchHangs)] {
             output.append(["metric": "hangs_over_250ms", "section": section, "count": hangs.0, "max_stall_ms": hangs.1])

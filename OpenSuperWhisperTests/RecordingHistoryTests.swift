@@ -16,7 +16,7 @@ final class RecordingHistoryTests: XCTestCase {
         oldRequest.succeed([recording("old result")])
         await oldTask.value
         XCTAssertTrue(history.recordings.isEmpty)
-        XCTAssertTrue(history.isLoadingMore)
+        XCTAssertTrue(history.isInitialLoading)
 
         let expected = recording("new result")
         newRequest.succeed([expected])
@@ -59,7 +59,7 @@ final class RecordingHistoryTests: XCTestCase {
         XCTAssertEqual(refreshRequest.query, "project")
         XCTAssertEqual(refreshRequest.offset, 0)
         XCTAssertEqual(history.recordings, [original])
-        XCTAssertTrue(history.isLoadingMore)
+        XCTAssertFalse(history.isLoadingMore, "Rows on screen stay without a spinner until their replacement arrives")
 
         let updated = recording("project updated")
         refreshRequest.succeed([updated])
