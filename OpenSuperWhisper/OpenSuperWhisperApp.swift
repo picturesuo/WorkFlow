@@ -223,6 +223,13 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
         }
     }
 
+    func applicationWillTerminate(_ notification: Notification) {
+        // Last, after the app's own teardown: whisper.cpp calls still running
+        // finish before exit destroys ggml's statics, and past the gate's
+        // timeout the process leaves with _exit(0).
+        ProcessExitGate.shared.shutdown()
+    }
+
     func application(_ sender: NSApplication, openFile filename: String) -> Bool {
         let url = URL(fileURLWithPath: filename)
         guard isAudioFile(url) else {

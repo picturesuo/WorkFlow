@@ -7,8 +7,16 @@ import Foundation
 /// whisper.cpp and ggml keep C++ statics (a mutex, the backend registry)
 /// whose destructors run during `exit`. A call still running on another
 /// thread then touches destroyed state and aborts the process. Every call
-/// into those libraries goes through `run`, and the atexit handler installed
-/// by `installAtExit` closes the gate and waits for the calls in flight.
+/// into those libraries goes through `run`. The app closes the gate in
+/// `applicationWillTerminate`, before exit begins; the atexit handler
+/// installed by `installAtExit` is the fallback for hosts that call `exit`
+/// directly, such as a test host.
+///
+/// The atexit handler runs before the destructors of load-time statics (the
+/// mutex behind the crashes seen) but after those of function-local statics
+/// created later, such as ggml's backend registry and Metal device. So a host
+/// that calls `exit` directly during a Metal transcription is not covered;
+/// the app is, through `applicationWillTerminate`.
 final class ProcessExitGate: @unchecked Sendable {
     /// The app waits up to 3 s, then leaves without running static
     /// destructors. A test host waits up to 120 s and never forces its exit.
