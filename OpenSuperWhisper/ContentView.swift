@@ -579,84 +579,85 @@ struct ContentView: View {
     }
 
     var body: some View {
-        Group {
-            if permissionsManager.hasCompletedInitialCheck,
-               !permissionsManager.isMicrophonePermissionGranted
-                || !permissionsManager.isAccessibilityPermissionGranted
-            {
-                PermissionsView(permissionsManager: permissionsManager)
-            } else {
-                VStack(spacing: 0) {
-                    MainToolbar(
-                        searchText: $searchText,
-                        meetingLabel: meetingController.statusLabel,
-                        isMeetingRecording: meetingController.isRecording,
-                        isMeetingInProgress: meetingController.isBusy,
-                        isMeetingAvailable: MainToolbar.meetingAvailable(
+        FixedMinimumSizeLayout(minimum: CGSize(width: 440, height: 460), ideal: CGSize(width: 560, height: 720)) {
+            Group {
+                if permissionsManager.hasCompletedInitialCheck,
+                   !permissionsManager.isMicrophonePermissionGranted
+                    || !permissionsManager.isAccessibilityPermissionGranted
+                {
+                    PermissionsView(permissionsManager: permissionsManager)
+                } else {
+                    VStack(spacing: 0) {
+                        MainToolbar(
+                            searchText: $searchText,
+                            meetingLabel: meetingController.statusLabel,
                             isMeetingRecording: meetingController.isRecording,
-                            isMeetingBusy: meetingController.isBusy,
-                            dictationState: viewModel.state
-                        ),
-                        canDeleteAll: !(viewModel.recordings.isEmpty && debouncedSearchText.isEmpty),
-                        onMeeting: {
-                            if meetingController.isRecording {
-                                Task { await meetingController.stop() }
-                            } else {
-                                meetingTitle = MeetingSessionController.defaultTitle()
-                                showMeetingNamePrompt = true
+                            isMeetingInProgress: meetingController.isBusy,
+                            isMeetingAvailable: MainToolbar.meetingAvailable(
+                                isMeetingRecording: meetingController.isRecording,
+                                isMeetingBusy: meetingController.isBusy,
+                                dictationState: viewModel.state
+                            ),
+                            canDeleteAll: !(viewModel.recordings.isEmpty && debouncedSearchText.isEmpty),
+                            onMeeting: {
+                                if meetingController.isRecording {
+                                    Task { await meetingController.stop() }
+                                } else {
+                                    meetingTitle = MeetingSessionController.defaultTitle()
+                                    showMeetingNamePrompt = true
+                                }
+                            },
+                            onDeleteAll: { showDeleteConfirmation = true },
+                            onSettings: { SettingsRequest.open() }
+                        )
+                        .onChange(of: searchText) { _, query in performSearch(query) }
+                        .confirmationDialog(
+                            "Delete All Recordings",
+                            isPresented: $showDeleteConfirmation,
+                            titleVisibility: .visible
+                        ) {
+                            Button("Delete All", role: .destructive) {
+                                viewModel.deleteAllRecordings()
                             }
-                        },
-                        onDeleteAll: { showDeleteConfirmation = true },
-                        onSettings: { SettingsRequest.open() }
-                    )
-                    .onChange(of: searchText) { _, query in performSearch(query) }
-                    .confirmationDialog(
-                        "Delete All Recordings",
-                        isPresented: $showDeleteConfirmation,
-                        titleVisibility: .visible
-                    ) {
-                        Button("Delete All", role: .destructive) {
-                            viewModel.deleteAllRecordings()
+                            Button("Cancel", role: .cancel) {}
+                        } message: {
+                            Text("This deletes every recording, including recordings outside the current search. This cannot be undone.")
                         }
-                        Button("Cancel", role: .cancel) {}
-                    } message: {
-                        Text("This deletes every recording, including recordings outside the current search. This cannot be undone.")
-                    }
-                    WFHairline()
+                        WFHairline()
 
-                    if permissionsManager.hasCompletedInitialCheck,
-                       requiresInputMonitoring,
-                       !permissionsManager.isInputMonitoringPermissionGranted {
-                        InputMonitoringNotice(shortcut: currentShortcutDescription) {
-                            permissionsManager.requestInputMonitoringPermissionOrOpenSystemPreferences()
+                        if permissionsManager.hasCompletedInitialCheck,
+                           requiresInputMonitoring,
+                           !permissionsManager.isInputMonitoringPermissionGranted {
+                            InputMonitoringNotice(shortcut: currentShortcutDescription) {
+                                permissionsManager.requestInputMonitoringPermissionOrOpenSystemPreferences()
+                            }
                         }
+
+                        if debouncedSearchText.isEmpty {
+                            SpeakingSummaryStrip(
+                                presentation: SpeakingPresentation(summary: viewModel.speakingSummary, typingWPM: typingWPM)
+                            ) { SettingsRequest.open(pane: .dictation) }
+                        }
+
+                        historyList
+                            .frame(maxWidth: .infinity, maxHeight: .infinity)
+                            .background(ThemePalette.contentBackground(colorScheme))
+
+                        DictationControls(
+                            viewModel: viewModel,
+                            transcriptionService: viewModel.transcriptionService,
+                            transcriptionQueue: viewModel.transcriptionQueue,
+                            microphoneService: viewModel.microphoneService,
+                            meetingController: meetingController,
+                            shortcut: currentShortcutDescription,
+                            writingFilter: writingFilter
+                        )
                     }
-
-                    if debouncedSearchText.isEmpty {
-                        SpeakingSummaryStrip(
-                            presentation: SpeakingPresentation(summary: viewModel.speakingSummary, typingWPM: typingWPM)
-                        ) { SettingsRequest.open(pane: .dictation) }
-                    }
-
-                    historyList
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
-                        .background(ThemePalette.contentBackground(colorScheme))
-
-                    DictationControls(
-                        viewModel: viewModel,
-                        transcriptionService: viewModel.transcriptionService,
-                        transcriptionQueue: viewModel.transcriptionQueue,
-                        microphoneService: viewModel.microphoneService,
-                        meetingController: meetingController,
-                        shortcut: currentShortcutDescription,
-                        writingFilter: writingFilter
-                    )
+                    // The toolbar row is the title bar, beside the traffic lights.
+                    .ignoresSafeArea(.container, edges: .top)
                 }
-                // The toolbar row is the title bar, beside the traffic lights.
-                .ignoresSafeArea(.container, edges: .top)
             }
         }
-        .frame(minWidth: 440, idealWidth: 560, minHeight: 460)
         .background(ThemePalette.chromeBackground(colorScheme))
         .background(WindowChromeConfigurator())
         .onAppear {

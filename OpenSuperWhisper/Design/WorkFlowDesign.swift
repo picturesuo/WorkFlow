@@ -1,6 +1,31 @@
 import AppKit
 import SwiftUI
 
+// MARK: - Window sizing
+
+/// A container whose own size never depends on its content: at least
+/// `minimum`, `ideal` when a dimension is unspecified, otherwise whatever
+/// is proposed. The window's minimum-size query therefore costs nothing.
+struct FixedMinimumSizeLayout: Layout {
+    var minimum: CGSize
+    var ideal: CGSize
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        CGSize(width: Self.dimension(proposal.width, minimum.width, ideal.width),
+               height: Self.dimension(proposal.height, minimum.height, ideal.height))
+    }
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        for subview in subviews {
+            subview.place(at: CGPoint(x: bounds.midX, y: bounds.midY), anchor: .center,
+                          proposal: ProposedViewSize(bounds.size))
+        }
+    }
+    func spacing(subviews: Subviews, cache: inout ()) -> ViewSpacing { ViewSpacing() }
+    static func dimension(_ proposed: CGFloat?, _ minimum: CGFloat, _ ideal: CGFloat) -> CGFloat {
+        guard let proposed else { return ideal }
+        return max(proposed, minimum)   // an infinite proposal stays infinite: the window may grow freely
+    }
+}
+
 // MARK: - Spacing & radii
 
 enum WFSpace {

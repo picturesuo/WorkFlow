@@ -20,16 +20,17 @@ struct OpenSuperWhisperApp: App {
 
     var body: some Scene {
         WindowGroup {
-            Group {
-                if Self.isRunningTests {
-                    EmptyView()
-                } else if !appState.hasCompletedOnboarding {
-                    OnboardingView()
-                } else {
-                    ContentView()
+            FixedMinimumSizeLayout(minimum: CGSize(width: 440, height: 460), ideal: CGSize(width: 560, height: 720)) {
+                Group {
+                    if Self.isRunningTests {
+                        EmptyView()
+                    } else if !appState.hasCompletedOnboarding {
+                        OnboardingView()
+                    } else {
+                        ContentView()
+                    }
                 }
             }
-            .frame(minWidth: 440, idealWidth: 560, minHeight: 460)
             .environmentObject(appState)
             .tint(ThemePalette.controlTint)
         }
