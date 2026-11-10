@@ -92,10 +92,24 @@ fi
 
 # A shipped build must not carry LLVM code-coverage instrumentation
 # (counters on every code region and a .profraw write at exit).
-for binary in "$source_app"/Contents/MacOS/*(N.) "$source_app"/Contents/Frameworks/**/*(N.); do
-    load_commands=$(otool -l "$binary" 2>/dev/null || true)
+for tool in otool od; do
+    if ! command -v "$tool" >/dev/null 2>&1; then
+        echo "Cannot check the build for coverage instrumentation: $tool is missing." >&2
+        exit 1
+    fi
+done
+for candidate in "$source_app"/**/*(N.); do
+    magic=$(od -An -tx1 -N4 -- "$candidate" | tr -d ' \n')
+    case "$magic" in
+        feedface|feedfacf|cefaedfe|cffaedfe|cafebabe|bebafeca|cafebabf|bfbafeca) ;;
+        *) continue ;;
+    esac
+    if ! load_commands=$(otool -l "$candidate" 2>&1); then
+        echo "Cannot inspect $candidate for coverage instrumentation." >&2
+        exit 1
+    fi
     if [[ "$load_commands" == *"sectname __llvm_prf_cnts"* ]]; then
-        echo "Release build is instrumented for code coverage: $binary" >&2
+        echo "Release build is instrumented for code coverage: $candidate" >&2
         exit 1
     fi
 done
