@@ -125,6 +125,8 @@ Cleanup rewrites what you said. It doesn't answer it. A question you dictate com
 
 If the reply drops a question you asked, or is made of material you didn't say, like an answer, advice, a poem, or a joke, WorkFlow uses your original transcript. A missing question mark alone is fine. These checks catch clear answers, not every subtle change of meaning.
 
+When you restart by saying the same words again, as in "I can't, I can't make it" or "what's the, um, what's the status", cleanup may keep just one take. The question, negation, or percent in it still has to come through, and a reply that drops it gets your original transcript.
+
 ## Music while you dictate
 
 To keep music or a video playing while you dictate, turn on **Settings → Dictation → Reduce background audio**. Dictation then records through macOS voice processing, the echo cancellation and noise suppression calls use. Apple describes it as taking audio the Mac plays out of what the microphone hears, so it may reduce music from this Mac's speakers and steady noise. Your music keeps playing; macOS may lower it slightly while you dictate. It's off by default, and meetings always record the microphone as is, so people on a call stay in the transcript.
