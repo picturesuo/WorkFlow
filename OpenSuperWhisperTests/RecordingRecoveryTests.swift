@@ -249,6 +249,43 @@ final class RecordingRecoveryTests: XCTestCase {
         XCTAssertEqual(try Snapshot(of: orphan), before, "The sweep keeps audio a row still uses")
     }
 
+    // MARK: - Deleted recordings stay deleted
+
+    func testDeletingARowDeletesItsTemporaryAudioSoItIsNeverRecovered() async throws {
+        let store = try makeStore()
+        // A dictation queued while the engine was busy: its row points at
+        // audio that is still in the temporary folder.
+        let queuedAudio = try makeRecording(seconds: 1)
+        let queued = Recording(
+            id: UUID(), timestamp: Date(), fileName: AudioRecorder.recordingFileName(), transcription: "", duration: 1,
+            status: .pending, progress: 0, sourceFileURL: queuedAudio.path
+        )
+        // An imported file is the user's own and lives elsewhere.
+        let imports = FileManager.default.temporaryDirectory
+            .appendingPathComponent("RecordingRecoveryTests-imports-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: imports, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: imports) }
+        let importedAudio = imports.appendingPathComponent("interview.wav")
+        try Data("the user's own file".utf8).write(to: importedAudio)
+        let imported = Recording(
+            id: UUID(), timestamp: Date(), fileName: AudioRecorder.recordingFileName(), transcription: "", duration: 1,
+            status: .pending, progress: 0, sourceFileURL: importedAudio.path
+        )
+        try await store.addRecordingSync(queued)
+        try await store.addRecordingSync(imported)
+
+        try await store.deleteRecordingSync(queued)
+        try await store.deleteRecordingSync(imported)
+
+        XCTAssertFalse(FileManager.default.fileExists(atPath: queuedAudio.path),
+                       "Before the fix the audio stayed, and the next launch would have recovered a deleted recording")
+        XCTAssertTrue(FileManager.default.fileExists(atPath: importedAudio.path), "A file outside the temporary folder is never deleted")
+        let adopted = await adopt(into: store)
+        XCTAssertEqual(adopted, 0)
+        let rows = try await rows(in: store)
+        XCTAssertEqual(rows.count, 0)
+    }
+
     // MARK: - Another WorkFlow
 
     func testOnlyAnotherWorkFlowProcessCountsAsSharingTheFolder() {
@@ -302,6 +339,7 @@ final class RecordingRecoveryTests: XCTestCase {
         try RecordingStore(
             database: database ?? DatabaseQueue(),
             recordingsDirectory: Recording.recordingsDirectory,
+            temporaryRecordingsDirectory: directory,
             cancelQueuedRecording: { _ in },
             stopPlayback: { _ in },
             speechDetector: FixedSpeechDetector()

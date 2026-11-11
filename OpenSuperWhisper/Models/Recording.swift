@@ -187,6 +187,8 @@ class RecordingStore: ObservableObject {
     @Published private(set) var recordings: [Recording] = []
     private let dbQueue: DatabaseQueue
     private let recordingsDirectory: URL
+    /// Where the recorder writes; a deleted row's audio still here goes with it.
+    private let temporaryRecordingsDirectory: URL
     private let cancelQueuedRecording: (UUID) -> Void
     private let stopPlayback: ([URL]) -> Void
     /// Measures each new live dictation's active speech on this Mac.
@@ -226,12 +228,14 @@ class RecordingStore: ObservableObject {
     init(
         database: DatabaseQueue,
         recordingsDirectory: URL,
+        temporaryRecordingsDirectory: URL = AudioRecorder.temporaryRecordingsDirectory,
         cancelQueuedRecording: @escaping (UUID) -> Void,
         stopPlayback: @escaping ([URL]) -> Void,
         speechDetector: any SpeechDetecting = SileroSpeechDetector.shared
     ) throws {
         self.dbQueue = database
         self.recordingsDirectory = recordingsDirectory.standardizedFileURL
+        self.temporaryRecordingsDirectory = temporaryRecordingsDirectory.standardizedFileURL
         self.cancelQueuedRecording = cancelQueuedRecording
         self.stopPlayback = stopPlayback
         self.speechDetector = speechDetector
@@ -1159,9 +1163,19 @@ class RecordingStore: ObservableObject {
             cancelQueuedRecording(recording.id)
         }
         let directoryPath = recordingsDirectory.path
-        let urls = deleted.map {
+        let historyAudio = deleted.map {
             recordingsDirectory.appendingPathComponent($0.fileName).standardizedFileURL
         }.filter { $0.path.hasPrefix(directoryPath + "/") }
+        // Audio still in the temporary folder (a queued row's, or audio kept
+        // there after a failed move) goes with its row. Left behind, the next
+        // launch would recover a recording the user deleted. A source
+        // anywhere else is the user's own file and is never touched.
+        let temporaryPath = temporaryRecordingsDirectory.path
+        let temporaryAudio = deleted.compactMap { recording -> URL? in
+            guard let source = recording.sourceFileURL, !source.isEmpty else { return nil }
+            return URL(fileURLWithPath: source).standardizedFileURL
+        }.filter { $0.path.hasPrefix(temporaryPath + "/") }
+        let urls = historyAudio + temporaryAudio
         stopPlayback(urls)
         let deletedIDs = Set(deleted.map(\.id))
         recordings.removeAll { deletedIDs.contains($0.id) }
