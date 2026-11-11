@@ -9,6 +9,10 @@ import Foundation
 /// offer Regenerate. Nothing is transcribed, pasted or copied here, and no
 /// file is ever deleted here: what is not adopted stays for the 24-hour sweep.
 ///
+/// Only recordings written after the first launch that ran this pass are
+/// adopted. Builds before it left a deleted queued row's audio in the folder,
+/// and that launch cannot tell such a file from a lost recording.
+///
 /// A recording whose process died while it was still capturing has every
 /// sample on disk behind a header that declares none, because the recorder
 /// fills in the sizes only when it stops. `WAVLayoutCore` finds that audio,
@@ -34,6 +38,7 @@ enum RecordingRecovery {
         let adopted = await adoptOrphans(
             in: AudioRecorder.temporaryRecordingsDirectory,
             launchedAt: launchedAt,
+            defaults: .standard,
             store: .shared,
             cleanupPipeline: .shared,
             anotherWorkFlowIsRunning: isAnotherWorkFlowRunning,
@@ -44,6 +49,18 @@ enum RecordingRecovery {
         }
     }
 
+    /// The preference holding the launch date of the first launch that ran
+    /// recovery.
+    static let activeSinceKey = "recordingRecoveryActiveSince"
+
+    /// The stored date recovery has been active since. A launch that finds
+    /// none stores its own launch date, so it adopts nothing.
+    static func activeSince(launchedAt: Date, in defaults: UserDefaults) -> Date {
+        if let stored = defaults.object(forKey: activeSinceKey) as? Date { return stored }
+        defaults.set(launchedAt, forKey: activeSinceKey)
+        return launchedAt
+    }
+
     /// Adopts the orphaned recordings in `directory` and returns how many
     /// History rows were added. `keepAudio` moves a recording into History
     /// and returns where it is left, as for any failed dictation.
@@ -51,11 +68,13 @@ enum RecordingRecovery {
     static func adoptOrphans(
         in directory: URL,
         launchedAt: Date,
+        defaults: UserDefaults,
         store: RecordingStore,
         cleanupPipeline: TranscriptCleanupPipeline,
         anotherWorkFlowIsRunning: () -> Bool,
         keepAudio: (URL, URL) -> URL?
     ) async -> Int {
+        let recoveryActiveSince = activeSince(launchedAt: launchedAt, in: defaults)
         // Every WorkFlow build shares the folder, so a file with no row here
         // may be one the other process is still recording or transcribing.
         guard !anotherWorkFlowIsRunning() else { return 0 }
@@ -67,6 +86,7 @@ enum RecordingRecovery {
         }.value
         let orphans = RecordingRecoveryCore.filesToAdopt(
             scanned.map(\.candidate),
+            recoveryActiveSince: recoveryActiveSince,
             launchedAt: launchedAt,
             minimumDuration: minimumDuration
         )

@@ -8,6 +8,8 @@ final class RecordingRecoveryCoreTests: XCTestCase {
     typealias Candidate = RecordingRecoveryCore.Candidate
 
     private let launchedAt = Date(timeIntervalSince1970: 1_000_000)
+    /// The first launch that recovered, long before every default fixture.
+    private let activeSince = Date(timeIntervalSince1970: 0)
     private let minimum: TimeInterval = 0.35
 
     private func url(_ name: String = "\(UUID().uuidString).wav") -> URL {
@@ -29,8 +31,13 @@ final class RecordingRecoveryCoreTests: XCTestCase {
         )
     }
 
-    private func adopted(_ candidates: [Candidate]) -> [Candidate] {
-        RecordingRecoveryCore.filesToAdopt(candidates, launchedAt: launchedAt, minimumDuration: minimum)
+    private func adopted(_ candidates: [Candidate], activeSince: Date? = nil) -> [Candidate] {
+        RecordingRecoveryCore.filesToAdopt(
+            candidates,
+            recoveryActiveSince: activeSince ?? self.activeSince,
+            launchedAt: launchedAt,
+            minimumDuration: minimum
+        )
     }
 
     func testAnUnreferencedRecordingFromBeforeLaunchIsAdopted() {
@@ -85,6 +92,38 @@ final class RecordingRecoveryCoreTests: XCTestCase {
         }
     }
 
+    func testOnlyFilesLastModifiedAfterRecoveryBecameActiveAreAdopted() {
+        // Recovery became active an hour before this launch.
+        let since = launchedAt.addingTimeInterval(-3_600)
+        let table: [(secondsAfterActive: TimeInterval, adopted: Bool)] = [
+            (-86_400 * 30, false),
+            (-60, false),
+            (-0.001, false),
+            (0, false),
+            (0.001, true),
+            (60, true),
+            (3_599, true),
+        ]
+        for row in table {
+            var file = orphan()
+            file.modified = since.addingTimeInterval(row.secondsAfterActive)
+            XCTAssertEqual(
+                adopted([file], activeSince: since).count, row.adopted ? 1 : 0,
+                "modified \(row.secondsAfterActive) s after recovery became active"
+            )
+        }
+    }
+
+    func testTheLaunchThatMakesRecoveryActiveAdoptsNothing() {
+        // No date is both after that launch and before it.
+        for secondsBeforeLaunch: TimeInterval in [86_400 * 3, 60, 0.001, 0, -0.001, -60] {
+            XCTAssertEqual(
+                adopted([orphan(secondsBeforeLaunch: secondsBeforeLaunch)], activeSince: launchedAt), [],
+                "modified \(secondsBeforeLaunch) s before launch"
+            )
+        }
+    }
+
     func testAFileWithNoModificationDateIsLeft() {
         var file = orphan()
         file.modified = nil
@@ -119,6 +158,7 @@ final class RecordingRecoveryCoreTests: XCTestCase {
             orphan(isReferenced: true),
             good,
             orphan(secondsBeforeLaunch: -5),
+            orphan(secondsBeforeLaunch: 2_000_000),
             orphan(duration: 0.2),
             orphan(duration: nil),
             orphan("notes.txt"),
@@ -135,8 +175,9 @@ final class RecordingRecoveryCoreTests: XCTestCase {
     }
 
     /// Random folders: the result is exactly the candidates that satisfy all
-    /// four facts, each once, and deciding again changes nothing.
+    /// five facts, each once, and deciding again changes nothing.
     func testRandomFoldersAdoptExactlyTheQualifyingFiles() {
+        let since = launchedAt.addingTimeInterval(-100_000)
         for seed in PropertyCheck.seeds {
             var rng = SplitMix64(seed: seed)
             var candidates: [Candidate] = []
@@ -151,17 +192,17 @@ final class RecordingRecoveryCoreTests: XCTestCase {
                 ))
             }
 
-            let result = adopted(candidates)
+            let result = adopted(candidates, activeSince: since)
 
             let expected = Set(candidates.filter { candidate in
                 guard let modified = candidate.modified, let duration = candidate.duration else { return false }
                 return RecordingRecoveryCore.isRecorderFileName(candidate.url.lastPathComponent)
-                    && !candidate.isReferenced && modified < launchedAt && duration >= minimum
+                    && !candidate.isReferenced && modified > since && modified < launchedAt && duration >= minimum
             })
             XCTAssertEqual(Set(result), expected, "seed \(seed)")
             XCTAssertEqual(result.count, expected.count, "seed \(seed): no file is adopted twice")
-            XCTAssertEqual(adopted(result), result, "seed \(seed): deciding again changes nothing")
-            XCTAssertEqual(adopted(candidates.shuffled(using: &rng)), result, "seed \(seed): the scan order does not matter")
+            XCTAssertEqual(adopted(result, activeSince: since), result, "seed \(seed): deciding again changes nothing")
+            XCTAssertEqual(adopted(candidates.shuffled(using: &rng), activeSince: since), result, "seed \(seed): the scan order does not matter")
             for (earlier, later) in zip(result, result.dropFirst()) {
                 XCTAssertLessThanOrEqual(earlier.modified!, later.modified!, "seed \(seed): oldest first")
             }

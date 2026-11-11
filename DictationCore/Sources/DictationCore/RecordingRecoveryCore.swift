@@ -15,7 +15,11 @@ import Foundation
 /// | name | is `<UUID>.wav` | the recorder did not write it |
 /// | History reference | none | a row already owns it |
 /// | last modified | before this process launched | this process may still be writing it, or the date is unknown |
+/// | last modified | after `recoveryActiveSince` | it predates the first launch that recovers, so a build that did not delete discarded audio may have left it |
 /// | audio duration | at least `minimumDuration` | it is too short to be a recording, or is not readable audio |
+///
+/// `recoveryActiveSince` is the launch date of the first launch that ran
+/// recovery. On that launch it equals `launchedAt`, so nothing is adopted.
 ///
 /// The result is ordered oldest first, then by path, so the rows are added
 /// to History in the order they were recorded.
@@ -50,13 +54,14 @@ public enum RecordingRecoveryCore {
     /// The files to adopt, oldest first.
     public static func filesToAdopt(
         _ candidates: [Candidate],
+        recoveryActiveSince: Date,
         launchedAt: Date,
         minimumDuration: TimeInterval
     ) -> [Candidate] {
         let adopted: [(candidate: Candidate, modified: Date)] = candidates.compactMap { candidate in
             guard isRecorderFileName(candidate.url.lastPathComponent),
                   !candidate.isReferenced,
-                  let modified = candidate.modified, modified < launchedAt,
+                  let modified = candidate.modified, modified > recoveryActiveSince, modified < launchedAt,
                   let duration = candidate.duration, duration.isFinite, duration >= minimumDuration
             else { return nil }
             return (candidate, modified)

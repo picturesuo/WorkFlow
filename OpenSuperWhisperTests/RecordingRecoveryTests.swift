@@ -18,17 +18,25 @@ final class RecordingRecoveryTests: XCTestCase {
     /// Audio that moved into the test History folder.
     private var historyAudio: [URL] = []
     private let launchedAt = Date()
+    /// A private preferences suite. Recovery has been active in it since
+    /// long before every fixture, unless a test says otherwise.
+    private var defaults: UserDefaults!
+    private var suiteName: String!
 
     // Async, so both run on the main actor with the rest of the class.
     override func setUp() async throws {
         directory = FileManager.default.temporaryDirectory
             .appendingPathComponent("RecordingRecoveryTests-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        suiteName = "RecordingRecoveryTests-\(UUID().uuidString)"
+        defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        defaults.set(launchedAt.addingTimeInterval(-30 * 86_400), forKey: RecordingRecovery.activeSinceKey)
     }
 
     override func tearDown() async throws {
         try? FileManager.default.removeItem(at: directory)
         for url in historyAudio { try? FileManager.default.removeItem(at: url) }
+        defaults.removePersistentDomain(forName: suiteName)
     }
 
     // MARK: - The loss
@@ -394,6 +402,79 @@ final class RecordingRecoveryTests: XCTestCase {
         XCTAssertEqual(rows.count, 0)
     }
 
+    // MARK: - Recordings from before recovery existed
+
+    func testTheFirstLaunchAdoptsNothingAndLaterLaunchesAdoptOnlyNewerRecordings() async throws {
+        let store = try makeStore()
+        defaults.removeObject(forKey: RecordingRecovery.activeSinceKey)
+        let firstLaunch = launchedAt.addingTimeInterval(-3_600)
+        // Left by a build that did not delete a deleted row's audio: one
+        // finished, one whose header was never finished.
+        let leftovers = [
+            try makeRecording(seconds: 1, modified: launchedAt.addingTimeInterval(-3 * 86_400)),
+            try makeUnfinishedRecording(.killed, seconds: 1, modified: launchedAt.addingTimeInterval(-7_200)),
+        ]
+        let before = try leftovers.map { try Snapshot(of: $0) }
+
+        let first = await adopt(into: store, launchedAt: firstLaunch)
+
+        XCTAssertEqual(first, 0, "Before the guard both came back as recovered rows")
+        XCTAssertEqual(defaults.object(forKey: RecordingRecovery.activeSinceKey) as? Date, firstLaunch)
+        XCTAssertEqual(try leftovers.map { try Snapshot(of: $0) }, before, "Not moved, repaired or redated")
+
+        // Lost by this build between its first launch and the next one.
+        let lost = try makeRecording(seconds: 2, modified: launchedAt.addingTimeInterval(-1_800))
+
+        let second = await adopt(into: store)
+        let third = await adopt(into: store, launchedAt: launchedAt.addingTimeInterval(3_600))
+
+        XCTAssertEqual(second, 1)
+        XCTAssertEqual(third, 0, "The older leftovers are never adopted")
+        let row = try await onlyRow(in: store)
+        XCTAssertEqual(row.duration, 2, accuracy: 0.01)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: lost.path))
+        XCTAssertEqual(try leftovers.map { try Snapshot(of: $0) }, before, "Left for the 24-hour sweep")
+        XCTAssertEqual(try contents(of: directory), Set(leftovers.map(\.lastPathComponent)))
+        XCTAssertEqual(defaults.object(forKey: RecordingRecovery.activeSinceKey) as? Date, firstLaunch,
+                       "Later launches do not move the date")
+    }
+
+    func testTheFirstLaunchStoresTheDateEvenWhenThePassIsSkipped() async throws {
+        let store = try makeStore()
+        defaults.removeObject(forKey: RecordingRecovery.activeSinceKey)
+        let orphan = try makeRecording(seconds: 1)
+        let before = try Snapshot(of: orphan)
+
+        let skipped = await adopt(into: store, anotherWorkFlowIsRunning: true)
+        let later = await adopt(into: store, launchedAt: launchedAt.addingTimeInterval(3_600))
+
+        XCTAssertEqual(skipped, 0)
+        XCTAssertEqual(later, 0, "It predates the first launch of a build that recovers")
+        XCTAssertEqual(defaults.object(forKey: RecordingRecovery.activeSinceKey) as? Date, launchedAt)
+        XCTAssertEqual(try Snapshot(of: orphan), before)
+    }
+
+    func testAMissingOrUnreadableDateIsSetAgainAndNothingIsAdopted() async throws {
+        let unreadable: [Any?] = [nil, "yesterday", 12.5]
+        for value in unreadable {
+            let store = try makeStore()
+            // Would be adopted if the date recovery became active were known.
+            let orphan = try makeRecording(seconds: 1)
+            let before = try Snapshot(of: orphan)
+            defaults.set(value, forKey: RecordingRecovery.activeSinceKey)
+
+            let adopted = await adopt(into: store)
+
+            XCTAssertEqual(adopted, 0, "\(String(describing: value)): skip, never resurrect")
+            XCTAssertEqual(defaults.object(forKey: RecordingRecovery.activeSinceKey) as? Date, launchedAt,
+                           "\(String(describing: value))")
+            let rows = try await rows(in: store)
+            XCTAssertEqual(rows.count, 0)
+            XCTAssertEqual(try Snapshot(of: orphan), before)
+            try FileManager.default.removeItem(at: orphan)
+        }
+    }
+
     // MARK: - Another WorkFlow
 
     func testOnlyAnotherWorkFlowProcessCountsAsSharingTheFolder() {
@@ -429,12 +510,14 @@ final class RecordingRecoveryTests: XCTestCase {
     @discardableResult
     private func adopt(
         into store: RecordingStore,
+        launchedAt: Date? = nil,
         anotherWorkFlowIsRunning: Bool = false,
         keepAudio: ((URL, URL) -> URL?)? = nil
     ) async -> Int {
         await RecordingRecovery.adoptOrphans(
             in: directory,
-            launchedAt: launchedAt,
+            launchedAt: launchedAt ?? self.launchedAt,
+            defaults: defaults,
             store: store,
             cleanupPipeline: makeLocalPipeline(),
             anotherWorkFlowIsRunning: { anotherWorkFlowIsRunning },
