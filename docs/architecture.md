@@ -23,7 +23,7 @@ event sources            pure core                    effect runner             
 
 | Module | Holds | May import |
 |---|---|---|
-| `DictationCore` (package) | reducers, states, events, effects | Foundation |
+| `DictationCore` (package) | reducers, states, events, effects; pure decisions without a machine (`RecordingRecoveryCore`, `WAVLayoutCore`) | Foundation |
 | App: runners (`AudioRecorder`, `ShortcutManager`, `ProcessExitGate`, later a dictation session store) | state ownership, effect execution, hardware and OS calls | DictationCore, AVFoundation, AppKit |
 | App: services (engines, cleanup pipeline, `RecordingStore`) | work the effects ask for | no UI |
 | App: views and view models | rendering, user intent to events | SwiftUI |
