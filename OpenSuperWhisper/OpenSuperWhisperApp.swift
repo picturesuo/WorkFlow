@@ -165,9 +165,12 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
         }
 
         OpenSuperWhisperApp.startTranscriptionQueue()
-        // Stale temporary recordings go only once History says which ones it
-        // still uses (queued, or kept after a failed move); if it cannot say, none go.
+        // Recordings a WorkFlow left behind when it closed before saving them
+        // are adopted into History first. Then stale temporary recordings go,
+        // only once History says which ones it still uses (queued, or kept
+        // after a failed move); if it cannot say, none go.
         Task { @MainActor in
+            await RecordingRecovery.adoptOrphansAtLaunch()
             guard let referenced = try? await RecordingStore.shared.referencedAudioPaths() else { return }
             AudioRecorder.shared.sweepTemporaryRecordings(keeping: referenced)
         }
