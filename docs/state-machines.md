@@ -19,7 +19,7 @@ Order of work: what a user feels comes first (latency they wait through, hangs a
 | 5 | Dictation session | The main window keeps a second copy of the dictation state and shows "Ready to dictate" while a hotkey dictation records; clicking record raises an error alert | Confusing, no data loss | failing test | proven (test) |
 | 6 | Dictation session | A press shortly after a stop is treated three ways depending on timing (see below) | Either the new speech is not recorded, or the older text is never pasted | characterized by test | product decision, not changed |
 | 7 | Transcription queue, engine reservation | Flags plus database status as state; sentinel strings decide "is this a regeneration" | none observed | none | suspected |
-| 8 | Dictation session | A live dictation gets its first History row only after transcription, cleanup and paste. If the process dies before that (quit, crash, force quit), only the temporary audio file exists; launch recovery reads rows only, and the launch sweep deletes the file once it is 24 hours old. A meeting that dies before it is stopped is lost the same way. | Silently lost dictation or meeting | source trace (first row written in `IndicatorViewModel.finishDictation` in `IndicatorWindow.swift`, after paste; `TranscriptionQueue` launch recovery, `startProcessingQueue` and `cleanupMissingFiles`, reads pending rows only; `AudioRecorder.sweepTemporaryRecordings`) | proven by trace, no failing test yet; not fixed: adopting orphaned audio into History is a privacy and product decision |
+| 8 | Dictation session | A live dictation gets its first History row only after transcription, cleanup and paste. If the process died before that (quit, crash, force quit), only the temporary audio file existed; launch recovery read rows only, and the launch sweep deleted the file once it was 24 hours old. A meeting that died before it was stopped was lost the same way. | Silently lost dictation or meeting | failing test (`RecordingRecoveryTests.testAnOrphanedRecordingBecomesOneFailedRowWithItsAudioAndDate`) | fixed: launch adopts the orphaned audio as a failed row with Regenerate (see below) |
 
 ## 1. Process exit (`ExitGateCore`)
 
@@ -138,13 +138,32 @@ Finding 6, the three timing windows after a stop. A new press:
 - while the older one is in cleanup: recording starts, the older dictation is retired (History only).
 "The newest dictation is the one pasted" is a deliberate, tested policy (`LatestDictationDeliveryTests`), so this is recorded, not changed. Recommendation: deliver every stopped dictation, in stop order, and never refuse a recording because a previous dictation is still processing.
 
-**Lost on process death (finding 8).** A live dictation is written to History only in `IndicatorViewModel.finishDictation`, after transcription, cleanup and paste, so a quit, crash or force quit before then leaves only the temporary `<UUID>.wav` file. Launch recovery in `TranscriptionQueue` reads pending rows only, and `AudioRecorder.sweepTemporaryRecordings` deletes unreferenced temporary files once they are 24 hours old; a meeting that dies before `MeetingSessionController.stop` is lost the same way.
+**Lost on process death (finding 8), fixed.** A live dictation is still written to History only in `IndicatorViewModel.finishDictation`, after transcription, cleanup and paste, so a quit, crash or force quit before then leaves only the temporary `<UUID>.wav` file. Launch recovery in `TranscriptionQueue` reads pending rows only, and `AudioRecorder.sweepTemporaryRecordings` deletes unreferenced temporary files once they are 24 hours old. Meetings (before `MeetingSessionController.stop` queues them) and filter-assistant voice input are written by the same recorder to the same folder under the same `<UUID>.wav` names.
 
-Two cases are recovered: queued imports, and dictations stopped while the engine was busy, because both get a pending row at stop through `TranscriptionQueue.addFileToQueue`.
+Launch now adopts that audio before the sweep runs (`RecordingRecovery.adoptOrphansAtLaunch`, called from `applicationDidFinishLaunching`). The decision is the pure `RecordingRecoveryCore.filesToAdopt` in `DictationCore`; the runner only reads the folder, asks History what it references, and adds the rows.
 
-Recommended design: at launch, before the sweep, adopt every unreferenced `<UUID>.wav` file that predates the launch and holds at least 0.35 s of audio as a failed row with its audio and a Regenerate action, and skip this while another WorkFlow process runs. Reuse `RecordingStore.addFailedDictation`, with the file's date and an option to keep the file when the insert fails. Model the tests on `QueuedAudioRetentionTests`.
+| Fact about a file in the temporary folder | Adopted | Left in place because |
+|---|---|---|
+| name | is `<UUID>.wav` | the recorder did not write it |
+| History or queue reference | none | a row already owns it |
+| last modified | before this process launched | this process may still be writing it, or the date is unknown |
+| audio duration | at least 0.35 s (`AudioRecorder.minimumRecordingDuration`) | it is too short to be a recording, or is not readable audio |
 
-It is a decision, not a fix, because it would bring back audio the user never saw saved: a recording discarded by force-quitting, filter-assistant voice input and meeting audio share the folder, and every WorkFlow build shares it too.
+Each adopted file becomes a failed row through `RecordingStore.addFailedDictation`, dated with the file's modification date, with the message "Recovered recording - WorkFlow closed before this was transcribed. Select Regenerate to transcribe it." under the usual "Transcription failed" title. Its audio moves into History the way every failed dictation's does, so play, Regenerate, delete and retention treat it like any other failed row. Nothing is transcribed, pasted or copied until the user chooses Regenerate, which uses the cleanup filter that was selected at the launch that recovered it. A recovered meeting or filter-assistant recording cannot be told apart from a dictation by its file, so it is recovered as a dictation row too.
+
+Invariants (tested in `RecordingRecoveryTests` and `RecordingRecoveryCoreTests`):
+- The pass never deletes a file. A file it does not adopt is not moved, rewritten or redated, and the 24-hour sweep remains the only thing that removes it.
+- The whole pass is skipped while another WorkFlow process runs, because every WorkFlow build shares the folder and an unreferenced file may be one the other process is still transcribing. "Another WorkFlow" is a running application, other than this process, whose bundle identifier is this build's, `com.picturesuo.WorkFlow`, or a legacy identity (`RecordingRecovery.isAnotherWorkFlowRunning`).
+- If History cannot say what it references, or cannot save the row, nothing is adopted: a failed save puts the audio back where it was found, for the next launch and the sweep.
+- A second pass adopts nothing: adopted audio has left the folder, or is referenced by its row when it could not move.
+- Deleting a History row also deletes its audio that is still in the temporary folder (a queued row, or audio kept there after a failed move), so launch recovery never brings back a recording the user deleted (`testDeletingARowDeletesItsTemporaryAudioSoItIsNeverRecovered`).
+
+Two cases were already recovered and still are: queued imports, and dictations stopped while the engine was busy, because both get a pending row at stop through `TranscriptionQueue.addFileToQueue`.
+
+Limits, by decision:
+- A recording whose process died while it was still capturing is not recovered. The recorder fills in the WAV header's sizes only when it stops (see `GrowingWAVReader`), and a file whose sizes were never written does not open as audio, so it is left for the sweep (`testFilesThatAreNotOrphanedRecordingsAreLeftUntouched` covers a header with zeroed sizes; a real killed capture was not reproduced). Recovering it would mean reading the samples past the header, as `GrowingWAVReader` does.
+- A recording the user meant to discard by force-quitting comes back as a recovered row; they delete it from History like any other.
+- When a launch skips the pass because another WorkFlow is running, its files wait for the next launch. The sweep still runs on that launch, so a file already older than 24 hours is deleted then, as it was before.
 
 ## 7. Transcription queue and engine reservation (suspected only)
 
