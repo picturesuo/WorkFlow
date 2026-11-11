@@ -19,13 +19,14 @@ final class RecordingRecoveryTests: XCTestCase {
     private var historyAudio: [URL] = []
     private let launchedAt = Date()
 
-    override func setUpWithError() throws {
+    // Async, so both run on the main actor with the rest of the class.
+    override func setUp() async throws {
         directory = FileManager.default.temporaryDirectory
             .appendingPathComponent("RecordingRecoveryTests-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
     }
 
-    override func tearDownWithError() throws {
+    override func tearDown() async throws {
         try? FileManager.default.removeItem(at: directory)
         for url in historyAudio { try? FileManager.default.removeItem(at: url) }
     }
