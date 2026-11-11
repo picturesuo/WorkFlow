@@ -336,11 +336,13 @@ final class FilterAssistantVoiceInput: ObservableObject {
     func stop() {
         guard state == .recording, let id = sessionID else { return }
         state = .transcribing
-        transcriptionTask = Task { [weak self] in
-            guard let self else { return }
-            let url = await self.dependencies.stop(id)
-            guard self.sessionID == id else {
-                if let url { self.dependencies.removeFile(url) }
+        // The recorder is stopped and its audio removed even if this object
+        // is gone by the time the task runs: a recording left running would
+        // keep the microphone and leave its file in the temporary folder.
+        transcriptionTask = Task { [weak self, dependencies] in
+            let url = await dependencies.stop(id)
+            guard let self, self.sessionID == id else {
+                if let url { dependencies.removeFile(url) }
                 return
             }
             defer {

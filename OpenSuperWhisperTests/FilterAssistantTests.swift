@@ -749,6 +749,27 @@ final class FilterAssistantVoiceInputTests: XCTestCase {
         }
     }
 
+    /// The composer can go away in the same turn Stop was pressed. The
+    /// recorder must still be stopped and its audio removed: left recording,
+    /// the file would stay in the temporary folder and launch recovery would
+    /// bring back a spoken request that was never meant for History.
+    func testReleasingTheComposerRightAfterStopStillStopsTheRecorderAndRemovesTheAudio() async throws {
+        var voice: FilterAssistantVoiceInput? = makeVoice(
+            service: TranscriptionService(engine: StubTranscriptionEngine(text: "unused"))
+        )
+        voice?.start()
+        voice?.stop()
+        voice = nil
+
+        for _ in 0..<200 where removed.isEmpty {
+            try? await Task.sleep(nanoseconds: 5_000_000)
+        }
+        XCTAssertEqual(stopped, started, "Before the fix the recorder was never stopped")
+        XCTAssertEqual(started.count, 1)
+        XCTAssertEqual(removed, [audioURL])
+        XCTAssertFalse(FileManager.default.fileExists(atPath: audioURL.path))
+    }
+
     func testSpokenRequestReachesOnlyTheComposer() async throws {
         let engine = StubTranscriptionEngine(text: " Use the square root sign. ")
         let service = TranscriptionService(engine: engine)
