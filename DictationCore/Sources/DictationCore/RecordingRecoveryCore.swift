@@ -40,7 +40,11 @@ public enum RecordingRecoveryCore {
 
     /// True for the names the recorder gives its files: `<UUID>.wav`.
     public static func isRecorderFileName(_ name: String) -> Bool {
-        false
+        let suffix = ".wav"
+        guard name.hasSuffix(suffix) else { return false }
+        let stem = name.dropLast(suffix.count)
+        // Only the 36-character hyphenated form, the one the recorder writes.
+        return stem.count == 36 && UUID(uuidString: String(stem)) != nil
     }
 
     /// The files to adopt, oldest first.
@@ -49,6 +53,20 @@ public enum RecordingRecoveryCore {
         launchedAt: Date,
         minimumDuration: TimeInterval
     ) -> [Candidate] {
-        []
+        let adopted: [(candidate: Candidate, modified: Date)] = candidates.compactMap { candidate in
+            guard isRecorderFileName(candidate.url.lastPathComponent),
+                  !candidate.isReferenced,
+                  let modified = candidate.modified, modified < launchedAt,
+                  let duration = candidate.duration, duration.isFinite, duration >= minimumDuration
+            else { return nil }
+            return (candidate, modified)
+        }
+        return adopted
+            .sorted { first, second in
+                first.modified != second.modified
+                    ? first.modified < second.modified
+                    : first.candidate.url.path < second.candidate.url.path
+            }
+            .map(\.candidate)
     }
 }
