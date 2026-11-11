@@ -128,7 +128,12 @@ final class RecordingRecoveryTests: XCTestCase {
         try Data("not audio".utf8).write(to: notAudio)
         try setModificationDate(launchedAt.addingTimeInterval(-60), of: notAudio)
         let otherName = try makeRecording(seconds: 1, name: "meeting-notes.wav")
-        let files = [referenced, recordedAfterLaunch, tooShort, notAudio, otherName]
+        // A capture that never stopped: the recorder fills in the header's
+        // sizes only when it stops, so the file does not open as audio.
+        let neverStopped = try makeRecording(seconds: 1)
+        try zeroHeaderSizes(of: neverStopped)
+        XCTAssertNil(RecordingRecovery.audioDuration(of: neverStopped))
+        let files = [referenced, recordedAfterLaunch, tooShort, notAudio, otherName, neverStopped]
         let before = try files.map { try Snapshot(of: $0) }
 
         let adopted = await adopt(into: store)
@@ -160,12 +165,7 @@ final class RecordingRecoveryTests: XCTestCase {
     func testAFailedInsertLeavesTheRecordingInPlace() async throws {
         let database = try DatabaseQueue()
         let store = try makeStore(database)
-        try await database.write { db in
-            try db.execute(sql: """
-                CREATE TRIGGER refuse_rows BEFORE INSERT ON \(Recording.databaseTableName)
-                BEGIN SELECT RAISE(ABORT, 'History refuses rows in this test'); END
-                """)
-        }
+        try await refuseRows(in: database)
         let orphan = try makeRecording(seconds: 1)
         let before = try Snapshot(of: orphan)
         var historyURL: URL?
@@ -186,6 +186,31 @@ final class RecordingRecoveryTests: XCTestCase {
         let retried = await adopt(into: store)
         XCTAssertEqual(retried, 1, "The next launch adopts it")
         _ = try await onlyRow(in: store)
+    }
+
+    func testAFailedSaveStillDeletesAnOrdinaryFailedDictationsAudio() async throws {
+        let database = try DatabaseQueue()
+        let store = try makeStore(database)
+        try await refuseRows(in: database)
+        let recorded = try makeRecording(seconds: 1)
+        var historyURL: URL?
+
+        let saved = await store.addFailedDictation(
+            audioAt: recorded,
+            error: TranscriptionError.processingFailed,
+            duration: 1,
+            selectedFilter: .builtIn(.everyday),
+            cleanupRequested: false,
+            targetBundleID: nil,
+            recordingStartedAt: nil
+        ) { temporary, final in
+            historyURL = final
+            return AudioRecorder.shared.keepTemporaryRecording(temporary, at: final)
+        }
+
+        XCTAssertFalse(saved)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: recorded.path), "Only recovery asks for the audio back")
+        XCTAssertFalse(FileManager.default.fileExists(atPath: try XCTUnwrap(historyURL).path))
     }
 
     // MARK: - Once only
@@ -256,6 +281,7 @@ final class RecordingRecoveryTests: XCTestCase {
 
     // MARK: - Fixtures
 
+    @discardableResult
     private func adopt(
         into store: RecordingStore,
         anotherWorkFlowIsRunning: Bool = false,
@@ -323,6 +349,39 @@ final class RecordingRecoveryTests: XCTestCase {
         writer = nil
         try setModificationDate(modified ?? launchedAt.addingTimeInterval(-60), of: url)
         return url
+    }
+
+    /// Makes every insert into History fail until the trigger is dropped.
+    private func refuseRows(in database: DatabaseQueue) async throws {
+        try await database.write { db in
+            try db.execute(sql: """
+                CREATE TRIGGER refuse_rows BEFORE INSERT ON \(Recording.databaseTableName)
+                BEGIN SELECT RAISE(ABORT, 'History refuses rows in this test'); END
+                """)
+        }
+    }
+
+    /// Zeroes the RIFF and data chunk sizes, keeping the file's date.
+    private func zeroHeaderSizes(of url: URL) throws {
+        let modified = try modificationDate(of: url)
+        var bytes = [UInt8](try Data(contentsOf: url))
+        var offset = 12
+        var dataSizeOffset: Int?
+        while offset + 8 <= bytes.count {
+            let size = (0..<4).reduce(0) { $0 | Int(bytes[offset + 4 + $1]) << (8 * $1) }
+            if bytes[offset..<offset + 4].elementsEqual(Array("data".utf8)) {
+                dataSizeOffset = offset + 4
+                break
+            }
+            offset += 8 + size + size % 2
+        }
+        let sizeOffset = try XCTUnwrap(dataSizeOffset, "The fixture has a data chunk")
+        for index in 0..<4 {
+            bytes[4 + index] = 0
+            bytes[sizeOffset + index] = 0
+        }
+        try Data(bytes).write(to: url)
+        try setModificationDate(modified, of: url)
     }
 
     private func setModificationDate(_ date: Date, of url: URL) throws {

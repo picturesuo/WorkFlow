@@ -634,22 +634,28 @@ class RecordingStore: ObservableObject {
     /// audio, the way the queue keeps its failures, so Regenerate can retry
     /// it. `keepAudio` moves the audio into History and returns where it is
     /// left. Returns whether History saved the row.
+    ///
+    /// A recording recovered at launch passes its file's date as `timestamp`
+    /// and sets `keepAudioIfUnsaved`, so a failed save puts the audio back at
+    /// `tempURL` for a later launch instead of deleting it.
     func addFailedDictation(
         audioAt tempURL: URL,
         error: Error,
         duration: TimeInterval,
+        timestamp: Date = Date(),
         selectedFilter: CleanupFilterSnapshot,
         autoConfig: FilterAutoConfig? = nil,
         cleanupRequested: Bool,
         targetBundleID: String?,
         recordingStartedAt: Date?,
+        keepAudioIfUnsaved: Bool = false,
         keepAudio: (URL, URL) -> URL?
     ) async -> Bool {
         let filter = cleanupRequested ? selectedFilter : nil
         let id = UUID()
         var recording = Recording(
             id: id,
-            timestamp: Date(),
+            timestamp: timestamp,
             fileName: AudioRecorder.recordingFileName(id: id),
             transcription: TranscriptionQueue.failedTranscriptionText(error),
             duration: duration,
@@ -688,7 +694,13 @@ class RecordingStore: ObservableObject {
             return true
         } catch {
             // No History row owns this audio.
-            if let audioURL { try? FileManager.default.removeItem(at: audioURL) }
+            if let audioURL {
+                if !keepAudioIfUnsaved {
+                    try? FileManager.default.removeItem(at: audioURL)
+                } else if audioURL != tempURL {
+                    try? FileManager.default.moveItem(at: audioURL, to: tempURL)
+                }
+            }
             print("Failed to save the failed dictation to History.")
             return false
         }

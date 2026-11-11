@@ -201,15 +201,26 @@ enum PerfSignpost {
 
     /// From the kernel's record of when this process started.
     private static func millisecondsSinceProcessStart() -> Double? {
-        var info = kinfo_proc()
-        var size = MemoryLayout<kinfo_proc>.stride
-        var mib: [Int32] = [CTL_KERN, KERN_PROC, KERN_PROC_PID, getpid()]
-        guard sysctl(&mib, u_int(mib.count), &info, &size, nil, 0) == 0 else { return nil }
-        let start = info.kp_proc.p_starttime
+        guard let start = processStartTime() else { return nil }
         var now = timeval()
         gettimeofday(&now, nil)
         let seconds = Double(now.tv_sec - start.tv_sec) + Double(now.tv_usec - start.tv_usec) / 1_000_000
         return seconds * 1_000
+    }
+
+    /// When the kernel started this process; nil if it cannot say.
+    static func processStartDate() -> Date? {
+        processStartTime().map {
+            Date(timeIntervalSince1970: Double($0.tv_sec) + Double($0.tv_usec) / 1_000_000)
+        }
+    }
+
+    private static func processStartTime() -> timeval? {
+        var info = kinfo_proc()
+        var size = MemoryLayout<kinfo_proc>.stride
+        var mib: [Int32] = [CTL_KERN, KERN_PROC, KERN_PROC_PID, getpid()]
+        guard sysctl(&mib, u_int(mib.count), &info, &size, nil, 0) == 0 else { return nil }
+        return info.kp_proc.p_starttime
     }
 
     // OSSignposter names must be static strings.
