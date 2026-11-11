@@ -129,19 +129,29 @@ final class RecordingRecoveryTests: XCTestCase {
         try Data("not audio".utf8).write(to: notAudio)
         try setModificationDate(launchedAt.addingTimeInterval(-60), of: notAudio)
         let otherName = try makeRecording(seconds: 1, name: "meeting-notes.wav")
-        // A capture that never stopped: the recorder fills in the header's
-        // sizes only when it stops, so the file does not open as audio.
-        let neverStopped = try makeRecording(seconds: 1)
-        try zeroHeaderSizes(of: neverStopped)
-        XCTAssertNil(RecordingRecovery.audioDuration(of: neverStopped))
-        let files = [referenced, recordedAfterLaunch, tooShort, notAudio, otherName, neverStopped]
+        // Unfinished recordings the pass must not repair: too short, still
+        // being written by this process, not the recorder's name, already
+        // owned by a row, and floating-point audio the repair does not cover.
+        let unfinishedShort = try makeUnfinishedRecording(.killed, seconds: 0.2)
+        let unfinishedNow = try makeUnfinishedRecording(.killed, seconds: 1, modified: launchedAt.addingTimeInterval(5))
+        let unfinishedOtherName = try makeUnfinishedRecording(.killed, seconds: 1, name: "draft.wav")
+        let unfinishedReferenced = try makeUnfinishedRecording(.killed, seconds: 1)
+        try await store.addRecordingSync(Recording(
+            id: UUID(), timestamp: Date(), fileName: AudioRecorder.recordingFileName(), transcription: "", duration: 1,
+            status: .pending, progress: 0, sourceFileURL: unfinishedReferenced.path
+        ))
+        let unfinishedFloat = try makeUnfinishedRecording(.killed, seconds: 1, isFloat: true)
+        let files = [
+            referenced, recordedAfterLaunch, tooShort, notAudio, otherName,
+            unfinishedShort, unfinishedNow, unfinishedOtherName, unfinishedReferenced, unfinishedFloat,
+        ]
         let before = try files.map { try Snapshot(of: $0) }
 
         let adopted = await adopt(into: store)
 
         XCTAssertEqual(adopted, 0)
         let rows = try await rows(in: store)
-        XCTAssertEqual(rows.map(\.status), [.pending], "Only the row that was already there")
+        XCTAssertEqual(rows.map(\.status), [.pending, .pending], "Only the rows that were already there")
         XCTAssertEqual(try files.map { try Snapshot(of: $0) }, before, "Nothing was moved, rewritten or deleted")
         XCTAssertEqual(try contents(of: directory), Set(files.map(\.lastPathComponent)))
     }
@@ -212,6 +222,103 @@ final class RecordingRecoveryTests: XCTestCase {
         XCTAssertFalse(saved)
         XCTAssertFalse(FileManager.default.fileExists(atPath: recorded.path), "Only recovery asks for the audio back")
         XCTAssertFalse(FileManager.default.fileExists(atPath: try XCTUnwrap(historyURL).path))
+    }
+
+    // MARK: - Killed while recording
+
+    func testARecordingKilledMidCaptureIsRepairedAndAdopted() async throws {
+        // What each unfinished header reads as before recovery, in frames,
+        // and whether recovery has to rewrite its sizes.
+        let table: [(kind: Unfinished, readsAs: AVAudioFramePosition?, isPatched: Bool)] = [
+            (.killed, 0, true),
+            (.killedWithPartialFrame, 0, true),
+            (.riffSizeNeverFilled, 2, true),
+            (.noSizes, nil, true),
+            (.allOnes, 16_000, false),
+            (.declaresMoreThanIsOnDisk, 16_000, false),
+        ]
+        for row in table {
+            let store = try makeStore()
+            let orphan = try makeUnfinishedRecording(row.kind, seconds: 1, modified: launchedAt.addingTimeInterval(-7_200))
+            let recordedAt = try modificationDate(of: orphan)
+            let before = try Data(contentsOf: orphan)
+            let samples = try payload(of: before, frames: 16_000)
+            XCTAssertEqual(try? AVAudioFile(forReading: orphan).length, row.readsAs, "\(row.kind) before recovery")
+
+            let adopted = await adopt(into: store)
+
+            XCTAssertEqual(adopted, 1, "\(row.kind)")
+            let saved = try await onlyRow(in: store)
+            XCTAssertEqual(saved.status, .failed, "\(row.kind)")
+            XCTAssertEqual(saved.duration, 1, accuracy: 0.001, "\(row.kind): the audio on disk, not what the header declared")
+            XCTAssertEqual(saved.timestamp.timeIntervalSince1970, recordedAt.timeIntervalSince1970, accuracy: 0.002,
+                           "\(row.kind): dated before the repair touched the file")
+            let playable = try XCTUnwrap(saved.playableAudioURL, "\(row.kind)")
+            XCTAssertEqual(try AVAudioFile(forReading: playable).length, 16_000, "\(row.kind): Regenerate can read every frame")
+            let after = try Data(contentsOf: playable)
+            XCTAssertEqual(try payload(of: after, frames: 16_000), samples, "\(row.kind): no sample changed")
+            XCTAssertEqual(after.count, before.count, "\(row.kind): only size fields are ever rewritten")
+            XCTAssertEqual(after != before, row.isPatched, "\(row.kind)")
+            XCTAssertEqual(try contents(of: directory), [], "\(row.kind)")
+        }
+    }
+
+    func testTheFixtureMatchesAKilledCoreAudioWriter() throws {
+        // A writer killed with SIGKILL left: JUNK, fmt, a FLLR filler up to
+        // byte 4,096, RIFF size 4,088, data size 0, and every sample on disk.
+        let bytes = [UInt8](try Data(contentsOf: try makeUnfinishedRecording(.killed, seconds: 1)))
+        XCTAssertEqual(String(bytes: bytes[12..<16], encoding: .ascii), "JUNK")
+        XCTAssertEqual(String(bytes: bytes[48..<52], encoding: .ascii), "fmt ")
+        XCTAssertEqual(String(bytes: bytes[72..<76], encoding: .ascii), "FLLR")
+        XCTAssertEqual(String(bytes: bytes[4_088..<4_092], encoding: .ascii), "data")
+        XCTAssertEqual(Array(bytes[4..<8]), [0xF8, 0x0F, 0, 0])
+        XCTAssertEqual(Array(bytes[4_092..<4_096]), [0, 0, 0, 0])
+        XCTAssertEqual(bytes.count, 4_096 + 32_000)
+    }
+
+    func testNothingIsRepairedWhileAnotherWorkFlowIsRunning() async throws {
+        let store = try makeStore()
+        let orphan = try makeUnfinishedRecording(.killed, seconds: 1)
+        let before = try Snapshot(of: orphan)
+
+        let adopted = await adopt(into: store, anotherWorkFlowIsRunning: true)
+
+        XCTAssertEqual(adopted, 0)
+        XCTAssertEqual(try Snapshot(of: orphan), before, "The other WorkFlow may still be writing it")
+    }
+
+    func testARepairThatCannotBeWrittenLeavesTheFileUntouchedAndUnadopted() async throws {
+        let store = try makeStore()
+        let orphan = try makeUnfinishedRecording(.killed, seconds: 1)
+        try FileManager.default.setAttributes([.posixPermissions: 0o444], ofItemAtPath: orphan.path)
+        let before = try Snapshot(of: orphan)
+
+        let adopted = await adopt(into: store)
+
+        XCTAssertEqual(adopted, 0, "A row whose audio the engine cannot read would promise a Regenerate that fails")
+        let rows = try await rows(in: store)
+        XCTAssertEqual(rows.count, 0)
+        XCTAssertEqual(try Snapshot(of: orphan), before)
+    }
+
+    func testARepairedRecordingKeepsItsDateWhenHistoryCannotSaveIt() async throws {
+        let database = try DatabaseQueue()
+        let store = try makeStore(database)
+        try await refuseRows(in: database)
+        let orphan = try makeUnfinishedRecording(.killed, seconds: 1, modified: launchedAt.addingTimeInterval(-7_200))
+        let recordedAt = try modificationDate(of: orphan)
+
+        let adopted = await adopt(into: store)
+
+        XCTAssertEqual(adopted, 0)
+        XCTAssertEqual(try AVAudioFile(forReading: orphan).length, 16_000, "Back where it was found, now readable")
+        XCTAssertEqual(try modificationDate(of: orphan), recordedAt, "Still dated when it was recorded")
+
+        try await database.write { db in try db.execute(sql: "DROP TRIGGER refuse_rows") }
+        let retried = await adopt(into: store)
+        XCTAssertEqual(retried, 1)
+        let saved = try await onlyRow(in: store)
+        XCTAssertEqual(saved.timestamp.timeIntervalSince1970, recordedAt.timeIntervalSince1970, accuracy: 0.002)
     }
 
     // MARK: - Once only
@@ -366,15 +473,16 @@ final class RecordingRecoveryTests: XCTestCase {
     private func makeRecording(
         seconds: Double,
         name: String = AudioRecorder.recordingFileName(),
-        modified: Date? = nil
+        modified: Date? = nil,
+        isFloat: Bool = false
     ) throws -> URL {
         let url = directory.appendingPathComponent(name)
         let settings: [String: Any] = [
             AVFormatIDKey: Int(kAudioFormatLinearPCM),
             AVSampleRateKey: 16_000.0,
             AVNumberOfChannelsKey: 1,
-            AVLinearPCMBitDepthKey: 16,
-            AVLinearPCMIsFloatKey: false,
+            AVLinearPCMBitDepthKey: isFloat ? 32 : 16,
+            AVLinearPCMIsFloatKey: isFloat,
         ]
         var writer: AVAudioFile? = try AVAudioFile(forWriting: url, settings: settings)
         let frames = AVAudioFrameCount((seconds * 16_000).rounded())
@@ -400,27 +508,80 @@ final class RecordingRecoveryTests: XCTestCase {
         }
     }
 
-    /// Zeroes the RIFF and data chunk sizes, keeping the file's date.
-    private func zeroHeaderSizes(of url: URL) throws {
-        let modified = try modificationDate(of: url)
+    /// The header states a recording is left in when its writer never stopped.
+    private enum Unfinished {
+        /// What a killed CoreAudio writer leaves: the RIFF size covers only
+        /// the header, the data size is 0, every sample is on disk.
+        case killed
+        /// The same, killed halfway through writing a frame.
+        case killedWithPartialFrame
+        /// The data size was filled in but the RIFF size was not.
+        case riffSizeNeverFilled
+        /// Both sizes are 0.
+        case noSizes
+        /// Both sizes are 0xFFFFFFFF, a streaming writer's placeholder.
+        case allOnes
+        /// Sizes for twice the audio that reached the disk.
+        case declaresMoreThanIsOnDisk
+    }
+
+    /// Writes a finished recording, then rewrites its header and length the
+    /// way an interrupted writer would have left them.
+    private func makeUnfinishedRecording(
+        _ kind: Unfinished,
+        seconds: Double,
+        name: String = AudioRecorder.recordingFileName(),
+        modified: Date? = nil,
+        isFloat: Bool = false
+    ) throws -> URL {
+        let written = kind == .declaresMoreThanIsOnDisk ? seconds * 2 : seconds
+        let url = try makeRecording(seconds: written, name: name, modified: modified, isFloat: isFloat)
+        let date = try modificationDate(of: url)
         var bytes = [UInt8](try Data(contentsOf: url))
-        var offset = 12
-        var dataSizeOffset: Int?
-        while offset + 8 <= bytes.count {
-            let size = (0..<4).reduce(0) { $0 | Int(bytes[offset + 4 + $1]) << (8 * $1) }
-            if bytes[offset..<offset + 4].elementsEqual(Array("data".utf8)) {
-                dataSizeOffset = offset + 4
-                break
-            }
-            offset += 8 + size + size % 2
+        let dataOffset = try dataOffset(in: bytes)
+        func set(_ value: UInt32, at offset: Int) {
+            for index in 0..<4 { bytes[offset + index] = UInt8(truncatingIfNeeded: value >> (8 * index)) }
         }
-        let sizeOffset = try XCTUnwrap(dataSizeOffset, "The fixture has a data chunk")
-        for index in 0..<4 {
-            bytes[4 + index] = 0
-            bytes[sizeOffset + index] = 0
+        switch kind {
+        case .killed:
+            set(UInt32(dataOffset - 8), at: 4)
+            set(0, at: dataOffset - 4)
+        case .killedWithPartialFrame:
+            set(UInt32(dataOffset - 8), at: 4)
+            set(0, at: dataOffset - 4)
+            bytes.append(0x55)
+        case .riffSizeNeverFilled:
+            set(UInt32(dataOffset - 8), at: 4)
+        case .noSizes:
+            set(0, at: 4)
+            set(0, at: dataOffset - 4)
+        case .allOnes:
+            set(0xFFFF_FFFF, at: 4)
+            set(0xFFFF_FFFF, at: dataOffset - 4)
+        case .declaresMoreThanIsOnDisk:
+            bytes.removeLast((bytes.count - dataOffset) / 2)
         }
         try Data(bytes).write(to: url)
-        try setModificationDate(modified, of: url)
+        try setModificationDate(date, of: url)
+        return url
+    }
+
+    /// Where the samples of a fixture begin.
+    private func dataOffset(in bytes: [UInt8]) throws -> Int {
+        var offset = 12
+        var found: Int?
+        while found == nil, offset + 8 <= bytes.count {
+            if bytes[offset..<offset + 4].elementsEqual(Array("data".utf8)) { found = offset + 8 }
+            let size = (0..<4).reduce(0) { $0 | Int(bytes[offset + 4 + $1]) << (8 * $1) }
+            offset += 8 + size + size % 2
+        }
+        return try XCTUnwrap(found, "The fixture has a data chunk")
+    }
+
+    /// The first `frames` 16-bit samples of a fixture.
+    private func payload(of data: Data, frames: Int) throws -> Data {
+        let offset = try dataOffset(in: [UInt8](data))
+        return data.subdata(in: offset..<offset + frames * 2)
     }
 
     private func setModificationDate(_ date: Date, of url: URL) throws {

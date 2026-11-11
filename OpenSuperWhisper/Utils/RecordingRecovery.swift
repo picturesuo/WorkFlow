@@ -8,6 +8,13 @@ import Foundation
 /// reached History become failed History rows that keep their audio and
 /// offer Regenerate. Nothing is transcribed, pasted or copied here, and no
 /// file is ever deleted here: what is not adopted stays for the 24-hour sweep.
+///
+/// A recording whose process died while it was still capturing has every
+/// sample on disk behind a header that declares none, because the recorder
+/// fills in the sizes only when it stops. `WAVLayoutCore` finds that audio,
+/// and the two size fields are rewritten in place so the engine can read it
+/// on Regenerate. Those eight bytes, in a file this pass adopts, are the only
+/// ones it ever writes.
 @MainActor
 enum RecordingRecovery {
     /// Why a recovered row has no transcript. Its description is the row's
@@ -54,15 +61,20 @@ enum RecordingRecovery {
         guard !anotherWorkFlowIsRunning() else { return 0 }
         // If History cannot say what it references, nothing is adopted.
         guard let referenced = try? await store.referencedAudioPaths() else { return 0 }
-        let candidates = await Task.detached(priority: .utility) {
-            scan(directory, referenced: referenced)
+        let minimumDuration = AudioRecorder.minimumRecordingDuration
+        let scanned = await Task.detached(priority: .utility) {
+            scan(directory, referenced: referenced, minimumDuration: minimumDuration)
         }.value
         let orphans = RecordingRecoveryCore.filesToAdopt(
-            candidates,
+            scanned.map(\.candidate),
             launchedAt: launchedAt,
-            minimumDuration: AudioRecorder.minimumRecordingDuration
+            minimumDuration: minimumDuration
         )
         guard !orphans.isEmpty else { return 0 }
+        let repairs = Dictionary(
+            scanned.compactMap { file in file.repair.map { (file.candidate.url, $0) } },
+            uniquingKeysWith: { first, _ in first }
+        )
 
         // Regenerate uses the filter selected now, as for a queued recording:
         // the one selected when it was recorded is not known.
@@ -71,6 +83,15 @@ enum RecordingRecovery {
         var adopted = 0
         for orphan in orphans {
             guard let modified = orphan.modified, let duration = orphan.duration else { continue }
+            if let layout = repairs[orphan.url] {
+                // Only a file the core adopts is ever written to. A row whose
+                // audio the engine cannot read would offer a Regenerate that fails.
+                let url = orphan.url
+                let repaired = await Task.detached(priority: .utility) {
+                    repairHeader(of: url, layout, modified: modified)
+                }.value
+                guard repaired else { continue }
+            }
             let saved = await store.addFailedDictation(
                 audioAt: orphan.url,
                 error: ClosedBeforeTranscription(),
@@ -89,9 +110,21 @@ enum RecordingRecovery {
         return adopted
     }
 
+    /// One file in the folder: what the core decides on, and the header
+    /// repair it needs before it can be adopted, if any.
+    struct ScannedFile: Sendable {
+        let candidate: RecordingRecoveryCore.Candidate
+        let repair: WAVLayoutCore.Layout?
+    }
+
     /// Reads the folder: every regular file with its date, its audio length,
     /// and whether History references it. Nothing is changed.
-    nonisolated static func scan(_ directory: URL, referenced: Set<String>) -> [RecordingRecoveryCore.Candidate] {
+    ///
+    /// A file that reads as at least `minimumDuration` is taken as it is.
+    /// One that reads shorter, or not at all, is offered to `WAVLayoutCore`:
+    /// if its samples are on disk behind unfinished sizes, the audio found
+    /// there is its length and the layout is the repair it needs.
+    nonisolated static func scan(_ directory: URL, referenced: Set<String>, minimumDuration: TimeInterval) -> [ScannedFile] {
         let keys: Set<URLResourceKey> = [.contentModificationDateKey, .isRegularFileKey]
         guard let files = try? FileManager.default.contentsOfDirectory(
             at: directory,
@@ -99,13 +132,80 @@ enum RecordingRecovery {
         ) else { return [] }
         return files.compactMap { file in
             guard let values = try? file.resourceValues(forKeys: keys), values.isRegularFile == true else { return nil }
-            return RecordingRecoveryCore.Candidate(
-                url: file,
-                modified: values.contentModificationDate,
-                duration: audioDuration(of: file),
-                isReferenced: referenced.contains(file.standardizedFileURL.path)
+            var duration = audioDuration(of: file)
+            var repair: WAVLayoutCore.Layout?
+            if (duration ?? 0) < minimumDuration, let layout = unfinishedLayout(of: file), layout.duration >= minimumDuration {
+                duration = layout.duration
+                repair = layout
+            }
+            return ScannedFile(
+                candidate: RecordingRecoveryCore.Candidate(
+                    url: file,
+                    modified: values.contentModificationDate,
+                    duration: duration,
+                    isReferenced: referenced.contains(file.standardizedFileURL.path)
+                ),
+                repair: repair
             )
         }
+    }
+
+    /// The layout of a PCM WAV file whose header sizes were never finished;
+    /// nil for a file that needs no repair or is not such a file.
+    nonisolated static func unfinishedLayout(of url: URL) -> WAVLayoutCore.Layout? {
+        guard let handle = try? FileHandle(forReadingFrom: url) else { return nil }
+        defer { try? handle.close() }
+        guard let header = try? handle.read(upToCount: WAVLayoutCore.maximumHeaderBytes),
+              let fileSize = try? handle.seekToEnd(),
+              case let .success(layout) = WAVLayoutCore.layout(header: [UInt8](header), fileSize: Int(fileSize)),
+              layout.needsRepair
+        else { return nil }
+        return layout
+    }
+
+    /// Writes the two size fields `layout` asks for and checks that the file
+    /// then reads as the audio found on disk. On any failure the original
+    /// bytes are put back and false is returned. The file keeps `modified`
+    /// as its date either way, so a later launch still dates it correctly.
+    nonisolated static func repairHeader(of url: URL, _ layout: WAVLayoutCore.Layout, modified: Date) -> Bool {
+        // The file must still be what the scan saw.
+        guard unfinishedLayout(of: url) == layout, let handle = try? FileHandle(forUpdating: url) else { return false }
+        defer {
+            try? handle.close()
+            try? FileManager.default.setAttributes([.modificationDate: modified], ofItemAtPath: url.path)
+        }
+        func write(_ bytes: Data, at offset: Int) throws {
+            try handle.seek(toOffset: UInt64(offset))
+            try handle.write(contentsOf: bytes)
+        }
+        let fields = [
+            (offset: WAVLayoutCore.riffSizeFieldOffset, value: layout.repairedRIFFSize),
+            (offset: layout.dataSizeFieldOffset, value: layout.repairedDataSize),
+        ]
+        var originals: [(offset: Int, bytes: Data)] = []
+        var isRepaired = false
+        do {
+            for field in fields {
+                try handle.seek(toOffset: UInt64(field.offset))
+                guard let bytes = try handle.read(upToCount: 4), bytes.count == 4 else { return false }
+                originals.append((field.offset, bytes))
+            }
+            for field in fields {
+                try write(withUnsafeBytes(of: field.value.littleEndian) { Data($0) }, at: field.offset)
+            }
+            try handle.synchronize()
+            // Regenerate hands this file to the engine, which reads it this way.
+            if let seconds = audioDuration(of: url) {
+                isRepaired = abs(seconds - layout.duration) <= 1 / Double(layout.sampleRate)
+            }
+        } catch {
+            isRepaired = false
+        }
+        if !isRepaired {
+            for original in originals { try? write(original.bytes, at: original.offset) }
+            try? handle.synchronize()
+        }
+        return isRepaired
     }
 
     /// Seconds of audio the file's header describes; nil when the file does
