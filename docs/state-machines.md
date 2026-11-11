@@ -19,7 +19,7 @@ Order of work: what a user feels comes first (latency they wait through, hangs a
 | 5 | Dictation session | The main window keeps a second copy of the dictation state and shows "Ready to dictate" while a hotkey dictation records; clicking record raises an error alert | Confusing, no data loss | failing test | proven (test) |
 | 6 | Dictation session | A press shortly after a stop is treated three ways depending on timing (see below) | Either the new speech is not recorded, or the older text is never pasted | characterized by test | product decision, not changed |
 | 7 | Transcription queue, engine reservation | Flags plus database status as state; sentinel strings decide "is this a regeneration" | none observed | none | suspected |
-| 8 | Dictation session | A live dictation gets its first History row only after transcription, cleanup and paste. If the process died before that (quit, crash, force quit), only the temporary audio file existed; launch recovery read rows only, and the launch sweep deleted the file once it was 24 hours old. A meeting that died before it was stopped was lost the same way. | Silently lost dictation or meeting | failing test (`RecordingRecoveryTests.testAnOrphanedRecordingBecomesOneFailedRowWithItsAudioAndDate`) | fixed: launch adopts the orphaned audio as a failed row with Regenerate (see below) |
+| 8 | Dictation session | A live dictation gets its first History row only after transcription, cleanup and paste. If the process died before that (quit, crash, force quit), only the temporary audio file existed; launch recovery read rows only, and the launch sweep deleted the file once it was 24 hours old. A meeting that died before it was stopped was lost the same way. | Silently lost dictation or meeting | failing test (`RecordingRecoveryTests.testAnOrphanedRecordingBecomesOneFailedRowWithItsAudioAndDate`) | fixed: launch adopts the orphaned audio, including a capture killed mid-recording, as a failed row with Regenerate (see below) |
 
 ## 1. Process exit (`ExitGateCore`)
 
@@ -147,12 +147,23 @@ Launch now adopts that audio before the sweep runs (`RecordingRecovery.adoptOrph
 | name | is `<UUID>.wav` | the recorder did not write it |
 | History or queue reference | none | a row already owns it |
 | last modified | before this process launched | this process may still be writing it, or the date is unknown |
-| audio duration | at least 0.35 s (`AudioRecorder.minimumRecordingDuration`) | it is too short to be a recording, or is not readable audio |
+| audio duration | at least 0.35 s (`AudioRecorder.minimumRecordingDuration`), read from the header or, for an unfinished header, found on disk | it is too short to be a recording, or is not readable audio |
 
 Each adopted file becomes a failed row through `RecordingStore.addFailedDictation`, dated with the file's modification date, with the message "Recovered recording - WorkFlow closed before this was transcribed. Select Regenerate to transcribe it." under the usual "Transcription failed" title. Its audio moves into History the way every failed dictation's does, so play, Regenerate, delete and retention treat it like any other failed row. Nothing is transcribed, pasted or copied until the user chooses Regenerate, which uses the cleanup filter that was selected at the launch that recovered it. A recovered meeting or filter-assistant recording cannot be told apart from a dictation by its file, so it is recovered as a dictation row too.
 
-Invariants (tested in `RecordingRecoveryTests` and `RecordingRecoveryCoreTests`):
-- The pass never deletes a file. A file it does not adopt is not moved, rewritten or redated, and the 24-hour sweep remains the only thing that removes it.
+**Killed while recording.** The recorder fills in a WAV header's RIFF and `data` sizes only when it stops. A process killed mid-capture therefore leaves every sample on disk behind a header that declares none, and the file reads as empty. This is the force quit or crash while dictating, and the meeting that never reached stop. When a leftover file reads as shorter than 0.35 s, or not at all, the pass gives its first 64 KB and its size to the pure `WAVLayoutCore.layout`, which walks the chunks (CoreAudio writes `JUNK`, `fmt `, then a `FLLR` filler up to byte 4096, then `data`) and reports where the samples start, how many whole frames are on disk, and the two size fields a repair must write.
+
+| Declared `data` size | Payload taken as | Repair needed |
+|---|---|---|
+| 0, 0xFFFFFFFF, or more than is on disk | what is on disk after the chunk header, rounded down to a whole frame | yes |
+| anything else | the declared size | only when the RIFF size does not span the `data` chunk or runs past the file |
+
+If at least 0.35 s is on disk and the core adopts the file, `RecordingRecovery.repairHeader` writes those two fields in place, reads the file back with `AVAudioFile` to confirm it now reads as the audio found, and restores the file's date; the row gets the length found and the date the file had before the repair. If the write or the check fails, the original bytes are put back and the file is not adopted. A file that already reads correctly (Core Audio itself reads a `data` size of 0xFFFFFFFF, or one larger than the file, up to the end of the file), a file that is not integer PCM WAVE, and a file the core does not adopt are never written to.
+
+Evidence: a child process writing a synthetic tone through `AVAudioFile` with `SpeechFileWriter`'s settings (the voice-processed capture's writer) was killed with SIGKILL after 0.5 s, 2 s and 5 s. Each file held every buffer written, RIFF size 4088 and `data` size 0, and `AVAudioFile` opened it as 0 frames; after the two fields were written it read back in full. `AVAudioRecorder`, the standard capture, was not observed: recording with it needs microphone access, which would have raised a permission prompt. Its files grow the same way (`GrowingWAVReader` reads them mid-capture on that basis), but what a kill leaves is inferred, not shown.
+
+Invariants (tested in `RecordingRecoveryTests`, `RecordingRecoveryCoreTests` and `WAVLayoutCoreTests`):
+- The pass never deletes a file. A file it does not adopt is not moved, rewritten or redated, and the 24-hour sweep remains the only thing that removes it. The only bytes it writes are the two size fields of an unfinished recording it adopts.
 - The whole pass is skipped while another WorkFlow process runs, because every WorkFlow build shares the folder and an unreferenced file may be one the other process is still transcribing. "Another WorkFlow" is a running application, other than this process, whose bundle identifier is this build's, `com.picturesuo.WorkFlow`, or a legacy identity (`RecordingRecovery.isAnotherWorkFlowRunning`).
 - If History cannot say what it references, or cannot save the row, nothing is adopted: a failed save puts the audio back where it was found, for the next launch and the sweep.
 - A second pass adopts nothing: adopted audio has left the folder, or is referenced by its row when it could not move.
@@ -160,8 +171,29 @@ Invariants (tested in `RecordingRecoveryTests` and `RecordingRecoveryCoreTests`)
 
 Two cases were already recovered and still are: queued imports, and dictations stopped while the engine was busy, because both get a pending row at stop through `TranscriptionQueue.addFileToQueue`.
 
+**Nothing discarded comes back.** Recovery turns every leftover recording into a row, so a path that drops a recording must delete its file. Every owner of a temporary recording was followed to its end:
+
+| Outcome | Owner, or where the file is deleted |
+|---|---|
+| Dictation pasted, copied or saved | History row (`IndicatorWindow.swift` `finishDictation`, audio moved by `keepTemporaryRecording`) |
+| Esc while recording | deleted (`AudioRecorder.performStop(discard:)`) |
+| Esc after stop, or superseded by a newer dictation | History row, not pasted |
+| Too short, no speech, or cleanup returned nothing | deleted (`AudioRecorder.stopRecording`, `finishDictation`) |
+| Refused with "Processing…" at the press | nothing was recorded |
+| Stopped while the queue held the engine | pending row (`TranscriptionQueue.addFileToQueue`) |
+| Recognizer failed | failed row (`RecordingStore.addFailedDictation`), deleted if the row cannot be saved |
+| Transcription cancelled | deleted (`finishDictation`) |
+| Main-window recording, each of the above | same owners (`ContentViewModel.finishRecording`) |
+| Meeting stopped | pending row; cancelled or too short: deleted |
+| Filter-assistant voice input, finished or cancelled | deleted (`FilterAssistantVoiceInput.stop`, `cancel`) |
+| Queued dictation with no speech | row and file deleted (`TranscriptionQueue.processRecording`) |
+| Row deleted while queued or after a failed move | deleted with the row (`RecordingStore.finishDeleting`) |
+| Capture failed to start, or the standard capture died | deleted (`AudioRecorder`) |
+
+One defect was found and fixed: `FilterAssistantVoiceInput.stop` stopped the recorder inside a task that did nothing once the object was released, which would have left the microphone running and the file in place (`testReleasingTheComposerRightAfterStopStillStopsTheRecorderAndRemovesTheAudio`). One outcome leaves an unowned file on purpose: when `addFileToQueue` cannot save the pending row for a stopped dictation or meeting, the audio stays so that the next launch recovers it. The user did not discard it.
+
 Limits, by decision:
-- A recording whose process died while it was still capturing is not recovered. The recorder fills in the WAV header's sizes only when it stops (see `GrowingWAVReader`), and a file whose sizes were never written does not open as audio, so it is left for the sweep (`testFilesThatAreNotOrphanedRecordingsAreLeftUntouched` covers a header with zeroed sizes; a real killed capture was not reproduced). Recovering it would mean reading the samples past the header, as `GrowingWAVReader` does.
+- A dictation whose process dies after its audio has moved into History's folder but before its row is saved is not recovered, and that file is never removed. Between the move and the row in `finishDictation` only the paste gate, the synchronous paste (a pasteboard write and a posted Cmd+V, no model call and no wait) and building the row's evidence run, and the row is then inserted by an unstructured task; cleanup runs before the move. The window is milliseconds, the text has usually been pasted by then, and the scan is deliberately not widened to History's folder for it.
 - A recording the user meant to discard by force-quitting comes back as a recovered row; they delete it from History like any other.
 - When a launch skips the pass because another WorkFlow is running, its files wait for the next launch. The sweep still runs on that launch, so a file already older than 24 hours is deleted then, as it was before.
 
