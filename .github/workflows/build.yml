@@ -58,6 +58,7 @@ jobs:
             -only-testing:OpenSuperWhisperTests/SpeakingEfficiencyStoreTests \
             -skip-testing:OpenSuperWhisperTests/SpeakingEfficiencyStoreTests/testIndicatorDictationOfRealSpeechMeasuresItWithTheBundledDetector \
             -only-testing:OpenSuperWhisperTests/RenamedAppMigrationTests \
+            -only-testing:OpenSuperWhisperTests/AutocorrectBindingTests \
             -only-testing:OpenSuperWhisperTests/OnboardingShortcutOptionTests \
             -only-testing:OpenSuperWhisperTests/LatestDictationGateTests \
             -only-testing:OpenSuperWhisperTests/ClipboardRestoreTests \

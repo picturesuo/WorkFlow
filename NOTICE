@@ -36,6 +36,12 @@ https://github.com/huacnlee/autocorrect
 Copyright (c) 2020 Jason Lee
 Licensed under the MIT License.
 
+The autocorrect-swift binding in this repository is the Swift binding that
+Starmel, the OpenSuperWhisper author, proposed for AutoCorrect:
+https://github.com/huacnlee/autocorrect/pull/277
+It is distributed under AutoCorrect's MIT License, included as
+autocorrect-swift/LICENSE.
+
 History storage uses GRDB.swift:
 https://github.com/groue/GRDB.swift
 Copyright (C) 2015-2025 Gwendal Roué

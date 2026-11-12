@@ -12,7 +12,11 @@ extension KeyboardShortcuts.Name {
 }
 
 class ShortcutManager {
-    static let shared = ShortcutManager()
+    /// Main-actor only: registering, enabling, and disabling shortcuts is
+    /// main-thread work, and KeyboardShortcuts 3 requires the main actor for
+    /// it. The app creates the manager at launch, and every
+    /// `.hotkeySettingsChanged` post is made on the main thread.
+    @MainActor static let shared = ShortcutManager()
 
     private var activeVm: IndicatorViewModel?
     private var holdWorkItem: DispatchWorkItem?
@@ -24,6 +28,7 @@ class ShortcutManager {
     private var pressConsumed = false
     private var pressStartedRecording = false
 
+    @MainActor
     private init() {
         print("ShortcutManager init")
 
@@ -50,10 +55,12 @@ class ShortcutManager {
         holdMode = false
     }
     
+    @MainActor
     @objc private func hotkeySettingsChanged() {
         setupRecordingTrigger()
     }
     
+    @MainActor
     private func setupKeyboardShortcuts() {
         KeyboardShortcuts.onKeyDown(for: .toggleRecord) { [weak self] in
             self?.handleKeyDown()
@@ -82,6 +89,7 @@ class ShortcutManager {
         activeRecording || indicatorState == .decoding
     }
 
+    @MainActor
     private func setupRecordingTrigger() {
         // The trigger modes are mutually exclusive. Tear all of them down
         // first, then enable exactly the one the preferences resolve to.
@@ -123,6 +131,7 @@ class ShortcutManager {
 
     /// Modifier keys and chords share the event tap and the same press
     /// handling as every other trigger.
+    @MainActor
     private func prepareModifierKeyMonitor() {
         useMouseButtonHotkey = false
         useModifierOnlyHotkey = true
