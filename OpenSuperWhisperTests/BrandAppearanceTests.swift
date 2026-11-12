@@ -3,8 +3,9 @@ import SwiftUI
 import XCTest
 @testable import OpenSuperWhisper
 
-/// Guards the WorkFlow brand: ivory and charcoal from the app icon, no
-/// leftover violet palette, and readable contrast in light and dark.
+/// Guards the WorkFlow brand: ivory and charcoal from the app icon, neutral
+/// surfaces around them, no leftover violet palette, and readable contrast
+/// in light and dark.
 @MainActor
 final class BrandPaletteTests: XCTestCase {
     private static let sourceRoot = URL(fileURLWithPath: #filePath)
@@ -28,7 +29,7 @@ final class BrandPaletteTests: XCTestCase {
         XCTAssertEqual(hits, [], "Use ThemePalette tokens instead of the retired violet palette")
     }
 
-    func testAccentColorAssetIsBrandTaupeInBothAppearances() throws {
+    func testAccentColorAssetIsNeutralInBothAppearances() throws {
         let url = Self.sourceRoot.appendingPathComponent("Assets.xcassets/AccentColor.colorset/Contents.json")
         let json = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(contentsOf: url)) as? [String: Any])
         let entries = try XCTUnwrap(json["colors"] as? [[String: Any]])
@@ -41,19 +42,36 @@ final class BrandPaletteTests: XCTestCase {
             }
             let color = NSColor(srgbRed: try channel("red"), green: try channel("green"), blue: try channel("blue"), alpha: 1)
             assertNotPurple(color, "AccentColor")
+            XCTAssertLessThan(color.saturationComponent, 0.05, "The accent is a gray, so a tinted control never recolors the app")
         }
     }
 
-    func testTokensAreWarmNeutralsWithReadableContrast() {
+    func testTokensAreNeutralsWithReadableContrast() {
         for scheme in [ColorScheme.light, .dark] {
             let card = resolved(ThemePalette.cardBackground(scheme), scheme)
             let window = resolved(ThemePalette.windowBackground(scheme), scheme)
+            let content = resolved(ThemePalette.contentBackground(scheme), scheme)
+            let chrome = resolved(ThemePalette.chromeBackground(scheme), scheme)
             let ink = resolved(ThemePalette.ink(scheme), scheme)
             let onInk = resolved(ThemePalette.onInk(scheme), scheme)
             let link = resolved(ThemePalette.linkText(scheme), scheme)
             let tint = resolved(ThemePalette.controlTint, scheme)
             for (name, color) in [("card", card), ("window", window), ("ink", ink), ("onInk", onInk), ("link", link), ("tint", tint)] {
                 assertNotPurple(color, "\(name) \(scheme)")
+            }
+            // Surfaces carry no tint of their own; the mark's ivory and
+            // charcoal are the only warmth.
+            for (name, surface) in [("card", card), ("window", window), ("content", content), ("chrome", chrome), ("tint", tint)] {
+                XCTAssertLessThan(surface.saturationComponent, 0.06, "\(name) \(scheme) is a neutral")
+            }
+            XCTAssertEqual(chrome, content, "The toolbar and the History are one surface \(scheme)")
+            XCTAssertEqual(ink, resolved(scheme == .dark ? BrandPalette.ivory : BrandPalette.charcoal, scheme), "Ink is the mark's own color \(scheme)")
+            // Quiet links and the success color are still text.
+            let quietLink = blend(ink, over: content, alpha: 0.62)
+            XCTAssertGreaterThanOrEqual(contrast(quietLink, content), 4.5, "quiet link on History \(scheme)")
+            let success = resolved(ThemePalette.success(scheme), scheme)
+            for (name, surface) in [("card", card), ("window", window), ("content", content)] {
+                XCTAssertGreaterThanOrEqual(contrast(success, surface), 4.5, "success text on \(name) \(scheme)")
             }
             XCTAssertGreaterThanOrEqual(contrast(ink, card), 7, "ink on card \(scheme)")
             XCTAssertGreaterThanOrEqual(contrast(ink, window), 7, "ink on window \(scheme)")
@@ -254,6 +272,16 @@ private func resolved(_ color: Color, _ scheme: ColorScheme) -> NSColor {
         result = NSColor(color).usingColorSpace(.sRGB) ?? .clear
     }
     return result
+}
+
+/// One color at `alpha` over another, as the eye sees it.
+private func blend(_ top: NSColor, over bottom: NSColor, alpha: CGFloat) -> NSColor {
+    NSColor(
+        srgbRed: top.redComponent * alpha + bottom.redComponent * (1 - alpha),
+        green: top.greenComponent * alpha + bottom.greenComponent * (1 - alpha),
+        blue: top.blueComponent * alpha + bottom.blueComponent * (1 - alpha),
+        alpha: 1
+    )
 }
 
 /// Violet through lavender: the retired palette spans hues 235-257 degrees.

@@ -107,8 +107,8 @@ struct SettingsView: View {
     var body: some View {
         VStack(spacing: 0) {
             SettingsPaneBar(selection: $selection)
-                .padding(.top, WFSpace.md)
-                .padding(.bottom, 10)
+                .padding(.top, WFSpace.lg)
+                .padding(.bottom, WFSpace.md)
                 .frame(maxWidth: .infinity)
             hairline
             ScrollView {

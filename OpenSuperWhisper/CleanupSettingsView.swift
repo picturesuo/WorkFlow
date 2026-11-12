@@ -34,7 +34,7 @@ struct CleanupSettingsView: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
-                    .padding(.horizontal, 2)
+                    .padding(.horizontal, WFSpace.md)
             }
         }
     }
@@ -94,9 +94,9 @@ struct CleanupSettingsView: View {
     private var modes: some View {
         VStack(alignment: .leading, spacing: 7) {
             Text("Dictation mode")
-                .font(.system(size: 12, weight: .semibold))
+                .font(WFType.sectionLabel)
                 .foregroundStyle(.secondary)
-                .padding(.leading, 2)
+                .padding(.leading, WFSpace.md)
                 .accessibilityAddTraits(.isHeader)
             LazyVGrid(columns: [GridItem(.flexible(), spacing: 10), GridItem(.flexible())], spacing: 10) {
                 ForEach(CleanupMode.allCases) { mode in
@@ -112,7 +112,7 @@ struct CleanupSettingsView: View {
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
-                .padding(.horizontal, 2)
+                .padding(.horizontal, WFSpace.md)
         }
     }
 }
@@ -223,16 +223,16 @@ struct WritingModeCard: View {
                 .padding(.horizontal, 10)
                 .padding(.vertical, 8)
                 .frame(maxWidth: .infinity, alignment: .leading)
-                .background(ThemePalette.panelSurface(colorScheme), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                .background(ThemePalette.panelSurface(colorScheme), in: RoundedRectangle(cornerRadius: WFRadius.panel, style: .continuous))
             }
-            .padding(12)
+            .padding(WFSpace.md)
             .frame(maxWidth: .infinity, minHeight: 150, alignment: .topLeading)
-            .background(ThemePalette.cardBackground(colorScheme), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+            .background(ThemePalette.cardBackground(colorScheme), in: RoundedRectangle(cornerRadius: WFRadius.card, style: .continuous))
             .overlay(
-                RoundedRectangle(cornerRadius: 12, style: .continuous)
-                    .stroke(isSelected ? ThemePalette.ink(colorScheme) : ThemePalette.cardBorder(colorScheme), lineWidth: isSelected ? 1.5 : 1)
+                RoundedRectangle(cornerRadius: WFRadius.card, style: .continuous)
+                    .strokeBorder(isSelected ? ThemePalette.ink(colorScheme) : ThemePalette.cardBorder(colorScheme), lineWidth: isSelected ? 1.5 : 1)
             )
-            .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+            .contentShape(RoundedRectangle(cornerRadius: WFRadius.card, style: .continuous))
         }
         .buttonStyle(.plain)
         .accessibilityElement(children: .ignore)
@@ -804,7 +804,7 @@ struct ProviderCostSettingsView: View {
         return VStack(alignment: .leading, spacing: 7) {
             HStack {
                 Text("Estimated cost")
-                    .font(.system(size: 12, weight: .semibold))
+                    .font(WFType.sectionLabel)
                     .foregroundStyle(.secondary)
                     .accessibilityAddTraits(.isHeader)
                 Spacer()
@@ -812,12 +812,12 @@ struct ProviderCostSettingsView: View {
                     SettingsWebLink("AWS pricing", destination: BedrockPricing.pricingURL)
                 }
             }
-            .padding(.horizontal, 2)
+            .padding(.horizontal, WFSpace.md)
             VStack(alignment: .leading, spacing: 0) {
                 VStack(alignment: .leading, spacing: 10) {
                     HStack(alignment: .firstTextBaseline, spacing: 8) {
                         Text(BedrockPricing.formatUSD(spent))
-                            .font(.system(size: 30, weight: .semibold, design: .rounded).monospacedDigit())
+                            .font(.system(size: 28, weight: .semibold).monospacedDigit())
                         Text("this month")
                             .font(.callout)
                             .foregroundStyle(.secondary)
@@ -888,7 +888,7 @@ struct ProviderCostSettingsView: View {
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
-                .padding(.horizontal, 2)
+                .padding(.horizontal, WFSpace.md)
         }
     }
 

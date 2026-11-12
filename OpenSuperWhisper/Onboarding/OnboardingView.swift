@@ -391,11 +391,12 @@ struct OnboardingView: View {
                     .toggleStyle(SwitchToggleStyle(tint: ThemePalette.controlTint))
                 }
             }
-            .padding(20)
+            .padding(.horizontal, WFSpace.xl)
+            .padding(.top, 28)
+            .padding(.bottom, WFSpace.lg)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(ThemePalette.panelSurface(colorScheme))
             
-            Divider()
+            WFHairline()
             
             // Content - Scrollable area
             ScrollView {
@@ -446,18 +447,18 @@ struct OnboardingView: View {
                                     ProgressView()
                                         .controlSize(.small)
                                     Text("Checking Input Monitoring…")
-                                        .font(.caption2)
+                                        .font(.subheadline)
                                         .foregroundColor(.secondary)
                                 } else {
                                     Image(systemName: permissionsManager.isInputMonitoringPermissionGranted
                                           ? "checkmark.circle.fill"
                                           : "exclamationmark.triangle.fill")
-                                        .foregroundColor(permissionsManager.isInputMonitoringPermissionGranted ? .green : ThemePalette.caution(colorScheme))
+                                        .foregroundStyle(permissionsManager.isInputMonitoringPermissionGranted ? ThemePalette.success(colorScheme) : ThemePalette.caution(colorScheme))
 
                                     Text(permissionsManager.isInputMonitoringPermissionGranted
                                          ? "Input Monitoring is enabled. Only modifier-key events are observed."
                                          : "Fn and single-modifier shortcuts need Input Monitoring. No regular keystrokes are captured.")
-                                        .font(.caption2)
+                                        .font(.subheadline)
                                         .foregroundColor(.secondary)
 
                                     Spacer()
@@ -475,8 +476,8 @@ struct OnboardingView: View {
                         }
 
                         Text("You can change this later in Settings")
-                            .font(.caption2)
-                            .foregroundColor(Color(.tertiaryLabelColor))
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
                     }
                     
                     // Model Selection
@@ -496,11 +497,12 @@ struct OnboardingView: View {
                         }
                     }
                 }
-                .padding(12)
+                .padding(.horizontal, WFSpace.xl)
+                .padding(.vertical, WFSpace.lg)
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
             
-            Divider()
+            WFHairline()
             
             // Footer with Continue button
             HStack {
@@ -519,7 +521,8 @@ struct OnboardingView: View {
                 .controlSize(.large)
                 .disabled(!viewModel.canContinue || viewModel.isDownloading)
             }
-            .padding(16)
+            .padding(.horizontal, WFSpace.xl)
+            .padding(.vertical, WFSpace.lg)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(ThemePalette.windowBackground(colorScheme))
@@ -613,7 +616,7 @@ struct OnboardingUnifiedModelItemView: View {
                 if isSelected {
                     Label("Ready", systemImage: "checkmark.circle.fill")
                         .font(.caption)
-                        .foregroundColor(.green)
+                        .foregroundStyle(ThemePalette.success(colorScheme))
                 } else {
                     Button(action: {
                         viewModel.selectModel(model)
@@ -644,15 +647,7 @@ struct OnboardingUnifiedModelItemView: View {
             }
         }
         .padding(14)
-        .background(
-            RoundedRectangle(cornerRadius: 10)
-                .fill(isSelected ? Color(.controlBackgroundColor).opacity(0.8) : Color(.controlBackgroundColor).opacity(0.5))
-                .shadow(color: Color.black.opacity(isSelected ? 0.08 : 0.05), radius: isSelected ? 8 : 4, x: 0, y: 2)
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: 10)
-                .stroke(isSelected ? ThemePalette.ink(colorScheme).opacity(0.55) : Color.clear, lineWidth: 1.5)
-        )
+        .onboardingCard(isSelected: isSelected)
         .accessibilityAddTraits(isSelected ? .isSelected : [])
         .contentShape(Rectangle())
         .onTapGesture {
@@ -683,7 +678,7 @@ private struct KeyCap: View {
             .frame(width: w, height: h)
             .background(
                 RoundedRectangle(cornerRadius: 4)
-                    .fill(highlighted ? ThemePalette.ink(colorScheme) : Color(.controlBackgroundColor).opacity(0.5))
+                    .fill(highlighted ? ThemePalette.ink(colorScheme) : ThemePalette.cardBackground(colorScheme))
             )
             .overlay(
                 RoundedRectangle(cornerRadius: 4)
@@ -696,6 +691,7 @@ private struct KeyCap: View {
 struct OnboardingKeyboardView: View {
     let selectedShortcut: OnboardingShortcutOption
     let layoutInfo: KeyboardLayoutInfo
+    @Environment(\.colorScheme) private var colorScheme
     /// The drawing's real width, so its height fits the keys it draws.
     @State private var keyboardWidth: CGFloat = 450 - 24
     
@@ -809,8 +805,8 @@ struct OnboardingKeyboardView: View {
         .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { keyboardWidth = $0 }
         .frame(height: heightForWidth(keyboardWidth))
         .background(
-            RoundedRectangle(cornerRadius: 10)
-                .fill(Color(.controlBackgroundColor).opacity(0.3))
+            ThemePalette.panelSurface(colorScheme),
+            in: RoundedRectangle(cornerRadius: WFRadius.card, style: .continuous)
         )
         .accessibilityHidden(true)
         .animation(.easeInOut(duration: 0.2), value: selectedShortcut)
@@ -843,18 +839,34 @@ struct OnboardingShortcutCard: View {
             .frame(maxWidth: .infinity)
             .padding(.vertical, 10)
             .padding(.horizontal, 8)
-            .background(
-                RoundedRectangle(cornerRadius: 10)
-                    .fill(isSelected ? Color(.controlBackgroundColor).opacity(0.8) : Color(.controlBackgroundColor).opacity(0.5))
-                    .shadow(color: Color.black.opacity(isSelected ? 0.08 : 0.05), radius: isSelected ? 8 : 4, x: 0, y: 2)
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: 10)
-                    .stroke(isSelected ? ThemePalette.ink(colorScheme).opacity(0.55) : Color.clear, lineWidth: 1.5)
-            )
+            .onboardingCard(isSelected: isSelected)
         }
         .buttonStyle(.plain)
         .accessibilityAddTraits(isSelected ? .isSelected : [])
+    }
+}
+
+/// A choice on the welcome screen: a card, outlined in ink when chosen.
+private struct OnboardingCard: ViewModifier {
+    let isSelected: Bool
+    @Environment(\.colorScheme) private var colorScheme
+
+    func body(content: Content) -> some View {
+        let shape = RoundedRectangle(cornerRadius: WFRadius.card, style: .continuous)
+        content
+            .background(ThemePalette.cardBackground(colorScheme), in: shape)
+            .overlay {
+                shape.strokeBorder(
+                    isSelected ? ThemePalette.ink(colorScheme) : ThemePalette.cardBorder(colorScheme),
+                    lineWidth: isSelected ? 1.5 : 1
+                )
+            }
+    }
+}
+
+private extension View {
+    func onboardingCard(isSelected: Bool) -> some View {
+        modifier(OnboardingCard(isSelected: isSelected))
     }
 }
 
