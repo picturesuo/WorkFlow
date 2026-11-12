@@ -9,7 +9,9 @@ import XCTest
 /// cleanup that keeps one take used to read as a dropped negation, question,
 /// or percent, so the whole dictation fell back to the recognizer's words,
 /// every "um" and "uh" included. One take is now enough, and every other
-/// check still applies.
+/// check still applies. A restart has a pause, written as punctuation or a
+/// hesitation sound, and a repeated sign is never one: "ten minus two, minus
+/// two" subtracts twice.
 final class RepeatedTakeGuardTests: XCTestCase {
     private func accepts(
         _ cleaned: String,
@@ -42,20 +44,55 @@ final class RepeatedTakeGuardTests: XCTestCase {
         )
     }
 
-    /// Restarts and the cleanup that keeps one take.
-    static let restarts: [(source: String, cleaned: String)] = [
-        ("I can't. I can't make it on Friday, um, sorry.", "I can't make it on Friday, sorry."),
-        ("I can't, I can't make it on Friday, um, sorry.", "I can't make it on Friday, sorry."),
-        ("We don't, um, we don't need the second server.", "We don't need the second server."),
-        ("I don't, I don't think we should merge it yet.", "I don't think we should merge it yet."),
-        ("It's not, um, it's not ready, and it's not tested either.", "It's not ready, and it's not tested either."),
-        ("What's the, what's the status of the deploy?", "What's the status of the deploy?"),
-        ("Why is, uh, why is the build failing on main?", "Why is the build failing on main?"),
-        ("How do we, how do we roll this back if the migration fails?", "How do we roll this back if the migration fails?"),
-        ("Should we? Should we ship it today?", "Should we ship it today?"),
-        ("Revenue is up 15%, uh, 15% this quarter.", "Revenue is up 15% this quarter."),
-        ("Revenue is up fifteen percent, uh, fifteen percent this quarter.", "Revenue is up fifteen percent this quarter."),
+    /// Restarts, the cleanup that keeps one take, and that cleanup as
+    /// Homework delivers it, with its quantities written as digits.
+    static let restarts: [(source: String, cleaned: String, homework: String)] = [
+        ("I can't. I can't make it on Friday, um, sorry.", "I can't make it on Friday, sorry.", "I can't make it on Friday, sorry."),
+        ("I can't, I can't make it on Friday, um, sorry.", "I can't make it on Friday, sorry.", "I can't make it on Friday, sorry."),
+        ("We don't, um, we don't need the second server.", "We don't need the second server.", "We don't need the second server."),
+        ("I don't, I don't think we should merge it yet.", "I don't think we should merge it yet.", "I don't think we should merge it yet."),
+        (
+            "It's not, um, it's not ready, and it's not tested either.",
+            "It's not ready, and it's not tested either.",
+            "It's not ready, and it's not tested either."
+        ),
+        ("What's the, what's the status of the deploy?", "What's the status of the deploy?", "What's the status of the deploy?"),
+        ("Why is, uh, why is the build failing on main?", "Why is the build failing on main?", "Why is the build failing on main?"),
+        (
+            "How do we, how do we roll this back if the migration fails?",
+            "How do we roll this back if the migration fails?",
+            "How do we roll this back if the migration fails?"
+        ),
+        ("Should we? Should we ship it today?", "Should we ship it today?", "Should we ship it today?"),
+        ("Revenue is up 15%, uh, 15% this quarter.", "Revenue is up 15% this quarter.", "Revenue is up 15% this quarter."),
+        (
+            "Revenue is up fifteen percent, uh, fifteen percent this quarter.",
+            "Revenue is up fifteen percent this quarter.",
+            "Revenue is up 15% this quarter."
+        ),
+        // Said three times, the restart still counts once.
+        ("I don't, I don't, I don't know about the second server.", "I don't know about the second server.", "I don't know about the second server."),
+        ("We can't, um, we can't, we can't ship it today.", "We can't ship it today.", "We can't ship it today."),
+        ("What's the, what's the, what's the status of the deploy?", "What's the status of the deploy?", "What's the status of the deploy?"),
+        ("Should we? Should we, uh, should we ship it today?", "Should we ship it today?", "Should we ship it today?"),
+        ("Revenue is up 15%, uh, 15%, uh, 15% this quarter.", "Revenue is up 15% this quarter.", "Revenue is up 15% this quarter."),
+    ]
+
+    /// Arithmetic that repeats a signed term, and the reply that drops one.
+    /// The dictation keeps the recognizer's words.
+    static let repeatedSigns: [(source: String, cleaned: String)] = [
+        ("ten minus two minus two", "ten minus two"),
+        ("ten minus two minus two", "10 - 2"),
+        ("ten minus two, minus two", "10 - 2"),
+        ("ten minus two, uh, minus two", "10 - 2"),
+        ("x minus 2 minus 2", "x - 2"),
+        ("x minus 2, minus 2", "x - 2"),
+        ("x minus 2, um, minus 2", "x minus 2"),
+        ("5 - 3 - 3", "5 - 3"),
+        ("5 - 3, uh, - 3", "5 - 3"),
+        // Two coordinates, or a restart: the words alone cannot say which.
         ("It was negative four, negative four degrees.", "It was negative four degrees."),
+        ("The point is at negative four, negative four.", "The point is at negative four."),
     ]
 
     func testCleanupThatKeepsOneTakeIsAcceptedInEveryMode() {
@@ -86,6 +123,9 @@ final class RepeatedTakeGuardTests: XCTestCase {
             rejects("I don't think so, and I'm sure.", source: "I don't think so, and I'm not, I'm not sure.", mode: mode)
             // The first "no" answers, so the second is the only negation.
             rejects("We said meetings on Friday.", source: "We said no, we said no meetings on Friday.", mode: mode)
+            // Three takes are one negation, and the next clause has its own.
+            rejects("I know about the second server.", source: "I don't, I don't, I don't know about the second server.", mode: mode)
+            rejects("I don't know, and I do care.", source: "I don't, I don't, I don't know, and I don't care.", mode: mode)
         }
     }
 
@@ -98,16 +138,46 @@ final class RepeatedTakeGuardTests: XCTestCase {
             rejects("We should ship it today.", source: "Should we? Should we ship it today?", mode: mode)
             // The first "what" does not ask, so the second is the only question.
             rejects("I know the plan.", source: "I know what is, what is the plan?", mode: mode)
+            // Three takes are one question, and the next clause asks another.
+            rejects("The status of the deploy is green.", source: "What's the, what's the, what's the status of the deploy?", mode: mode)
+            rejects("What's the status, and is the owner here?", source: "What's the, what's the, what's the status, and what's the owner?", mode: mode)
         }
     }
 
     func testARestartNeverExcusesADroppedOrAddedSymbol() {
         for mode in CleanupMode.allCases {
             rejects("Revenue is up 15 this quarter.", source: "Revenue is up 15%, uh, 15% this quarter.", mode: mode)
-            rejects("It was four degrees.", source: "It was negative four, negative four degrees.", mode: mode)
             // The first take had no percent, so the one the speaker added is required.
             rejects("Revenue is up 15 this quarter.", source: "Revenue is up 15, uh, 15% this quarter.", mode: mode)
             rejects("Up 15% last year and this year.", source: "Up 15% last year and 15%, uh, 15% this year.", mode: mode)
+        }
+    }
+
+    func testARepeatedSignIsNeverARestart() {
+        for mode in CleanupMode.allCases {
+            for repeated in Self.repeatedSigns {
+                rejects(repeated.cleaned, source: repeated.source, mode: mode)
+            }
+            // Every signed term kept is still a faithful cleanup.
+            accepts("ten minus two minus two", source: "ten minus two, uh, minus two", mode: mode)
+            accepts("x minus 2 minus 2", source: "x minus 2, um, minus 2", mode: mode)
+        }
+        accepts("10 - 2 - 2", source: "ten minus two, uh, minus two", mode: .homework)
+        accepts("x - 2 - 2", source: "x minus 2 minus 2", mode: .homework)
+        accepts("5 - 3 - 3", source: "5 - 3, uh, - 3", mode: .homework)
+    }
+
+    func testWordsSaidAgainWithoutAPauseAreNotARestart() {
+        for mode in CleanupMode.allCases {
+            // Two different things are refused, and two questions are asked.
+            rejects("Not this one either.", source: "Not this one not this one either.", mode: mode)
+            rejects("We don't ship on Friday.", source: "We don't ship on Monday we don't ship on Friday.", mode: mode)
+            rejects("Why is it slow now?", source: "Why is it slow why is it slow now?", mode: mode)
+            rejects("What is the cost and the timeline?", source: "What is the cost and what is the timeline?", mode: mode)
+            rejects("Revenue is up 15% this quarter.", source: "Revenue is up 15% 15% this quarter.", mode: mode)
+            // The same words with the pause of a restart.
+            accepts("Why is it slow now?", source: "Why is it slow, uh, why is it slow now?", mode: mode)
+            accepts("We don't ship on Friday.", source: "We don't ship, um, we don't ship on Friday.", mode: mode)
         }
     }
 
@@ -237,20 +307,13 @@ final class RepeatedTakeDictationTests: XCTestCase {
         hesitation.numberOfMatches(in: text, range: NSRange(text.startIndex..., in: text))
     }
 
-    /// Homework writes the cleanup's quantities as digits afterward.
-    private static func finished(_ cleaned: String, source: String, mode: CleanupMode) -> String {
-        guard mode == .homework else { return cleaned }
-        let formatted = HomeworkNumberFormatter.format(cleaned)
-        return (try? CleanupGuard.postprocess(formatted, source: source, mode: mode, allowsNumberFormatting: true)) ?? cleaned
-    }
-
     func testRestartedDictationsArePastedCleanedInEveryMode() async throws {
         for mode in CleanupMode.allCases {
             self.mode = mode
             for restart in RepeatedTakeGuardTests.restarts {
                 reply = { _ in (200, restart.cleaned) }
                 let (pasted, row) = try await dictate(restart.source)
-                let expected = Self.finished(restart.cleaned, source: restart.source, mode: mode)
+                let expected = mode == .homework ? restart.homework : restart.cleaned
                 XCTAssertEqual(pasted, expected, "\(mode): \(restart.source)")
                 XCTAssertEqual(row.transcription, expected)
                 XCTAssertEqual(row.cleanupSource, .bedrock)
@@ -274,6 +337,21 @@ final class RepeatedTakeDictationTests: XCTestCase {
                 reply = { _ in unsafe }
                 let (pasted, row) = try await dictate(source)
                 XCTAssertEqual(pasted, source, "\(mode): \(unsafe.text)")
+                XCTAssertEqual(row.cleanupSource, .rawFallback)
+                XCTAssertEqual(failures.compactMap { $0 }, [TranscriptCleanupPipeline.safeFailureMessage])
+            }
+        }
+    }
+
+    func testRepeatedArithmeticKeepsTheRecognizerWordsInEveryMode() async throws {
+        for mode in CleanupMode.allCases {
+            self.mode = mode
+            for repeated in RepeatedTakeGuardTests.repeatedSigns {
+                failures = []
+                reply = { _ in (200, repeated.cleaned) }
+                let (pasted, row) = try await dictate(repeated.source)
+                XCTAssertEqual(pasted, repeated.source, "\(mode): \(repeated.cleaned)")
+                XCTAssertEqual(row.transcription, repeated.source)
                 XCTAssertEqual(row.cleanupSource, .rawFallback)
                 XCTAssertEqual(failures.compactMap { $0 }, [TranscriptCleanupPipeline.safeFailureMessage])
             }
