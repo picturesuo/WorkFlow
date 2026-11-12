@@ -403,6 +403,9 @@ enum CleanupGuard {
     /// "fifteen percent" is not "15", and "negative four" is not "4": each
     /// percent or sign the speaker attached to a number survives on that same
     /// number, as the symbol or the word, unless the speaker corrected it.
+    /// One said twice is required twice, even after a pause: "5%, 5%, and
+    /// 10%" lists three values and "ten minus two, minus two" subtracts
+    /// twice, which the words alone cannot tell from a restart.
     private static func keepsEveryValueSymbol(_ cleaned: String, source: String) -> Bool {
         var written = valueSymbols(in: cleaned)
         for said in valueSymbols(in: source) where !isCorrected(said.range, in: source) {
@@ -495,12 +498,28 @@ enum CleanupGuard {
     /// ("so do I", "what I want is"), and a corrected question are not counted.
     private static func askedQuestions(in text: String) -> (words: [String: Int], yesNo: Int) {
         let words = words(in: text)
+        let takes = repeatedTakes(in: text)
         var asked: [String: Int] = [:]
         var yesNo = 0
         // "how do I, sorry, what's the command": the first question was replaced.
         func wasReplaced(_ index: Int) -> Bool {
             let end = words[min(index + 2, words.count - 1)].range.upperBound
             return isCorrected(words[index].range.lowerBound..<end, in: text, pattern: pausedCorrectionPattern)
+        }
+        // "what's the, what's the status" asks once: a restart repeats a
+        // question only when its first take already asked it, so a third
+        // take repeats the second.
+        var said: [(question: String, position: String.Index)] = []
+        func repeats(_ question: String, at position: String.Index) -> Bool {
+            takes.contains { take in
+                take.second.contains(position)
+                    && said.contains { $0.question == question && take.first.contains($0.position) }
+            }
+        }
+        func asksAnew(_ question: String, at position: String.Index) -> Bool {
+            let isRepeated = repeats(question, at: position)
+            said.append((question, position))
+            return !isRepeated
         }
         for (index, word) in words.enumerated() {
             let question = base(word.text)
@@ -512,12 +531,24 @@ enum CleanupGuard {
                 let previous = index > 0 ? words[index - 1].text : ""
                 let isEmbedded = askingWords.contains(previous)
                     || (previous == "me" && index > 1 && ["tell", "show"].contains(words[index - 2].text))
-                if (isDirect || isEmbedded) && !wasReplaced(index) { asked[question, default: 0] += 1 }
+                if (isDirect || isEmbedded) && !wasReplaced(index) {
+                    if asksAnew(question, at: word.range.lowerBound) { asked[question, default: 0] += 1 }
+                } else if repeats(question, at: word.range.lowerBound) {
+                    // A middle take after a comma does not ask on its own,
+                    // and the take after it still repeats it: "who is, who
+                    // is, um, who is covering".
+                    said.append((question, word.range.lowerBound))
+                }
             } else if opensYesNoQuestion(index, in: words, text: text),
                       !(index > 0 && ["so", "neither", "nor"].contains(words[index - 1].text)),
                       !(["can", "could", "would", "will"].contains(word.text) && words[index + 1].text == "you"),
-                      !wasReplaced(index) {
+                      !wasReplaced(index), asksAnew(word.text, at: word.range.lowerBound) {
                 yesNo += 1
+            } else if !questionWords.contains(question), repeats(word.text, at: word.range.lowerBound) {
+                // A middle take after a comma does not open a clause, and
+                // the take after it still repeats it: "should we, should
+                // we, um, should we ship it".
+                said.append((word.text, word.range.lowerBound))
             }
         }
         return (asked, yesNo)
@@ -605,11 +636,59 @@ enum CleanupGuard {
             || cleaned.contains { $0.isNumber || "%√×÷±=+−²³".contains($0) }
     }
 
-    /// Hesitation sounds that say nothing on their own.
-    private static let fillerWords: Set<String> = [
+    /// Hesitation sounds, which say nothing in any position.
+    private static let hesitationSounds: Set<String> = [
         "um", "umm", "uh", "uhh", "uhm", "er", "erm", "ah", "ahh", "eh",
-        "hm", "hmm", "mm", "mmm", "mhm", "like", "so", "well"
+        "hm", "hmm", "mm", "mmm", "mhm"
     ]
+    /// Hesitation sounds and the words that say nothing when they are all
+    /// the speaker said.
+    private static let fillerWords = hesitationSounds.union(["like", "so", "well"])
+
+    private static let takeWordPattern = try! NSRegularExpression(pattern: #"[\p{L}\p{N}]+(?:['’][\p{L}\p{N}]+)*"#)
+    private static let maximumTakeLength = 8
+
+    /// Where the speaker restarted by saying the same words again at once:
+    /// "I can't. I can't make it", "what's the, um, what's the status". Each
+    /// entry is a run of up to eight words and the identical run right after
+    /// it, with a pause between: punctuation or a hesitation sound, and no
+    /// other word. Runs said without a pause ("not this one not this one
+    /// either") are not a restart. A rewrite that keeps one take still says
+    /// what the speaker said, so a negation or question the first take
+    /// already counted is not required again in the second; a repeated
+    /// percent or sign still is (see `keepsEveryValueSymbol`). Like a word
+    /// repeated at once ("don't don't"), a repeated sentence counts once too
+    /// ("It's not. It's not tested."), and these count checks cannot tell
+    /// which take a moved negation came from.
+    private static func repeatedTakes(
+        in text: String
+    ) -> [(first: Range<String.Index>, second: Range<String.Index>)] {
+        let words = takeWordPattern.matches(in: text, range: NSRange(text.startIndex..., in: text))
+            .compactMap { match -> (text: String, range: Range<String.Index>)? in
+                guard let range = Range(match.range, in: text) else { return nil }
+                let word = text[range].lowercased().replacingOccurrences(of: "’", with: "'")
+                return hesitationSounds.contains(word) ? nil : (word, range)
+            }
+        var takes: [(first: Range<String.Index>, second: Range<String.Index>)] = []
+        var index = 1
+        while index < words.count {
+            let longest = min(maximumTakeLength, index, words.count - index)
+            let gap = text[words[index - 1].range.upperBound..<words[index].range.lowerBound]
+            guard gap.contains(where: { $0.isLetter || ",.;:!?…\u{2014}\u{2013}".contains($0) }),
+                  let length = stride(from: longest, through: 1, by: -1).first(where: { length in
+                (0..<length).allSatisfy { words[index - length + $0].text == words[index + $0].text }
+            }) else {
+                index += 1
+                continue
+            }
+            takes.append((
+                first: words[index - length].range.lowerBound..<words[index - 1].range.upperBound,
+                second: words[index].range.lowerBound..<words[index + length - 1].range.upperBound
+            ))
+            index += length
+        }
+        return takes
+    }
     private static let fillerPhrasePattern = try! NSRegularExpression(
         pattern: #"\b(?:you know|i mean)\b"#,
         options: [.caseInsensitive]
@@ -631,13 +710,24 @@ enum CleanupGuard {
     )
 
     /// Negations the rewrite must keep. A negation the speaker corrected
-    /// ("don't, sorry, do"), a word they repeated ("don't don't"), and a bare
-    /// "no" that answers or corrects ("five, no, six", "ten no wait twelve")
-    /// are not required.
+    /// ("don't, sorry, do"), a word they repeated ("don't don't") or said
+    /// again in a restart ("I can't, I can't make it"), and a bare "no" that
+    /// answers or corrects ("five, no, six", "ten no wait twelve") are not
+    /// required.
     private static func requiredNegations(in text: String) -> Int {
-        negations(in: text) { range, word in
-            !isCorrected(range, in: text, pattern: pausedCorrectionPattern)
-                && !(word == "no" && isBareNo(range, in: text))
+        let takes = repeatedTakes(in: text)
+        // A restart repeats a negation only when its first take meant it, so
+        // a third take repeats the second.
+        var meant: [(word: String, position: String.Index)] = []
+        return negations(in: text) { range, word in
+            guard !isCorrected(range, in: text, pattern: pausedCorrectionPattern),
+                  !(word == "no" && isBareNo(range, in: text)) else { return false }
+            let isRepeated = takes.contains { take in
+                take.second.contains(range.lowerBound)
+                    && meant.contains { $0.word == word && take.first.contains($0.position) }
+            }
+            meant.append((word, range.lowerBound))
+            return !isRepeated
         }
     }
 
