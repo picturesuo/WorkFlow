@@ -53,13 +53,17 @@ class FluidAudioEngine: TranscriptionEngine {
             throw CancellationError()
         }
 
-        let audioFile = try AVAudioFile(forReading: url)
+        // A recording with several channels is recognized from one mix of
+        // them; a one-channel recording is read as it is.
+        let source = try SpeechAudioReader.monoSource(for: url)
+        defer { source.discard() }
+        let audioFile = try AVAudioFile(forReading: source.url)
         let seconds = Double(audioFile.length) / audioFile.processingFormat.sampleRate
         let text: String
         if seconds > Self.segmentedLimitSeconds {
-            text = try await transcribeLongForm(url: url, manager: asrManager, settings: settings)
+            text = try await transcribeLongForm(url: source.url, manager: asrManager, settings: settings)
         } else {
-            text = try await transcribeSegmented(AudioConverter().resampleAudioFile(url), settings: settings)
+            text = try await transcribeSegmented(AudioConverter().resampleAudioFile(source.url), settings: settings)
         }
 
         guard !isCancelled else {

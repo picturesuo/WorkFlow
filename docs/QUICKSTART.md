@@ -127,6 +127,17 @@ If the reply drops a question you asked, or is made of material you didn't say, 
 
 When you restart by saying the same words again, as in "I can't, I can't make it" or "what's the, um, what's the status", cleanup may keep just one take. The question or negation in it still has to come through, and a reply that drops it gets your original transcript. A percent or a minus you say twice, as in "5%, 5%, and 10%" or "ten minus two, minus two", has to stay twice, even when you meant a restart.
 
+## Microphones with several inputs
+
+WorkFlow records every input channel of the microphone you pick, and a file you drop in can be stereo or surround. The speech model takes one channel, so WorkFlow mixes the channels that carry sound into one before it transcribes:
+
+- A voice on any single input, such as the second input of an audio interface, is used at its own level.
+- Idle inputs more than 40 dB under the loudest one are left out, so they don't thin the voice.
+- Several sources, such as a microphone plus call audio on an aggregate device, are averaged.
+- Two channels that cancel each other use the louder one alone.
+
+The audio saved in History keeps all of its channels; only what the model hears is mixed. A recording with one channel is read exactly as before.
+
 ## Music while you dictate
 
 To keep music or a video playing while you dictate, turn on **Settings → Dictation → Reduce background audio**. Dictation then records through macOS voice processing, the echo cancellation and noise suppression calls use. Apple describes it as taking audio the Mac plays out of what the microphone hears, so it may reduce music from this Mac's speakers and steady noise. Your music keeps playing; macOS may lower it slightly while you dictate. It's off by default, and meetings always record the microphone as is, so people on a call stay in the transcript.

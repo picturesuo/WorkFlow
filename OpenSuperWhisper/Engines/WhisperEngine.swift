@@ -300,10 +300,16 @@ class WhisperEngine: TranscriptionEngine {
 
     nonisolated func convertAudioToPCM(fileURL: URL) async throws -> [Float]? {
         return try await Task.detached(priority: .userInitiated) {
-            let (resolvedURL, isTempFile) = try self.resolveFileURL(fileURL)
+            let (containerURL, isTempFile) = try self.resolveFileURL(fileURL)
             defer {
-                if isTempFile { try? FileManager.default.removeItem(at: resolvedURL) }
+                if isTempFile { try? FileManager.default.removeItem(at: containerURL) }
             }
+            // A recording with several channels is converted from one mix of
+            // them, so a surround layout or two channels that cancel never
+            // reach the model as silence.
+            let source = try SpeechAudioReader.monoSource(for: containerURL)
+            defer { source.discard() }
+            let resolvedURL = source.url
             let audioFile = try AVAudioFile(forReading: resolvedURL)
             let sourceFormat = audioFile.processingFormat
             let totalFrames = audioFile.length
