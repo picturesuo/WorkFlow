@@ -38,6 +38,7 @@ The suites skip unless `TEST_RUNNER_WF_BENCH_CORPUS` is set:
 
 - First and last words are checked only on references that have words, and printed out of that count.
 - Words recognized on an empty reference, such as the silence and noise fixtures, are insertions in the pooled word error rate. They are also printed on their own as `silence words`, so a hallucination on silence is never hidden in the pooled rate.
+- The Wilson interval describes a proportion, so it prints as `n/a` when errors outnumber reference words, which insertions can cause. A cell whose references are all empty has no word error rate, and both print as `n/a`; its insertion and `silence words` counts are still printed.
 - `python3 -I -m unittest discover -s Scripts/dictation-benchmark` runs the scorer's own tests, which CI also runs.
 
 Normalization before scoring: lowercase; `$N` reads as "N dollars" and `%` as "percent"; digit grouping commas, ordinal suffixes and the colon in times are removed; other punctuation is dropped; ordinal words become cardinals; and runs of number words become digits. British and American spellings are not merged, so "colour" against "color" counts as an error.
