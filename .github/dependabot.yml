@@ -18,10 +18,3 @@ updates:
     directory: "/"
     schedule:
       interval: "weekly"
-    ignore:
-      # asian-autocorrect is pinned to the head of
-      # https://github.com/huacnlee/autocorrect/pull/277, which adds the
-      # autocorrect-swift crate that run.sh builds. That pull request was
-      # closed unmerged, so AutoCorrect's main branch has no such crate and a
-      # bump to it cannot build.
-      - dependency-name: "asian-autocorrect"
