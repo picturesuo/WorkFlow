@@ -1670,7 +1670,9 @@ private final class CatalogHost {
             window.titleVisibility = .hidden
             window.setFrame(NSRect(origin: .zero, size: size), display: false)
         }
-        let view = NSHostingView(rootView: root)
+        // The catalog shows every surface as it looks on screen, in a window
+        // that is never shown.
+        let view = NSHostingView(rootView: root.environment(\.windowOnScreenOverride, true))
         window.contentView = view
         view.frame = NSRect(origin: .zero, size: size)
         self.window = window

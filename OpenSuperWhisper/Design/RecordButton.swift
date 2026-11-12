@@ -189,13 +189,15 @@ struct RecordButtonFace: View {
     }
 }
 
-/// A quarter arc that turns around the ring, driven by the display clock
-/// so it stops drawing when the control leaves the screen.
+/// A quarter arc that turns around the ring, driven by the display clock.
+/// That clock keeps running in a window that is not on screen, so the arc
+/// holds still there instead of redrawing for nobody.
 private struct ProgressArc: View {
     let color: Color
+    @Environment(\.isWindowOnScreen) private var isWindowOnScreen
 
     var body: some View {
-        TimelineView(.animation) { context in
+        TimelineView(.animation(paused: !isWindowOnScreen)) { context in
             let turns = context.date.timeIntervalSinceReferenceDate / WFRecordControl.spinPeriod
             Circle()
                 .inset(by: 0.75)
@@ -207,13 +209,19 @@ private struct ProgressArc: View {
     }
 }
 
-/// The face, fed by the shared level meter only while it records, so the
-/// rest of the window never redraws at the meter's rate.
+/// The face, fed by the shared level meter only while it records in a
+/// window that is on screen. The rest of the window never redraws at the
+/// meter's rate, and a window that is closed, hidden or covered does not
+/// redraw for the meter at all: its halo rests until it is seen again.
 struct LiveRecordButtonFace: View {
     let phase: RecordButtonPhase
-    @ObservedObject private var meter = InputLevelMeter.shared
+    @StateObject private var feed = InputLevelFeed()
+    @Environment(\.isWindowOnScreen) private var isWindowOnScreen
 
     var body: some View {
-        RecordButtonFace(phase: phase, level: phase.isLive ? meter.level : 0)
+        RecordButtonFace(phase: phase, level: phase.isLive ? feed.level : 0)
+            .onChange(of: phase.isLive && isWindowOnScreen, initial: true) { _, followsMeter in
+                feed.isOn = followsMeter
+            }
     }
 }

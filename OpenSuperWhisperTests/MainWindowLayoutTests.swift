@@ -592,6 +592,18 @@ final class OffscreenHost<Content: View>: HostedControls {
     }
 }
 
+/// A hosting view that counts its layout passes. SwiftUI lays its hosting
+/// view out once for every frame it draws, so the count says how often a
+/// window was redrawn without timing anything.
+final class LayoutCountingHostingView<Content: View>: NSHostingView<Content> {
+    private(set) var layoutPasses = 0
+
+    override func layout() {
+        layoutPasses += 1
+        super.layout()
+    }
+}
+
 /// A `ContentView` in an offscreen window shaped like the app's main window.
 @MainActor
 final class MainWindowHost: HostedControls {
@@ -607,6 +619,9 @@ final class MainWindowHost: HostedControls {
     let host: NSView
     let viewModel: ContentViewModel
     let store: RecordingStore
+    /// How many times SwiftUI has laid the window out, which it does once
+    /// for every frame it draws.
+    let layoutPasses: () -> Int
 
     init(
         recordings: [Recording],
@@ -616,6 +631,7 @@ final class MainWindowHost: HostedControls {
         appStorage: UserDefaults,
         pasteboard: NSPasteboard.Name = NSPasteboard.Name("MainWindowHost-unused"),
         permissions: PermissionsManager? = nil,
+        windowOnScreen: Bool? = true,
         viewModel makeViewModel: ((TranscriptionService, TranscriptionQueue, RecordingStore) -> ContentViewModel)? = nil
     ) throws {
         store = try RecordingStore(
@@ -656,6 +672,9 @@ final class MainWindowHost: HostedControls {
         .tint(ThemePalette.controlTint)
         .environment(\.colorScheme, scheme)
         .environment(\.transcriptPasteboard, pasteboard)
+        // The window is never shown. Renders draw it as it looks on screen;
+        // nil lets the window answer for itself, which is "not on screen".
+        .environment(\.windowOnScreenOverride, windowOnScreen)
         .defaultAppStorage(appStorage)
 
         window = NSWindow(
@@ -666,7 +685,8 @@ final class MainWindowHost: HostedControls {
         )
         window.isReleasedWhenClosed = false
         window.appearance = NSAppearance(named: scheme == .dark ? .darkAqua : .aqua)
-        let hosting = NSHostingView(rootView: content)
+        let hosting = LayoutCountingHostingView(rootView: content)
+        layoutPasses = { hosting.layoutPasses }
         window.contentView = hosting
         host = hosting
         hosting.frame = NSRect(origin: .zero, size: size)

@@ -89,4 +89,6 @@ jobs:
             -only-testing:OpenSuperWhisperTests/LiveTranscriptionServiceTests \
             -only-testing:OpenSuperWhisperTests/SpeechAudioReaderTests \
             -only-testing:OpenSuperWhisperTests/RecorderLifecycleTests \
-            -only-testing:OpenSuperWhisperTests/MeetingLifecycleTests
+            -only-testing:OpenSuperWhisperTests/MeetingLifecycleTests \
+            -only-testing:OpenSuperWhisperTests/RecordingMeterCostTests/testAReadingThatChangesNothingIsNotPublished \
+            -only-testing:OpenSuperWhisperTests/RecordingMeterCostTests/testAFeedFollowsTheMeterOnlyWhileItIsOn
