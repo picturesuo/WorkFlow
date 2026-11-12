@@ -114,6 +114,19 @@ final class SpeakingLayoutTests: XCTestCase {
         XCTAssertEqual(AppPreferences.shared.typingBaselineWPM, 10)
     }
 
+    /// The summary draws its figures stronger than the words before them;
+    /// together they are still the one line VoiceOver reads.
+    func testSummaryFiguresAreSplitFromTheirLeadWithoutChangingTheLine() {
+        let line = "This month: ≈4.7 min saved · 3.6× faster"
+        let parts = SpeakingSummaryStrip.parts(of: line)
+        XCTAssertEqual(parts.lead, "This month: ")
+        XCTAssertEqual(parts.figures, "≈4.7 min saved · 3.6× faster")
+        XCTAssertEqual(parts.lead + parts.figures, line)
+        let plain = SpeakingSummaryStrip.parts(of: "No colon here")
+        XCTAssertEqual(plain.lead, "")
+        XCTAssertEqual(plain.figures, "No colon here")
+    }
+
     func testHistoryBadgesReadMinutesAndMultiplierNeverTokens() {
         func badge(_ speaking: SpeakingEligibility?) -> HistoryRow {
             HistoryRow(

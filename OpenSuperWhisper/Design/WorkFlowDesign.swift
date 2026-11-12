@@ -38,6 +38,27 @@ enum WFSpace {
 
 enum WFRadius {
     static let card: CGFloat = 14
+    /// The floating dictation bar.
+    static let bar: CGFloat = 20
+    /// A fill behind one row or a small group of controls.
+    static let panel: CGFloat = 10
+}
+
+// MARK: - Type
+
+/// The few text sizes the app uses, so every surface reads as one system.
+/// They follow the system text styles, so they scale with the Mac's text size.
+enum WFType {
+    /// A window or pane title.
+    static let title = Font.title2.weight(.semibold)
+    /// The name of a group of rows, or a day in History.
+    static let sectionLabel = Font.callout.weight(.semibold)
+    /// What a dictation says.
+    static let transcript = Font.body
+    /// Time, length, and how a text was produced.
+    static let meta = Font.subheadline
+    /// The one line that says what is happening now.
+    static let status = Font.body.weight(.semibold)
 }
 
 // MARK: - Motion
@@ -79,75 +100,89 @@ extension EnvironmentValues {
 
 // MARK: - Palette
 
-/// Charcoal ink on warm paper in light mode and ivory ink on charcoal in dark
-/// mode, both taken from the WorkFlow mark.
+/// Charcoal ink on clean white in light mode and ivory ink on near black in
+/// dark mode. The mark's two colors carry the brand; every surface around
+/// them is a quiet neutral, so text and the record control stand out.
 enum ThemePalette {
-    static func windowBackground(_ scheme: ColorScheme) -> Color {
-        scheme == .dark
-            ? Color(red: 21 / 255, green: 21 / 255, blue: 21 / 255)
-            : Color(red: 245 / 255, green: 243 / 255, blue: 238 / 255)
+    private static func gray(_ value: Double) -> Color {
+        Color(red: value / 255, green: value / 255, blue: value / 255)
     }
 
+    /// Behind grouped content: Settings, onboarding, the permissions screen.
+    static func windowBackground(_ scheme: ColorScheme) -> Color {
+        scheme == .dark
+            ? Color(red: 22 / 255, green: 22 / 255, blue: 23 / 255)
+            : Color(red: 246 / 255, green: 246 / 255, blue: 245 / 255)
+    }
+
+    /// A quiet fill with no border: an example, a summary, a hovered row.
     static func panelSurface(_ scheme: ColorScheme) -> Color {
         scheme == .dark
-            ? Color.white.opacity(0.04)
-            : Color.black.opacity(0.025)
+            ? Color.white.opacity(0.055)
+            : Color.black.opacity(0.04)
     }
 
     static func panelBorder(_ scheme: ColorScheme) -> Color {
         scheme == .dark
             ? Color.white.opacity(0.08)
-            : Color.black.opacity(0.08)
+            : Color.black.opacity(0.07)
     }
 
+    /// A group of rows, or anything that floats above the window.
     static func cardBackground(_ scheme: ColorScheme) -> Color {
         scheme == .dark
-            ? Color(red: 31 / 255, green: 30 / 255, blue: 28 / 255)
-            : Color(red: 255 / 255, green: 254 / 255, blue: 250 / 255)
+            ? Color(red: 32 / 255, green: 32 / 255, blue: 34 / 255)
+            : gray(255)
     }
 
     static func cardBorder(_ scheme: ColorScheme) -> Color {
         scheme == .dark
-            ? Color.white.opacity(0.08)
-            : Color(red: 230 / 255, green: 225 / 255, blue: 214 / 255)
+            ? Color.white.opacity(0.07)
+            : Color.black.opacity(0.07)
     }
 
     static func cardShadow(_ scheme: ColorScheme) -> Color {
-        scheme == .dark ? .clear : Color.black.opacity(0.025)
+        scheme == .dark ? .clear : Color.black.opacity(0.04)
     }
 
     static func hairline(_ scheme: ColorScheme) -> Color {
-        scheme == .dark ? Color.white.opacity(0.10) : Color.black.opacity(0.08)
+        scheme == .dark ? Color.white.opacity(0.09) : Color.black.opacity(0.08)
     }
 
-    /// The main window's toolbar and dictation bar.
+    /// The main window's toolbar. It shares the History's surface, so the
+    /// window reads as one sheet with the title bar part of it.
     static func chromeBackground(_ scheme: ColorScheme) -> Color {
-        scheme == .dark ? cardBackground(.dark) : windowBackground(.light)
+        contentBackground(scheme)
     }
 
-    /// The History list: brighter than the chrome in light mode and deeper in
-    /// dark mode, the way macOS content areas sit against their toolbars.
+    /// The History list and anything else that is read rather than set.
     static func contentBackground(_ scheme: ColorScheme) -> Color {
-        scheme == .dark ? windowBackground(.dark) : cardBackground(.light)
+        scheme == .dark ? windowBackground(.dark) : gray(255)
     }
 
     /// The mark's charcoal in light mode and its ivory in dark mode: the record
     /// control, the ready state, and selection.
     static func ink(_ scheme: ColorScheme) -> Color {
-        scheme == .dark ? BrandPalette.ivory : Color(red: 31 / 255, green: 29 / 255, blue: 26 / 255)
+        scheme == .dark ? BrandPalette.ivory : BrandPalette.charcoal
     }
 
     /// Glyphs drawn on `ink`, like the W on its tile.
     static func onInk(_ scheme: ColorScheme) -> Color {
-        scheme == .dark ? Color(red: 31 / 255, green: 29 / 255, blue: 26 / 255) : BrandPalette.ivory
+        scheme == .dark ? BrandPalette.charcoal : BrandPalette.ivory
     }
 
-    /// Links and emphasized labels: a warm brass with AA text contrast on
-    /// cards (6.3:1 light, 10.2:1 dark).
+    /// Words that do something when clicked. They are the ink itself, set
+    /// apart from the text around them by weight rather than by a hue
+    /// (17:1 on cards in light mode, 13:1 in dark).
     static func linkText(_ scheme: ColorScheme) -> Color {
-        scheme == .dark
-            ? Color(red: 216 / 255, green: 201 / 255, blue: 169 / 255)
-            : Color(red: 107 / 255, green: 93 / 255, blue: 69 / 255)
+        ink(scheme)
+    }
+
+    /// A link that should not pull the eye, such as "Show full text" under
+    /// a transcript: the ink at reduced strength (4.9:1 on the History in
+    /// light mode, 7:1 in dark).
+    static func quietLink(_ scheme: ColorScheme) -> Color {
+        ink(scheme).opacity(0.62)
     }
 
     /// Live recording: a warm vermilion that sits with charcoal and ivory.
@@ -175,13 +210,22 @@ enum ThemePalette {
             : Color(red: 150 / 255, green: 88 / 255, blue: 0 / 255)
     }
 
-    /// Fill for switches, prominent buttons, and checkboxes. White labels stay
-    /// readable on it (14.1:1 light, 4.9:1 dark), and setting it explicitly
-    /// keeps a user-chosen system accent from recoloring the app.
+    /// Done, granted, ready: a green quiet enough to sit beside the ink and
+    /// still read as text (5.0:1 on cards in light mode, 7.6:1 in dark).
+    static func success(_ scheme: ColorScheme) -> Color {
+        scheme == .dark
+            ? Color(red: 98 / 255, green: 196 / 255, blue: 141 / 255)
+            : Color(red: 30 / 255, green: 126 / 255, blue: 78 / 255)
+    }
+
+    /// Fill for switches, prominent buttons, and checkboxes: the charcoal in
+    /// light mode and a neutral gray in dark mode. White labels stay readable
+    /// on it (17:1 light, 4.7:1 dark), and setting it explicitly keeps a
+    /// user-chosen system accent from recoloring the app.
     static let controlTint = Color(nsColor: NSColor(name: nil) { appearance in
         appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
-            ? NSColor(srgbRed: 122 / 255, green: 112 / 255, blue: 95 / 255, alpha: 1)
-            : NSColor(srgbRed: 46 / 255, green: 43 / 255, blue: 38 / 255, alpha: 1)
+            ? NSColor(srgbRed: 116 / 255, green: 116 / 255, blue: 118 / 255, alpha: 1)
+            : NSColor(srgbRed: 28 / 255, green: 28 / 255, blue: 28 / 255, alpha: 1)
     })
 }
 
@@ -338,7 +382,7 @@ struct SurfaceCard: ViewModifier {
             .clipShape(RoundedRectangle(cornerRadius: WFRadius.card, style: .continuous))
             .overlay(
                 RoundedRectangle(cornerRadius: WFRadius.card, style: .continuous)
-                    .stroke(
+                    .strokeBorder(
                         isHovered
                             ? ThemePalette.ink(colorScheme).opacity(0.22)
                             : ThemePalette.cardBorder(colorScheme),
@@ -347,15 +391,41 @@ struct SurfaceCard: ViewModifier {
             )
             .shadow(
                 color: ThemePalette.cardShadow(colorScheme),
-                radius: isHovered ? 6 : 2,
+                radius: isHovered ? 8 : 3,
                 y: isHovered ? 2 : 1
             )
+    }
+}
+
+/// A control surface that floats over content: translucent, softly lit at
+/// its edge, and lifted by a wide shadow, so what scrolls beneath shows
+/// through without competing with it.
+struct FloatingBar: ViewModifier {
+    var cornerRadius: CGFloat = WFRadius.bar
+    @Environment(\.colorScheme) private var colorScheme
+
+    func body(content: Content) -> some View {
+        let shape = RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+        content
+            .background {
+                shape
+                    .fill(ThemePalette.cardBackground(colorScheme).opacity(colorScheme == .dark ? 0.72 : 0.78))
+                    .background { shape.fill(Material.regularMaterial) }
+            }
+            .overlay { shape.strokeBorder(ThemePalette.panelBorder(colorScheme), lineWidth: 1) }
+            .clipShape(shape)
+            .shadow(color: Color.black.opacity(colorScheme == .dark ? 0.45 : 0.10), radius: 16, y: 6)
+            .shadow(color: Color.black.opacity(colorScheme == .dark ? 0.30 : 0.05), radius: 2, y: 1)
     }
 }
 
 extension View {
     func surfaceCard(isHovered: Bool = false) -> some View {
         modifier(SurfaceCard(isHovered: isHovered))
+    }
+
+    func floatingBar(cornerRadius: CGFloat = WFRadius.bar) -> some View {
+        modifier(FloatingBar(cornerRadius: cornerRadius))
     }
 }
 

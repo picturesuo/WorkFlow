@@ -49,8 +49,8 @@ Settings (⌘,) has four panes; ⌘1 to ⌘4 switch between them, and Settings r
 ## Main window at a glance
 
 - **Toolbar**: search History, **More** (⋯) for **Start Meeting Recording…** and **Delete All Recordings…**, and Settings. While a meeting records, a stop button joins the toolbar and the record button stops and saves it.
-- **History**: dictations grouped by day, newest first. Each row has **Copy**; its ⋯ menu, or a right-click, also offers Play Recording, Regenerate Transcript, and Delete Recording. A failed transcription that kept its audio shows **Regenerate** in place of Copy, and a long transcript opens with **Show full text**. A recording WorkFlow closed on before transcribing it (a quit, crash, or force quit) comes back at the next launch as a failed row marked "Recovered recording"; nothing is transcribed or pasted until you choose **Regenerate**, and you can delete it like any other row.
-- **Dictation bar**: the dictation mode and **Learn…**, what dictation is doing now with your shortcut, the microphone menu (⌄), and the record button. While it listens, the button shows a small vermilion stop square and a faint halo that follows your microphone's level, so a still halo means the microphone hears nothing.
+- **History**: dictations grouped by day, newest first. Each row shows what you said first, then a quiet line with the time, the length, and how the text was produced. That line ends with **Copy**; the ⋯ menu beside it, or a right-click, also offers Play Recording, Regenerate Transcript, and Delete Recording. A failed transcription that kept its audio shows **Regenerate** in place of Copy, and a long transcript opens with **Show full text**. A recording WorkFlow closed on before transcribing it (a quit, crash, or force quit) comes back at the next launch as a failed row marked "Recovered recording"; nothing is transcribed or pasted until you choose **Regenerate**, and you can delete it like any other row.
+- **Dictation bar**: it floats over the bottom of History, which scrolls beneath it. It holds the dictation mode and **Learn…**, what dictation is doing now with your shortcut, the microphone menu (⌄), and the record button. While it listens, the button shows a small vermilion stop square and a faint halo that follows your microphone's level, so a still halo means the microphone hears nothing.
 
 ## First dictation
 
@@ -79,6 +79,8 @@ To make a mode more specific, open **Settings → Cleanup → Custom filters**, 
 Cleanup never answers what you dictate: a question or request comes back rewritten as that question or request, or as your original transcript.
 
 WorkFlow launches at login and stays available in the menu bar by default. Dictation works entirely locally before any API is configured.
+
+Escape cancels a dictation. Once a recording has run for 10 seconds, the first Escape only asks you to confirm, and a second Escape within 5 seconds cancels; after those 5 seconds the next Escape asks again, even if WorkFlow was briefly too busy to clear the prompt. **Cancel without confirmation** under More options skips the second Escape.
 
 If you sometimes press Escape accidentally, enable **Settings → Dictation → More options → Ignore Esc while recording**. Escape will then leave active dictations recording; use the configured recording shortcut to finish normally. Escape while a stopped dictation is still transcribing cancels its paste either way; the text stays in History.
 
@@ -126,6 +128,27 @@ Cleanup rewrites what you said. It doesn't answer it. A question you dictate com
 If the reply drops a question you asked, or is made of material you didn't say, like an answer, advice, a poem, or a joke, WorkFlow uses your original transcript. A missing question mark alone is fine. These checks catch clear answers, not every subtle change of meaning.
 
 When you restart by saying the same words again, as in "I can't, I can't make it" or "what's the, um, what's the status", cleanup may keep just one take. The question or negation in it still has to come through, and a reply that drops it gets your original transcript. A percent or a minus you say twice, as in "5%, 5%, and 10%" or "ten minus two, minus two", has to stay twice, even when you meant a restart.
+
+## If the microphone stops while you record
+
+When the microphone goes away in the middle of a recording, for example a device is unplugged, a headset disconnects, or the recorder fails, WorkFlow keeps what it recorded until then:
+
+- A dictation ends there, is transcribed and delivered as usual, and the indicator shows **Recording cut short**.
+- A meeting is saved to History with the audio so far, and WorkFlow tells you it stopped early.
+- Esc still discards the recording.
+
+Starting a recording also stops a History recording that is playing, so the microphone doesn't record it.
+
+## Microphones with several inputs
+
+WorkFlow records every input channel of the microphone you pick, and a file you drop in can be stereo or surround. The speech model takes one channel, so WorkFlow mixes the channels that carry sound into one before it transcribes:
+
+- A voice on any single input, such as the second input of an audio interface, is used at its own level.
+- Idle inputs more than 40 dB under the loudest one are left out, so they don't thin the voice.
+- Several sources, such as a microphone plus call audio on an aggregate device, are averaged.
+- Two channels that cancel each other use the louder one alone.
+
+The audio saved in History keeps all of its channels; only what the model hears is mixed. A recording with one channel is read exactly as before.
 
 ## Music while you dictate
 

@@ -181,6 +181,13 @@ final class RecordControlTests: XCTestCase {
         XCTAssertEqual(DictationDockStatus.noMicrophone.recordPhase, .unavailable)
         XCTAssertFalse(DictationDockStatus.noMicrophone.canActivate)
         XCTAssertTrue(DictationDockStatus.meeting(1).canActivate, "A running meeting can be stopped from the dock")
+        XCTAssertEqual(DictationDockStatus.startedMeeting(isConnecting: false), .meeting(0))
+        let connectingMeeting = DictationDockStatus.startedMeeting(isConnecting: true)
+        XCTAssertEqual(connectingMeeting.title, DictationDockStatus.connecting.title, "A meeting says its microphone is connecting")
+        XCTAssertFalse(connectingMeeting.recordPhase.isLive, "Nothing is recorded yet")
+        XCTAssertTrue(connectingMeeting.canActivate, "A started meeting can be stopped while its microphone connects")
+        XCTAssertEqual(connectingMeeting.recordAccessibilityLabel, "Stop meeting")
+        XCTAssertFalse(DictationDockStatus.connecting.canActivate, "A dictation that is connecting has nothing to press")
         XCTAssertEqual(DictationDockStatus.meeting(1).recordAccessibilityLabel, "Stop & save meeting")
         XCTAssertEqual(DictationDockStatus.recording(1).recordAccessibilityLabel, "Stop recording")
         XCTAssertEqual(DictationDockStatus.ready.recordAccessibilityLabel, "Start recording")
@@ -344,7 +351,7 @@ final class RecordControlTests: XCTestCase {
 
     func testDockKeepsOneHeightInEveryStatusAndWidth() {
         let statuses: [DictationDockStatus] = [
-            .ready, .connecting, .recording(3_599), .meeting(4_000), .transcribing, .loadingModel, .processingQueue, .savingMeeting, .noMicrophone,
+            .ready, .connecting, .meetingConnecting, .recording(3_599), .meeting(4_000), .transcribing, .loadingModel, .processingQueue, .savingMeeting, .noMicrophone,
         ]
         for width in [CGFloat(440), 560, 900] {
             let heights = Set(statuses.map { status in

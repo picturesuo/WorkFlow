@@ -13,8 +13,8 @@ Order of work: what a user feels comes first (latency they wait through, hangs a
 | # | Machine | Finding | Harm | Evidence | Status |
 |---|---|---|---|---|---|
 | 1 | Process exit | Quitting while whisper.cpp runs on a background thread aborts in a static destructor | Crash report on quit; test host aborts after a green run | 8 crash reports on 2026-11-09, one signature | fixed (PR #14) |
-| 2 | Recorder | A standard capture that fails on its own deletes the audio, frees the microphone, and tells nobody; the capsule keeps "listening"; a meeting keeps "recording" | Lost dictation or lost meeting with a lying UI | failing tests | proven (test) |
-| 3 | Recorder | Cancel waits on the recorder queue from the main thread, behind microphone start | Main-thread stall on every cancelled press (Esc, modifier used as a shortcut) | benchmark `cancel_after_start` | not measured yet: the test identity has no microphone permission (see perf/baseline.md); suspected |
+| 2 | Recorder | A standard capture that fails on its own deletes the audio, frees the microphone, and tells nobody; the capsule keeps "listening"; a meeting keeps "recording" | Lost dictation or lost meeting with a lying UI | failing tests | fixed: both capture paths keep the audio and tell the owner once, and a meeting saves what it has (see below) |
+| 3 | Recorder | Cancel waits on the recorder queue from the main thread, behind microphone start | Main-thread stall on every cancelled press (Esc, modifier used as a shortcut) | failing test on scripted hardware (`RecorderLifecycleTests.testCancelNeverWaitsForAMicrophoneThatIsStillOpening`: 0.55 s on the main thread behind a 0.6 s microphone start) | fixed: cancel ends ownership at once and closes the capture on the recorder queue. The `cancel_after_start` benchmark on a real microphone is still not measured (see perf/baseline.md) |
 | 4 | Trigger | The shortcut keeps its own copy of "a dictation is active"; while the capsule shows a notice the next press is swallowed | A press that does nothing | failing test | proven (test) |
 | 5 | Dictation session | The main window keeps a second copy of the dictation state and shows "Ready to dictate" while a hotkey dictation records; clicking record raises an error alert | Confusing, no data loss | failing test | proven (test) |
 | 6 | Dictation session | A press shortly after a stop is treated three ways depending on timing (see below) | Either the new speech is not recorded, or the older text is never pasted | characterized by test | product decision, not changed |
@@ -71,10 +71,14 @@ The original crash did not reproduce on demand (0 aborts in 45 runs before the c
 
 Invariants: phase is idle exactly when nobody owns the recorder; audio is discarded only by cancel; every accepted start gets exactly one terminal answer; a capture that ends on its own notifies its owner once and keeps its audio; a stale id never changes another session; the published flags always equal the phase; every opened capture is closed.
 
-Illegal today:
-- `audioRecorderDidFinishRecording(successfully: false)` takes ownership away with `take(ifMatching: nil)`, deletes the file, and notifies nobody. Owner state "recording", recorder state "idle, audio gone". The voice-processed path handles the same event correctly (keeps the audio, sends `captureStopped`); the two capture paths disagree.
-- `MeetingSessionController` never listens for a capture that ended, so (meeting: recording, recorder: idle) persists until the user stops, and the stop then reports no audio.
-- `cancelRecording` uses `workQueue.sync` from the main thread: (main thread blocked, recorder still opening the microphone).
+Illegal before, fixed in the current recorder (it still runs its own gate and queue; driving it from `RecorderCore` is the remaining migration step):
+- `audioRecorderDidFinishRecording(successfully: false)` took ownership away with `take(ifMatching: nil)`, deleted the file, and notified nobody: owner state "recording", recorder state "idle, audio gone", while the voice-processed path kept the audio and sent `captureStopped`. Both paths now go through one `captureEnded`: the session stays with its owner, the published flags go idle, the owner is told once, and its usual stop returns the audio recorded until then. A standard capture that stopped on its own reports no time, so its length is read from the file, and a header the recorder never finished is completed in place the way launch recovery completes one (`StandardCapture.salvagedDuration`).
+- `MeetingSessionController` never listened for a capture that ended, so (meeting: recording, recorder: idle) persisted until the user stopped, and the stop then reported no audio. It now ends the meeting there, queues the audio it has, and says the meeting stopped early. It also shows a microphone that is still connecting, and starts the meeting's clock when audio arrives.
+- `cancelRecording` used `workQueue.sync` from the main thread: (main thread blocked, recorder still opening the microphone). Cancel now takes ownership away at once and closes the capture on the queue; a press cancelled before the queue reaches it never opens the microphone.
+- The system input went back to the previous device when one recording's stop tail ended, even while the next recording, started inside that tail, was still capturing its own. It now goes back only when no capture is still writing.
+- A History recording kept playing through the speakers when a recording started, so the microphone recorded it. Starting a recording now stops it.
+
+The recorder reaches audio hardware only through `RecordingHardware` (the active microphone, the system input, the standard capture, the voice engine, the start sound, playback). The app passes `LiveRecordingHardware`; `RecorderLifecycleTests` and `MeetingLifecycleTests` pass scripted hardware and drive the real `AudioRecorder` and `MeetingSessionController` through starts, stops, cancels, a capture that dies, overlapping sessions and a seeded random sequence, without opening a microphone. They prove the recorder's own lifecycle. What `AVAudioRecorder` reports and leaves on disk when a real device disappears was not observed.
 
 ## 4. Trigger gesture (`TriggerCore`)
 
@@ -130,6 +134,7 @@ Explicit model (one session):
 Illegal today:
 - (window dock "Ready to dictate", hotkey dictation capturing): two owners of one fact (finding 5).
 - (`isConfirmingCancel`, state not recording) and (`isFinalizing`, state not decoding) are representable; nothing prevents them.
+- Fixed: (`isConfirmingCancel`, confirmation window already over). Only a main-run-loop timer ended the window, so while the main thread was busy past it, or the timer was delivered late, a second Esc still cancelled the recording. `handleCancelRequest` now judges the window by a continuous clock at the press and arms again when it has passed; the timer only clears what the capsule shows. Reproduced by keeping the main thread busy for 17 s inside the old test's wait, which failed with the three errors a loaded combined run had shown, and pinned by `EscapeCancelConfirmationTests`, whose expiry tests move the clock by hand instead of waiting in real time.
 - (state recording, no recorder session): reachable after the recorder failure in finding 2.
 
 Finding 6, the three timing windows after a stop. A new press:

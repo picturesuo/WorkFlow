@@ -162,7 +162,7 @@ struct FilterAssistantSheet: View {
                 } else if voice.state == .recording {
                     Label("Listening for the assistant only. Nothing is pasted.", systemImage: "waveform")
                         .font(.caption)
-                        .foregroundColor(.red)
+                        .foregroundStyle(ThemePalette.signalText(colorScheme))
                 } else if voice.state == .transcribing {
                     Text("Transcribing on this Mac…")
                         .font(.caption)
@@ -208,7 +208,7 @@ struct FilterAssistantSheet: View {
                     voice.stop()
                 } label: {
                     Image(systemName: "stop.fill")
-                        .foregroundColor(.red)
+                        .foregroundStyle(ThemePalette.signal(colorScheme))
                         .frame(width: 18, height: 18)
                 }
                 .help("Stop and transcribe")

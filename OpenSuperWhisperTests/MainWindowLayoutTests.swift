@@ -154,6 +154,70 @@ final class MainWindowLayoutTests: XCTestCase {
         XCTAssertEqual(Set(historyHeights.values).count, 1, "The dictation bar must not grow over History: \(historyHeights)")
     }
 
+    /// The dictation bar floats: History runs to the window's bottom edge
+    /// behind it instead of ending above it, and the bar sits inside
+    /// History's frame with a margin on every side.
+    func testTheDictationBarFloatsOverHistory() throws {
+        for (name, size) in Self.sizes {
+            let window = try host(size: size)
+            let list = window.frameInHost(try XCTUnwrap(window.historyScrollView))
+            let record = window.frameInHost(try XCTUnwrap(window.recordButton))
+            XCTAssertEqual(list.maxY, window.host.bounds.height, accuracy: 0.5, "History reaches the window's bottom edge at \(name)")
+            XCTAssertTrue(list.contains(record), "The record control floats over History at \(name)")
+            XCTAssertLessThanOrEqual(record.maxY, window.host.bounds.height - DictationDock.margin, "The bar keeps its margin from the window edge at \(name)")
+            XCTAssertLessThanOrEqual(record.maxX, window.host.bounds.width - DictationDock.margin, "and from its side at \(name)")
+            window.close()
+        }
+    }
+
+    /// At the width the window opens with, the mode row keeps its label and
+    /// its segments at their own width with room to spare, so choosing a
+    /// segment never flips the row to its narrower form. Narrow windows drop
+    /// the label and let the segments fill the bar.
+    func testModeRowKeepsItsLabelAtTheOpeningWidthWithRoomToSpare() throws {
+        func segments(width: CGFloat) throws -> (frame: CGRect, natural: CGFloat) {
+            let dock = OffscreenHost(
+                DictationDock(status: .ready, shortcut: "⌃ / fn", writingSelection: .constant(.builtIn(.everyday)),
+                              onLearn: {}, microphones: [MainWindowFixtures.microphone],
+                              currentMicrophoneID: MainWindowFixtures.microphone.id, onSelectMicrophone: { _ in }, onRecord: {}),
+                size: CGSize(width: width, height: 140)
+            )
+            let control = try XCTUnwrap(dock.segmentedControls.first)
+            return withExtendedLifetime(dock) { (dock.frameInHost(control), control.fittingSize.width) }
+        }
+        for width in [CGFloat(560), 550] {
+            let row = try segments(width: width)
+            XCTAssertEqual(row.frame.width, row.natural, accuracy: 1, "The segments keep their own width at \(width)")
+            XCTAssertGreaterThan(row.frame.minX, 90, "The Dictation mode label sits before them at \(width)")
+        }
+        let narrow = try segments(width: 440)
+        XCTAssertLessThan(narrow.frame.minX, 40, "No label in a narrow window")
+        XCTAssertGreaterThan(narrow.frame.width, 300, "The segments fill the bar")
+    }
+
+    /// The bar is a sibling of History, not part of it: when History reloads,
+    /// as it does after every dictation, the bar keeps the same controls, so
+    /// a menu that is open, keyboard focus, and the record control's state
+    /// are not thrown away.
+    func testAHistoryRefreshKeepsTheDictationBarsControls() async throws {
+        for recordings in [[], MainWindowFixtures.history()] {
+            let window = try host(recordings, appStorage: .standard)
+            let picker = try XCTUnwrap(window.segmentedControls.first)
+            let record = try XCTUnwrap(window.recordButton)
+
+            NotificationCenter.default.post(name: RecordingStore.recordingsDidUpdateNotification, object: nil)
+            window.viewModel.refreshHistory()
+            for _ in 0..<40 { try await Task.sleep(nanoseconds: 10_000_000) }
+            window.settle()
+
+            let name = recordings.isEmpty ? "an empty History" : "a History with rows"
+            XCTAssertTrue(window.segmentedControls.first === picker, "The mode picker survives a refresh of \(name)")
+            XCTAssertNotNil(picker.window, "and is still in the window")
+            XCTAssertTrue(window.recordButton === record, "The record control survives a refresh of \(name)")
+            window.close()
+        }
+    }
+
     /// The README preview: the window listening under Auto, with three
     /// successful synthetic dictations and their time saved. It is rendered
     /// from the real view like every other state here; nothing is recorded.
@@ -243,7 +307,7 @@ final class MainWindowLayoutTests: XCTestCase {
             XCTAssertGreaterThan(expanded.frame.height, collapsedHeight + 30, "Show full text reveals the hidden lines at \(name)")
             if name == "screenshot" { save(try window.render(), name: "state-long-expanded-light") }
 
-            let copy = try XCTUnwrap(window.rowButton(above: expanded), "The row shows a Copy button")
+            let copy = try XCTUnwrap(window.rowButton(below: expanded), "The row shows a Copy button")
             copy.performClick(nil)
             XCTAssertEqual(pasteboard.string(forType: .string), MainWindowFixtures.longEssay, "Copy takes the whole transcript")
             pasteboard.clearContents()
@@ -256,7 +320,7 @@ final class MainWindowLayoutTests: XCTestCase {
         let short = try XCTUnwrap(window.textField(containing: "Move the design review"))
         XCTAssertEqual(short.stringValue, "Move the design review to Thursday afternoon.")
         XCTAssertLessThan(short.frame.height, 24, "One line")
-        try XCTUnwrap(window.rowButton(above: short)).performClick(nil)
+        try XCTUnwrap(window.rowButton(below: short)).performClick(nil)
         XCTAssertEqual(pasteboard.string(forType: .string), "Move the design review to Thursday afternoon.")
         window.close()
     }
@@ -653,13 +717,13 @@ final class MainWindowHost: HostedControls {
     }
 
     /// The visible row button (Copy, or Regenerate after a failure) on the
-    /// metadata line just above a transcript.
-    func rowButton(above text: NSView) -> NSButton? {
+    /// metadata line just under a transcript.
+    func rowButton(below text: NSView) -> NSButton? {
         guard let list = historyScrollView else { return nil }
-        let textTop = frameInHost(text).minY
+        let textBottom = frameInHost(text).maxY
         return buttons
-            .filter { $0.isDescendant(of: list) && $0.frame.width <= 30 && frameInHost($0).maxY <= textTop + 4 }
-            .max { frameInHost($0).minY < frameInHost($1).minY }
+            .filter { $0.isDescendant(of: list) && $0.frame.width <= 30 && frameInHost($0).minY >= textBottom - 4 }
+            .min { frameInHost($0).minY < frameInHost($1).minY }
     }
 
     private var toolbarButtons: [NSButton] {
@@ -669,9 +733,12 @@ final class MainWindowHost: HostedControls {
     /// The toolbar's stop-meeting button, present only while a meeting runs.
     var meetingStopButton: NSButton? { toolbarButtons.count > 1 ? toolbarButtons.min { frameInHost($0).minX < frameInHost($1).minX } : nil }
 
+    /// The record control: the one button with its frame, wherever the
+    /// floating dictation bar puts it.
     var recordButton: NSButton? {
-        let bottom = buttons.filter { frameInHost($0).minY > host.bounds.height - 72 }
-        return bottom.max { frameInHost($0).maxX < frameInHost($1).maxX }
+        buttons.first {
+            abs($0.frame.width - WFRecordControl.size) < 1 && abs($0.frame.height - WFRecordControl.size) < 1
+        }
     }
 
     /// macOS 26 stretches a scroll view that touches the toolbar band up under

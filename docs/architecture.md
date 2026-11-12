@@ -42,7 +42,7 @@ event sources            pure core                    effect runner             
 ## Migration order (every step ships, the app keeps working)
 
 1. **Measure**: signposts on the four flows and a repeatable benchmark (done first; `Scripts/perf/`).
-2. **Recorder**: `AudioRecorder` drives its ownership and capture lifecycle from `RecorderCore`. Fixes a capture that dies on its own deleting the audio and leaving the UI "listening", and cancel blocking the main thread.
+2. **Recorder**: `AudioRecorder` drives its ownership and capture lifecycle from `RecorderCore`. The two bugs this step was to fix, a capture that dies on its own deleting the audio and leaving the UI "listening", and cancel blocking the main thread, are fixed in the current recorder, which now reaches hardware only through `RecordingHardware` so tests drive it with scripted devices. Moving its gate and queue onto `RecorderCore` is still to do, and that seam is what makes it safe.
 3. **Process exit** (done): native whisper.cpp calls pass through `ProcessExitGate`, so quitting waits for them instead of aborting in a static destructor. `DictationCore` is now linked into the app target for `ExitGateCore`; `RecorderCore` and `TriggerCore` are written but not yet wired.
 4. **Trigger**: `ShortcutManager` drives gestures from `TriggerCore` and stops mirroring the session.
 5. **Session**: `IndicatorViewModel`'s flags become one `DictationSessionCore` phase; the main-window dock renders the same store instead of its own copy. `LatestDictationGate` folds in.
@@ -57,4 +57,4 @@ Each step lands as its own change with: characterization tests first, the repro 
 - **Delivery policy for overlapping dictations** ("the newest dictation is pasted, older ones go to History") is a product decision that exists and is tested. The session core will encode it as is. Delivering every dictation in order is listed in state-machines.md as a recommendation, not done.
 - **Engines, cleanup providers, learning, filters, onboarding, settings.** Not on the measured flows, no failure evidence found.
 - **`RecordingStore` on a single `DatabaseQueue`.** Fine at the measured sizes; revisit only with a trace.
-- **Meeting recording and the in-window record button keep their behavior**; they gain correct handling of a capture that ends on its own through the recorder step.
+- **Meeting recording and the in-window record button keep their behavior**; a capture that ends on its own now ends them with the audio recorded until then.

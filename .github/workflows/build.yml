@@ -86,4 +86,7 @@ jobs:
             -only-testing:OpenSuperWhisperTests/SegmentedTranscriberTests \
             -only-testing:OpenSuperWhisperTests/GrowingWAVReaderTests \
             -only-testing:OpenSuperWhisperTests/LiveTranscriptionTests \
-            -only-testing:OpenSuperWhisperTests/LiveTranscriptionServiceTests
+            -only-testing:OpenSuperWhisperTests/LiveTranscriptionServiceTests \
+            -only-testing:OpenSuperWhisperTests/SpeechAudioReaderTests \
+            -only-testing:OpenSuperWhisperTests/RecorderLifecycleTests \
+            -only-testing:OpenSuperWhisperTests/MeetingLifecycleTests

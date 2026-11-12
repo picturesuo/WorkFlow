@@ -595,6 +595,9 @@ struct ContentView: View {
     @State private var showDeleteConfirmation = false
     @State private var showMeetingNamePrompt = false
     @State private var meetingTitle = MeetingSessionController.defaultTitle()
+    /// The floating dictation bar's height, which History keeps clear at
+    /// its end. It is the same in every dictation state.
+    @State private var dockHeight: CGFloat = DictationDock.expectedHeight
     private var writingFilter = WritingFilterPreferences()
     @AppStorage(SpeakingEfficiency.typingWPMKey) private var typingWPM = SpeakingEfficiency.defaultTypingWPM
     @AppStorage("modifierOnlyHotkey") private var modifierOnlyHotkeyRaw = ModifierKey.fn.rawValue
@@ -688,25 +691,34 @@ struct ContentView: View {
                             ) { SettingsRequest.open(pane: .dictation) }
                         }
 
-                        HistoryList(
-                            history: viewModel.history,
-                            search: viewModel.search,
-                            regenerationFilters: writingFilter.filters,
-                            shortcut: currentShortcutDescription,
-                            onDelete: viewModel.deleteRecording
-                        )
-                            .frame(maxWidth: .infinity, maxHeight: .infinity)
-                            .background(ThemePalette.contentBackground(colorScheme))
+                        // The dictation bar floats over the History, which
+                        // scrolls beneath it and keeps its last row clear of
+                        // it. The bar is a sibling of the list, never part of
+                        // it, so a History refresh cannot rebuild its controls.
+                        ZStack(alignment: .bottom) {
+                            HistoryList(
+                                history: viewModel.history,
+                                search: viewModel.search,
+                                regenerationFilters: writingFilter.filters,
+                                shortcut: currentShortcutDescription,
+                                bottomInset: dockHeight,
+                                onDelete: viewModel.deleteRecording
+                            )
+                                .frame(maxWidth: .infinity, maxHeight: .infinity)
 
-                        DictationControls(
-                            viewModel: viewModel,
-                            transcriptionService: viewModel.transcriptionService,
-                            transcriptionQueue: viewModel.transcriptionQueue,
-                            microphoneService: viewModel.microphoneService,
-                            meetingController: meetingController,
-                            shortcut: currentShortcutDescription,
-                            writingFilter: writingFilter
-                        )
+                            DictationControls(
+                                viewModel: viewModel,
+                                transcriptionService: viewModel.transcriptionService,
+                                transcriptionQueue: viewModel.transcriptionQueue,
+                                microphoneService: viewModel.microphoneService,
+                                meetingController: meetingController,
+                                shortcut: currentShortcutDescription,
+                                writingFilter: writingFilter
+                            )
+                            .background { DockScrim() }
+                            .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { dockHeight = $0 }
+                        }
+                        .background(ThemePalette.contentBackground(colorScheme))
                     }
                     // The toolbar row is the title bar, beside the traffic lights.
                     .ignoresSafeArea(.container, edges: .top)
@@ -753,9 +765,9 @@ struct ContentView: View {
             Text("\(AppIdentity.productName) records locally until you stop it. Meeting mode never pastes into another app.")
         }
         .alert(
-            "Meeting recording failed",
+            meetingController.issue?.title ?? "Meeting recording failed",
             isPresented: Binding(
-                get: { meetingController.errorMessage != nil },
+                get: { meetingController.issue != nil },
                 set: { if !$0 { meetingController.clearError() } }
             )
         ) {
@@ -791,6 +803,31 @@ struct ContentView: View {
 }
 
 
+/// What scrolls beneath the floating dictation bar fades into the window
+/// instead of being cut off at the bar's edge.
+struct DockScrim: View {
+    @Environment(\.colorScheme) private var colorScheme
+
+    /// How far above the bar the fade starts.
+    static let lead: CGFloat = 28
+
+    var body: some View {
+        let surface = ThemePalette.contentBackground(colorScheme)
+        LinearGradient(
+            stops: [
+                .init(color: surface.opacity(0), location: 0),
+                .init(color: surface.opacity(0.9), location: 0.35),
+                .init(color: surface, location: 1),
+            ],
+            startPoint: .top, endPoint: .bottom
+        )
+        // The fade begins a line of text above the bar.
+        .padding(.top, -Self.lead)
+        .allowsHitTesting(false)
+        .accessibilityHidden(true)
+    }
+}
+
 /// The toolbar's search field. Only this view observes the typed text.
 private struct HistorySearchField: View {
     @ObservedObject var search: HistorySearch
@@ -820,9 +857,16 @@ struct HistoryList: View {
     @ObservedObject var search: HistorySearch
     let regenerationFilters: [CustomCleanupFilter]
     let shortcut: String
+    /// Room kept clear at the end of the list for what floats over it.
+    var bottomInset: CGFloat = 0
     let onDelete: (Recording) -> Void
 
     private static let topAnchor = "history-list-top"
+
+    /// The load-error bar under the rows already keeps the list clear.
+    private var listEndInset: CGFloat {
+        history.errorMessage == nil ? bottomInset : 0
+    }
 
     var body: some View {
         if history.recordings.isEmpty {
@@ -837,6 +881,7 @@ struct HistoryList: View {
                 }
             }
             .padding(WFSpace.xl)
+            .padding(.bottom, bottomInset)
         } else {
             VStack(spacing: 0) {
                 ScrollViewReader { proxy in
@@ -886,8 +931,9 @@ struct HistoryList: View {
                                     .padding(WFSpace.md)
                             }
                         }
-                        .padding(.bottom, WFSpace.sm)
+                        .padding(.bottom, WFSpace.sm + listEndInset)
                     }
+                    .contentMargins(.bottom, listEndInset, for: .scrollIndicators)
                     // A new query's results start at the top once they arrive,
                     // as they did when the list was rebuilt. Scroll to the top
                     // of the list, not to the first row: a row scrolled to the
@@ -898,6 +944,7 @@ struct HistoryList: View {
                 }
                 if let error = history.errorMessage {
                     HistoryLoadError(message: error, onRetry: { history.loadMore() }, compact: true)
+                        .padding(.bottom, bottomInset)
                 }
             }
         }
@@ -919,6 +966,7 @@ struct MainToolbar: View {
     let onMeeting: () -> Void
     let onDeleteAll: () -> Void
     let onSettings: () -> Void
+    @Environment(\.colorScheme) private var colorScheme
 
     struct MenuItem: Equatable {
         let title: String
@@ -941,8 +989,8 @@ struct MainToolbar: View {
 
     var body: some View {
         HStack(spacing: WFSpace.sm) {
-            HStack(spacing: 6) {
-                WorkFlowMark(size: 18)
+            HStack(spacing: 7) {
+                WorkFlowMark(size: 20)
                 Text("History")
                     .font(.headline)
                     .lineLimit(1)
@@ -962,7 +1010,7 @@ struct MainToolbar: View {
                         systemImage: "stop.circle.fill",
                         help: meetingLabel,
                         accessibilityLabel: meetingLabel,
-                        tint: .red,
+                        tint: ThemePalette.signal(colorScheme),
                         action: onMeeting
                     )
                     .disabled(!isMeetingRecording)
@@ -1019,10 +1067,15 @@ struct InputMonitoringNotice: View {
                 .controlSize(.small)
                 .accessibilityLabel("Enable Input Monitoring")
         }
-        .padding(.horizontal, WFSpace.lg)
+        .padding(.horizontal, WFSpace.md)
         .padding(.vertical, WFSpace.sm)
-        .background(ThemePalette.caution(colorScheme).opacity(0.10))
-        .overlay(alignment: .bottom) { WFHairline() }
+        .background(
+            ThemePalette.caution(colorScheme).opacity(0.12),
+            in: RoundedRectangle(cornerRadius: WFRadius.panel, style: .continuous)
+        )
+        .padding(.horizontal, WFSpace.md)
+        .padding(.top, WFSpace.sm)
+        .background(ThemePalette.contentBackground(colorScheme))
     }
 }
 
@@ -1058,11 +1111,11 @@ struct HistoryDayHeader: View {
 
     var body: some View {
         Text(title)
-            .font(.callout.weight(.semibold))
+            .font(WFType.sectionLabel)
             .foregroundStyle(.secondary)
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.horizontal, HistoryRow.horizontalPadding)
-            .padding(.top, WFSpace.md)
+            .padding(.top, WFSpace.lg)
             .padding(.bottom, WFSpace.xs)
             .background(ThemePalette.contentBackground(colorScheme))
             .accessibilityAddTraits(.isHeader)
@@ -1071,7 +1124,7 @@ struct HistoryDayHeader: View {
 
 struct HistoryRowSeparator: View {
     var body: some View {
-        WFHairline().padding(.leading, HistoryRow.horizontalPadding)
+        WFHairline().padding(.horizontal, HistoryRow.horizontalPadding)
     }
 }
 
@@ -1128,18 +1181,39 @@ struct HistoryEmptyState: View {
 
     var body: some View {
         if isSearching {
-            ContentUnavailableView.search(text: query)
+            message(
+                title: query.isEmpty ? "No results" : "No results for “\(query)”",
+                detail: "Check the spelling or try another search."
+            ) {
+                Image(systemName: "magnifyingglass")
+                    .font(.system(size: 30, weight: .regular))
+                    .foregroundStyle(.tertiary)
+            }
         } else {
-            ContentUnavailableView {
-                Label {
-                    Text("Your dictations will appear here")
-                } icon: {
-                    WorkFlowMark(size: 48)
-                }
-            } description: {
-                Text(Self.guidance(shortcut: shortcut))
+            message(title: "Your dictations will appear here", detail: Self.guidance(shortcut: shortcut)) {
+                WorkFlowMark(size: 52)
             }
         }
+    }
+
+    /// A quiet message in the middle of an empty History.
+    private func message<Icon: View>(title: String, detail: String, @ViewBuilder icon: () -> Icon) -> some View {
+        VStack(spacing: WFSpace.sm) {
+            icon()
+                .padding(.bottom, WFSpace.xs)
+                .accessibilityHidden(true)
+            Text(title)
+                .font(WFType.title)
+                .multilineTextAlignment(.center)
+                .accessibilityAddTraits(.isHeader)
+            Text(detail)
+                .font(.body)
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .frame(maxWidth: 340)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 }
 
@@ -1154,7 +1228,7 @@ private struct DictationControls: View {
 
     private var status: DictationDockStatus {
         if meetingController.isSaving { return .savingMeeting }
-        if meetingController.isRecording { return .meeting(0) }
+        if meetingController.isRecording { return .startedMeeting(isConnecting: meetingController.isConnecting) }
         if viewModel.state == .decoding { return .transcribing }
         // Stopping dictation must remain available even when another service becomes busy.
         if viewModel.isRecording { return .recording(0) }
@@ -1207,8 +1281,16 @@ private struct DictationControls: View {
 
 enum DictationDockStatus: Equatable {
     case ready, connecting, transcribing, loadingModel, processingQueue, savingMeeting, noMicrophone
+    /// A meeting was started and its microphone has not delivered audio yet.
+    case meetingConnecting
     case recording(TimeInterval)
     case meeting(TimeInterval)
+
+    /// A meeting that was started and not stopped. While its microphone is
+    /// still connecting it records nothing yet, and can still be stopped.
+    static func startedMeeting(isConnecting: Bool) -> DictationDockStatus {
+        isConnecting ? .meetingConnecting : .meeting(0)
+    }
 
     var isRecording: Bool {
         if case .recording = self { return true }
@@ -1223,6 +1305,7 @@ enum DictationDockStatus: Equatable {
         case .ready: .ready
         case .recording: .listening
         case .meeting: .meeting
+        case .meetingConnecting: .meetingConnecting
         case .connecting: .connecting
         case .transcribing, .loadingModel, .processingQueue, .savingMeeting: .working
         case .noMicrophone: .unavailable
@@ -1233,7 +1316,7 @@ enum DictationDockStatus: Equatable {
         switch self {
         case .ready: return "Ready to dictate"
         case .recording: return "Listening"
-        case .connecting: return "Connecting microphone…"
+        case .connecting, .meetingConnecting: return "Connecting microphone…"
         case .transcribing: return "Transcribing your dictation…"
         case .loadingModel: return "Loading speech model…"
         case .processingQueue: return "Processing audio…"
@@ -1248,6 +1331,7 @@ enum DictationDockStatus: Equatable {
         case .meeting(let duration): return "\(WFTime.clock(duration)) · Stop to save it to History"
         case .ready: return shortcut.isEmpty ? "Click the microphone to start" : "Press \(shortcut) to dictate anywhere"
         case .connecting: return "Your microphone is getting ready"
+        case .meetingConnecting: return "The meeting starts when your microphone is ready"
         case .transcribing, .loadingModel, .processingQueue, .savingMeeting: return "You can keep browsing your history"
         case .noMicrophone: return "Connect a microphone to start dictating"
         }
@@ -1257,6 +1341,7 @@ enum DictationDockStatus: Equatable {
         switch self {
         case .recording: "Stop recording"
         case .meeting: "Stop & save meeting"
+        case .meetingConnecting: "Stop meeting"
         default: "Start recording"
         }
     }
@@ -1265,6 +1350,7 @@ enum DictationDockStatus: Equatable {
         switch self {
         case .recording: "Stops recording and begins transcription"
         case .meeting: "Stops the meeting recording and adds it to History"
+        case .meetingConnecting: "Stops the meeting; audio recorded by then is added to History"
         default: detail(shortcut: shortcut)
         }
     }
@@ -1292,6 +1378,12 @@ struct DictationDock: View {
     @Environment(\.colorScheme) private var colorScheme
 
     static let statusHeight: CGFloat = WFRecordControl.size
+    /// The space between the floating bar and the window's edges.
+    static let margin: CGFloat = WFSpace.md
+    /// The widest the mode menu grows.
+    static let menuPickerWidth: CGFloat = 260
+    /// The bar's height with its margins before it is first measured.
+    static let expectedHeight: CGFloat = 126
 
     var body: some View {
         VStack(spacing: 10) {
@@ -1306,25 +1398,42 @@ struct DictationDock: View {
             }
             .frame(height: Self.statusHeight)
         }
-        .padding(.horizontal, WFSpace.lg)
+        .padding(.leading, 14)
+        .padding(.trailing, WFSpace.md)
         .padding(.top, WFSpace.md)
-        .padding(.bottom, 10)
-        .overlay(alignment: .top) { WFHairline() }
+        .padding(.bottom, WFSpace.sm)
+        .floatingBar()
+        .padding(.horizontal, Self.margin)
+        .padding(.top, WFSpace.sm)
+        .padding(.bottom, Self.margin)
+    }
+
+    /// Built-in modes alone are segments; custom filters or Auto make the
+    /// picker a menu, which would otherwise stretch across the bar.
+    private var usesSegments: Bool {
+        customFilters.isEmpty && writingAuto?.wrappedValue != true
     }
 
     private func modeControls(showsLabel: Bool) -> some View {
-        HStack(spacing: WFSpace.md) {
+        // Tight enough that the label and four segments fit the window's
+        // opening width with room to spare, so the row never flips to its
+        // narrower form when a segment is chosen.
+        HStack(spacing: 10) {
             if showsLabel {
                 Text("Dictation mode")
                     .font(.callout)
                     .foregroundStyle(.secondary)
                     .fixedSize()
                     .accessibilityHidden(true)
+            }
+            if !usesSegments {
+                writingPicker.frame(maxWidth: Self.menuPickerWidth, alignment: .leading)
+            } else if showsLabel {
                 writingPicker.fixedSize()
             } else {
                 writingPicker.frame(maxWidth: .infinity, alignment: .leading)
             }
-            if showsLabel { Spacer(minLength: 0) }
+            if showsLabel || !usesSegments { Spacer(minLength: 0) }
             learnLink
         }
     }
@@ -1374,7 +1483,7 @@ struct DictationDock: View {
                         .accessibilityHidden(true)
                 }
                 Text(status.title)
-                    .font(.system(size: 14, weight: .medium))
+                    .font(WFType.status)
                     .foregroundStyle(.primary)
                     .lineLimit(1)
                     .truncationMode(.tail)
@@ -1497,9 +1606,12 @@ struct PermissionsView: View {
             Spacer()
 
             // Centered in the window and no wider than a readable column.
-            VStack(spacing: 20) {
+            VStack(spacing: WFSpace.md) {
+                WorkFlowMark(size: 52)
+                    .padding(.bottom, WFSpace.xs)
                 Text("Permissions needed")
-                    .font(.title2.weight(.semibold))
+                    .font(WFType.title)
+                    .padding(.bottom, WFSpace.sm)
 
                 if didMigrateFromChat {
                     Text("WorkFlow now has its own macOS identity. Your settings and History were preserved, but macOS needs these permissions once more.")
@@ -1544,15 +1656,15 @@ struct PermissionRow: View {
         // The description sits under its title, not under the icon.
         HStack(alignment: .firstTextBaseline, spacing: 10) {
             Image(systemName: isGranted ? "checkmark.circle.fill" : "exclamationmark.circle.fill")
-                .foregroundColor(isGranted ? .green : ThemePalette.caution(colorScheme))
+                .foregroundStyle(isGranted ? ThemePalette.success(colorScheme) : ThemePalette.caution(colorScheme))
                 .font(.headline)
 
-            VStack(alignment: .leading, spacing: 4) {
+            VStack(alignment: .leading, spacing: 3) {
                 Text(title)
                     .font(.headline)
                 Text(description)
-                    .font(.subheadline)
-                    .foregroundColor(.secondary)
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
             }
 
             Spacer(minLength: WFSpace.md)
@@ -1698,6 +1810,7 @@ struct HistoryRow: View {
     var onRegenerateWith: ((CleanupFilterSelection) -> Void)?
     var regenerationFilters: [CustomCleanupFilter] = []
     @State private var showTranscription = false
+    @State private var isHovered = false
     @AppStorage(SpeakingEfficiency.typingWPMKey) private var typingWPM = SpeakingEfficiency.defaultTypingWPM
     @Environment(\.colorScheme) private var colorScheme
 
@@ -1910,7 +2023,7 @@ struct HistoryRow: View {
                 Button { perform(action) } label: {
                     ToolbarGlyph(
                         systemImage: actions.systemImage(action),
-                        tint: action == .play ? .red : .secondary,
+                        tint: action == .play ? ThemePalette.signal(colorScheme) : .secondary,
                         size: 24,
                         symbolSize: 12
                     )
@@ -2002,7 +2115,7 @@ struct HistoryRow: View {
                 speakingBadge
             }
         }
-        .font(.subheadline)
+        .font(WFType.meta)
         .foregroundStyle(.secondary)
         .monospacedDigit()
     }
@@ -2025,62 +2138,82 @@ struct HistoryRow: View {
         .foregroundStyle(.secondary)
     }
 
-    var body: some View {
-        VStack(alignment: .leading, spacing: WFSpace.xs) {
-            metadata
-                .frame(maxWidth: .infinity, alignment: .leading)
-                // Room for the row's buttons and its actions menu.
-                .padding(.trailing, CGFloat(actions.visible.count) * 24 + 40)
-            filterChoiceBadge
+    /// Under the text: when it was said and how it was produced on the
+    /// left, what can be done with it on the right.
+    private var footer: some View {
+        HStack(alignment: .center, spacing: WFSpace.sm) {
+            VStack(alignment: .leading, spacing: 2) {
+                metadata
+                filterChoiceBadge
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            // The glyphs sit in 24-point plates; pulling the group out lines
+            // the last glyph up with the edge the toolbar's glyphs keep.
+            rowActions.padding(.trailing, -(Self.horizontalPadding - WFSpace.md))
+        }
+    }
 
-            if recording.mode == .meeting {
-                Label(recording.title.flatMap { $0.isEmpty ? nil : $0 } ?? "Meeting", systemImage: "person.2")
-                    .labelStyle(CompactLabelStyle(spacing: 5, iconScale: .medium))
-                    .font(.headline)
+    /// What the row is about, before its details: the words, or the state
+    /// of a row that has none yet.
+    @ViewBuilder
+    private var content: some View {
+        if recording.mode == .meeting {
+            Label(recording.title.flatMap { $0.isEmpty ? nil : $0 } ?? "Meeting", systemImage: "person.2")
+                .labelStyle(CompactLabelStyle(spacing: 5, iconScale: .medium))
+                .font(.headline)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+
+        if isPending {
+            if !isRegenerating, let name = recording.sourceFileName {
+                Text(name)
+                    .font(.body.weight(.medium))
                     .fixedSize(horizontal: false, vertical: true)
             }
+            progressLabel
+        }
 
-            if isPending {
-                if !isRegenerating, let name = recording.sourceFileName {
-                    Text(name)
-                        .font(.body.weight(.medium))
-                        .fixedSize(horizontal: false, vertical: true)
+        if recording.status == .failed {
+            VStack(alignment: .leading, spacing: 2) {
+                Label("Transcription failed", systemImage: "exclamationmark.triangle.fill")
+                    .labelStyle(CompactLabelStyle(spacing: 4))
+                    .font(.body.weight(.medium))
+                    .foregroundStyle(ThemePalette.signalText(colorScheme))
+                if !recording.transcription.isEmpty {
+                    Text(Self.failureDetail(recording.transcription))
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                        .textSelection(.enabled)
+                        .accessibilityLabel(recording.transcription)
                 }
-                progressLabel
             }
+            .fixedSize(horizontal: false, vertical: true)
+        } else if !displayText.isEmpty {
+            TranscriptionView(transcribedText: displayText, searchQuery: searchQuery, isExpanded: $showTranscription)
+        } else if !isPending {
+            Text("No speech detected")
+                .font(.body)
+                .foregroundStyle(.secondary)
+        }
+    }
 
-            if recording.status == .failed {
-                VStack(alignment: .leading, spacing: 2) {
-                    Label("Transcription failed", systemImage: "exclamationmark.triangle.fill")
-                        .labelStyle(CompactLabelStyle(spacing: 4))
-                        .font(.body.weight(.medium))
-                        .foregroundStyle(ThemePalette.signalText(colorScheme))
-                    if !recording.transcription.isEmpty {
-                        Text(Self.failureDetail(recording.transcription))
-                            .font(.callout)
-                            .foregroundStyle(.secondary)
-                            .textSelection(.enabled)
-                            .accessibilityLabel(recording.transcription)
-                    }
-                }
-                .fixedSize(horizontal: false, vertical: true)
-            } else if !displayText.isEmpty {
-                TranscriptionView(transcribedText: displayText, searchQuery: searchQuery, isExpanded: $showTranscription)
-            } else if !isPending {
-                Text("No speech detected")
-                    .font(.body)
-                    .foregroundStyle(.secondary)
-            }
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            content
+            footer
         }
         .padding(.horizontal, Self.horizontalPadding)
-        .padding(.vertical, 10)
+        .padding(.top, WFSpace.md)
+        .padding(.bottom, WFSpace.sm)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .overlay(alignment: .topTrailing) {
-            rowActions
-                .padding(.top, 5)
-                .padding(.trailing, WFSpace.md)
+        .background {
+            RoundedRectangle(cornerRadius: WFRadius.panel, style: .continuous)
+                .fill(isHovered ? ThemePalette.panelSurface(colorScheme) : Color.clear)
+                .padding(.horizontal, WFSpace.sm)
+                .padding(.vertical, 2)
         }
         .contentShape(Rectangle())
+        .onHover { isHovered = $0 }
         .contextMenu { actionMenuItems }
         .accessibilityElement(children: .contain)
         .accessibilityActions {
@@ -2116,6 +2249,9 @@ struct TranscriptionView: View {
     @State private var collapsedHeight: CGFloat = 0
 
     static let collapsedLineLimit = 4
+    /// Behind a search match: amber soft enough that the words keep their
+    /// own color in light and dark mode.
+    static let highlight = BrandPalette.amber.opacity(0.45)
 
     /// Offer the toggle only when the collapsed text actually hides lines.
     private var isTruncated: Bool {
@@ -2143,6 +2279,7 @@ struct TranscriptionView: View {
         
         let text = transcribedText
         let query = searchQuery
+        let highlight = Self.highlight
         
         computeTask = Task.detached(priority: .userInitiated) {
             var attributedString = AttributedString(text)
@@ -2152,8 +2289,7 @@ struct TranscriptionView: View {
             while let range = text.range(of: query, options: searchOptions, range: searchStartIndex..<text.endIndex) {
                 guard !Task.isCancelled else { return }
                 if let attributedRange = Range(range, in: attributedString) {
-                    attributedString[attributedRange].backgroundColor = .yellow
-                    attributedString[attributedRange].foregroundColor = .black
+                    attributedString[attributedRange].backgroundColor = highlight
                 }
                 searchStartIndex = range.upperBound
             }
@@ -2169,8 +2305,8 @@ struct TranscriptionView: View {
 
     private func styled(_ text: Text) -> some View {
         text
-            .font(.body)
-            .lineSpacing(2)
+            .font(WFType.transcript)
+            .lineSpacing(3)
             .frame(maxWidth: .infinity, alignment: .leading)
     }
 
@@ -2205,7 +2341,7 @@ struct TranscriptionView: View {
                     Label(isExpanded ? "Show less" : "Show full text", systemImage: isExpanded ? "chevron.up" : "chevron.down")
                         .labelStyle(CompactLabelStyle())
                         .font(.subheadline.weight(.medium))
-                        .foregroundStyle(ThemePalette.linkText(colorScheme))
+                        .foregroundStyle(ThemePalette.quietLink(colorScheme))
                 }
                 .buttonStyle(.borderless)
             }

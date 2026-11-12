@@ -177,36 +177,49 @@ struct SpeakingSummaryStrip: View {
 
     var body: some View {
         if let text = presentation.stripText {
-            VStack(spacing: 0) {
-                strip(text)
-                WFHairline()
-            }
+            strip(text)
+                .padding(.horizontal, WFSpace.md)
+                .padding(.top, WFSpace.sm)
+                .background(ThemePalette.contentBackground(colorScheme))
         }
     }
 
+    /// "This month: " and what follows it, so the figures can be drawn
+    /// stronger than the words that introduce them.
+    static func parts(of text: String) -> (lead: String, figures: String) {
+        guard let range = text.range(of: ": ") else { return ("", text) }
+        return (String(text[..<range.upperBound]), String(text[range.upperBound...]))
+    }
+
     private func strip(_ text: String) -> some View {
-        Button(action: onOpenDetails) {
-            HStack(spacing: 6) {
+        let parts = Self.parts(of: text)
+        return Button(action: onOpenDetails) {
+            HStack(spacing: WFSpace.sm) {
                 Image(systemName: "timer")
-                    .font(.system(size: 11, weight: .semibold))
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(.secondary)
                     .accessibilityHidden(true)
-                Text(text)
+                (Text(parts.lead).foregroundStyle(.secondary)
+                    + Text(parts.figures).foregroundStyle(.primary).fontWeight(.medium))
                     .lineLimit(1)
                     .truncationMode(.tail)
                 Spacer(minLength: 0)
                 Image(systemName: "chevron.right")
                     .font(.system(size: 9, weight: .semibold))
+                    .foregroundStyle(.tertiary)
                     .accessibilityHidden(true)
             }
-            .font(.subheadline.monospacedDigit())
-            .foregroundStyle(.secondary)
-            .padding(.horizontal, HistoryRow.horizontalPadding)
-            .padding(.vertical, 7)
+            .font(WFType.meta.monospacedDigit())
+            .padding(.horizontal, WFSpace.md)
+            .padding(.vertical, WFSpace.sm)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .contentShape(Rectangle())
+            .background(
+                ThemePalette.panelSurface(colorScheme),
+                in: RoundedRectangle(cornerRadius: WFRadius.panel, style: .continuous)
+            )
+            .contentShape(RoundedRectangle(cornerRadius: WFRadius.panel, style: .continuous))
         }
         .buttonStyle(.plain)
-        .background(ThemePalette.contentBackground(colorScheme))
         .help("Estimated active speech compared with typing at an assumed \(SpeakingFormat.wpm(presentation.typingWPM)); pauses and waiting for text aren’t counted. Open Settings → Dictation for the details and to change the typing speed.")
         .accessibilityLabel(text)
         .accessibilityHint("Opens the speaking versus typing details in Settings")

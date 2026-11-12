@@ -2,36 +2,44 @@ import SwiftUI
 
 // MARK: - Pane chrome
 
-/// The pane switcher at the top of Settings, drawn like a macOS settings
-/// toolbar: a symbol over a short label, the current pane filled.
+/// The pane switcher at the top of Settings: one capsule holding a short
+/// label per pane, the current one lifted on its own plate. Each label is a
+/// button, so Tab reaches it and Command with its number chooses it.
 struct SettingsPaneBar: View {
     @Binding var selection: SettingsPane
     @Environment(\.colorScheme) private var colorScheme
 
+    static let height: CGFloat = 30
+
     var body: some View {
-        HStack(spacing: WFSpace.xs) {
+        HStack(spacing: 2) {
             ForEach(Array(SettingsPane.allCases.enumerated()), id: \.element) { index, pane in
                 let isSelected = pane == selection
                 Button {
                     selection = pane
                 } label: {
-                    VStack(spacing: 3) {
+                    HStack(spacing: 6) {
                         Image(systemName: pane.symbol)
-                            .font(.system(size: 16, weight: isSelected ? .semibold : .regular))
-                            .frame(height: 20)
+                            .font(.system(size: 12, weight: .medium))
+                            .frame(width: 16)
                         Text(pane.title)
-                            .font(.system(size: 11, weight: isSelected ? .semibold : .regular))
+                            .font(.system(size: 12.5, weight: isSelected ? .semibold : .medium))
                             .lineLimit(1)
                             .fixedSize()
                     }
                     .foregroundStyle(isSelected ? Color.primary : Color.secondary)
-                    .padding(.horizontal, 10)
-                    .frame(minWidth: 84, minHeight: 50)
-                    .background(
-                        RoundedRectangle(cornerRadius: 8, style: .continuous)
-                            .fill(isSelected ? ThemePalette.ink(colorScheme).opacity(colorScheme == .dark ? 0.12 : 0.07) : .clear)
-                    )
-                    .contentShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                    .padding(.horizontal, WFSpace.md)
+                    .frame(height: Self.height)
+                    .background {
+                        if isSelected {
+                            // Lifted off the track: white in light mode, a
+                            // lighter gray than the track in dark mode.
+                            Capsule(style: .continuous)
+                                .fill(colorScheme == .dark ? Color.white.opacity(0.17) : ThemePalette.cardBackground(.light))
+                                .shadow(color: Color.black.opacity(colorScheme == .dark ? 0.30 : 0.10), radius: 2, y: 1)
+                        }
+                    }
+                    .contentShape(Capsule(style: .continuous))
                 }
                 .buttonStyle(.plain)
                 .keyboardShortcut(KeyEquivalent(Character("\(index + 1)")), modifiers: .command)
@@ -40,6 +48,11 @@ struct SettingsPaneBar: View {
                 .accessibilityAddTraits(isSelected ? [.isSelected] : [])
             }
         }
+        .padding(3)
+        .background(
+            colorScheme == .dark ? Color.white.opacity(0.07) : Color.black.opacity(0.055),
+            in: Capsule(style: .continuous)
+        )
     }
 }
 
@@ -51,7 +64,7 @@ struct SettingsPaneHeader: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
             Text(title)
-                .font(.system(size: 24, weight: .semibold, design: .rounded))
+                .font(WFType.title)
                 .accessibilityAddTraits(.isHeader)
             Text(subtitle)
                 .font(.callout)
@@ -75,9 +88,9 @@ struct SettingsGroup<Content: View>: View {
         VStack(alignment: .leading, spacing: 7) {
             if let title {
                 Text(title)
-                    .font(.system(size: 12, weight: .semibold))
+                    .font(WFType.sectionLabel)
                     .foregroundStyle(.secondary)
-                    .padding(.leading, 2)
+                    .padding(.leading, WFSpace.md)
                     .accessibilityAddTraits(.isHeader)
             }
             VStack(alignment: .leading, spacing: 0) {
@@ -90,7 +103,7 @@ struct SettingsGroup<Content: View>: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
-                    .padding(.horizontal, 2)
+                    .padding(.horizontal, WFSpace.md)
             }
         }
     }
@@ -270,10 +283,10 @@ private struct SettingsSurface: ViewModifier {
     func body(content: Content) -> some View {
         content
             .background(ThemePalette.cardBackground(colorScheme))
-            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+            .clipShape(RoundedRectangle(cornerRadius: WFRadius.card, style: .continuous))
             .overlay(
-                RoundedRectangle(cornerRadius: 12, style: .continuous)
-                    .stroke(ThemePalette.cardBorder(colorScheme), lineWidth: 1)
+                RoundedRectangle(cornerRadius: WFRadius.card, style: .continuous)
+                    .strokeBorder(ThemePalette.cardBorder(colorScheme), lineWidth: 1)
             )
     }
 }
