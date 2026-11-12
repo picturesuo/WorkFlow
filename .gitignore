@@ -110,6 +110,11 @@ SourcePackages
 .build
 default.profraw
 
+# autocorrect-swift: Cargo build output, and the lock file run.sh copies from
+# the asian-autocorrect submodule before each build.
+/autocorrect-swift/target/
+/autocorrect-swift/Cargo.lock
+
 # Fastlane
 fastlane/.env
 fastlane/report.xml

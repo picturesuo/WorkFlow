@@ -1,0 +1,20 @@
+# The C interface WorkFlow uses to call AutoCorrect from Swift (see Bridge.h).
+# AutoCorrect has no Swift binding of its own: this one was proposed in
+# https://github.com/huacnlee/autocorrect/pull/277 and closed unmerged.
+# src/lib.rs and autocorrect_swift.h come from that pull request and are under
+# AutoCorrect's license (LICENSE). Keeping them here lets the
+# asian-autocorrect submodule track AutoCorrect itself.
+[package]
+edition = "2021"
+name = "autocorrect-swift"
+version = "2.14.3"
+
+[dependencies]
+autocorrect = { path = "../asian-autocorrect/autocorrect" }
+libc = "0.2"
+
+[lib]
+crate-type = ["cdylib"]
+
+# Its own workspace: AutoCorrect's workspace does not list this crate.
+[workspace]
