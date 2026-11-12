@@ -11,6 +11,9 @@ enum RecordButtonPhase: Equatable, CaseIterable {
     case listening
     /// A meeting is recording; press to stop and save it.
     case meeting
+    /// A meeting was started and its microphone has not delivered audio
+    /// yet; press to stop it.
+    case meetingConnecting
     /// Transcribing or cleaning up; nothing to press.
     case working
     /// No microphone, or the speech model is still loading.
@@ -18,7 +21,9 @@ enum RecordButtonPhase: Equatable, CaseIterable {
 
     /// Recording audio right now.
     var isLive: Bool { self == .listening || self == .meeting }
-    var isEnabled: Bool { self == .ready || isLive }
+    /// Pressing stops what was started.
+    var showsStop: Bool { isLive || self == .meetingConnecting }
+    var isEnabled: Bool { self == .ready || showsStop }
 }
 
 enum WFRecordControl {
@@ -99,7 +104,7 @@ struct RecordButtonFace: View {
             base.foregroundStyle(ink.opacity(isLifted ? 0.34 : 0.18))
         case .listening, .meeting:
             base.foregroundStyle(ink.opacity(0.18))
-        case .connecting, .working:
+        case .connecting, .meetingConnecting, .working:
             if reduceMotion {
                 base.foregroundStyle(ink.opacity(0.42))
             } else {
@@ -148,7 +153,7 @@ struct RecordButtonFace: View {
 
     private var discOpacity: Double {
         switch phase {
-        case .ready, .listening, .meeting: 1
+        case .ready, .listening, .meeting, .meetingConnecting: 1
         case .connecting: 0.85
         case .working: 0.45
         case .unavailable: 0.3
@@ -159,7 +164,7 @@ struct RecordButtonFace: View {
     private var glyph: some View {
         let onDisc = ThemePalette.onInk(colorScheme)
         Group {
-            if phase.isLive {
+            if phase.showsStop {
                 RoundedRectangle(cornerRadius: 3, style: .continuous)
                     .fill(signal)
                     .frame(width: WFRecordControl.stopSquare, height: WFRecordControl.stopSquare)
@@ -177,7 +182,7 @@ struct RecordButtonFace: View {
 
     private var symbol: String {
         switch phase {
-        case .ready, .connecting, .listening, .meeting: "mic.fill"
+        case .ready, .connecting, .listening, .meeting, .meetingConnecting: "mic.fill"
         case .working: "waveform"
         case .unavailable: "mic.slash.fill"
         }

@@ -93,11 +93,9 @@ final class SpeechAudioReaderTests: XCTestCase {
     }
 
     /// The samples Parakeet is given for a recording up to the segmented
-    /// limit: the engine's own two steps.
+    /// limit.
     private func parakeetSamples(_ url: URL) throws -> [Float] {
-        let source = try SpeechAudioReader.monoSource(for: url)
-        defer { source.discard() }
-        return try AudioConverter().resampleAudioFile(source.url)
+        try FluidAudioEngine.segmentedSamples(of: url)
     }
 
     private func whisperSamples(_ url: URL) async throws -> [Float] {
@@ -114,11 +112,7 @@ final class SpeechAudioReaderTests: XCTestCase {
     // MARK: - One channel is untouched
 
     func testAOneChannelRecordingIsReadAsItIs() throws {
-        let source = try SpeechAudioReader.monoSource(for: Self.reference)
-        XCTAssertEqual(source.url, Self.reference)
-        XCTAssertFalse(source.isTemporary)
-        source.discard()
-        XCTAssertTrue(FileManager.default.fileExists(atPath: Self.reference.path), "Discarding never removes the recording itself")
+        XCTAssertNil(try SpeechAudioReader.channelPlan(for: Self.reference), "One channel is never mixed")
         XCTAssertEqual(try parakeetSamples(Self.reference), voice, "Sample for sample what Parakeet read before")
     }
 
@@ -220,29 +214,92 @@ final class SpeechAudioReaderTests: XCTestCase {
 
     func testAMultichannelFileWithNoAudioIsLeftAlone() throws {
         let url = try recording([[], [], []])
-        let source = try SpeechAudioReader.monoSource(for: url)
-        XCTAssertEqual(source.url, url)
-        XCTAssertFalse(source.isTemporary)
+        XCTAssertNil(try SpeechAudioReader.channelPlan(for: url))
     }
 
-    // MARK: - The temporary mix
+    // MARK: - The long-form mix
 
-    func testTheTemporaryMixIsOneChannelAtTheSameRateAndIsRemoved() throws {
+    func testTheLongFormMixIsTheFileFluidAudioReadsInPlace() throws {
         let url = try recording([silence, voice, silence])
-        let source = try SpeechAudioReader.monoSource(for: url)
-        XCTAssertTrue(source.isTemporary)
-        XCTAssertNotEqual(source.url, url)
-        XCTAssertFalse(source.url.path.hasPrefix(AudioRecorder.temporaryRecordingsDirectory.path),
-                       "Never in the folder launch recovery adopts recordings from")
-        do {
-            let mix = try AVAudioFile(forReading: source.url)
-            XCTAssertEqual(mix.processingFormat.channelCount, 1)
-            XCTAssertEqual(mix.processingFormat.sampleRate, 16_000)
-            XCTAssertEqual(mix.length, AVAudioFramePosition(voice.count))
-        }
-        source.discard()
-        XCTAssertFalse(FileManager.default.fileExists(atPath: source.url.path))
+        let plan = try XCTUnwrap(SpeechAudioReader.channelPlan(for: url))
+        let speech = directory.appendingPathComponent("speech.wav")
+        try SpeechAudioReader.writeSpeechFile(of: url, plan: plan, to: speech)
+
+        // 16-bit PCM, one channel, 16 kHz: what FluidAudio maps without a
+        // converted copy of its own.
+        let format = try AVAudioFile(forReading: speech).fileFormat
+        XCTAssertEqual(format.channelCount, 1)
+        XCTAssertEqual(format.sampleRate, 16_000)
+        XCTAssertEqual(format.streamDescription.pointee.mFormatID, kAudioFormatLinearPCM)
+        XCTAssertEqual(format.streamDescription.pointee.mBitsPerChannel, 16)
+        XCTAssertEqual(format.streamDescription.pointee.mFormatFlags & kAudioFormatFlagIsFloat, 0)
+
+        let (source, _) = try AudioSourceFactory().makeDiskBackedSource(from: speech, targetSampleRate: 16_000)
+        defer { source.cleanup() }
+        XCTAssertEqual(source.sampleCount, voice.count)
+        var samples = [Float](repeating: 0, count: source.sampleCount)
+        try samples.withUnsafeMutableBufferPointer { try source.copySamples(into: $0.baseAddress!, offset: 0, count: $0.count) }
+        assertHearsTheVoice(samples, "FluidAudio's long-form reader")
         XCTAssertTrue(FileManager.default.fileExists(atPath: url.path), "The recording itself stays")
+    }
+
+    /// The finding this guards: a long stereo file was rewritten whole at
+    /// its own rate as Float32 (44 100 x 4 bytes a second) before either
+    /// recognizer read it. Twenty-one minutes is past Parakeet's long-form
+    /// limit, with the sound on the channel Core Audio would drop.
+    func testALongStereoRecordingIsMixedInBoundedMemoryWithoutASourceRateCopy() async throws {
+        let seconds = 21 * 60
+        let rate = 44_100
+        let amplitude: Float = 0.25
+        let url = directory.appendingPathComponent("long.wav")
+        var settings = Self.recorderSettings(channels: 2)
+        settings[AVSampleRateKey] = Double(rate)
+        do {
+            let file = try AVAudioFile(forWriting: url, settings: settings)
+            let second = try XCTUnwrap(AVAudioPCMBuffer(pcmFormat: file.processingFormat, frameCapacity: AVAudioFrameCount(rate)))
+            second.frameLength = AVAudioFrameCount(rate)
+            let data = try XCTUnwrap(second.floatChannelData)
+            for frame in 0..<rate {
+                data[0][frame] = 0
+                // 441 whole cycles a second, so every second is the same.
+                data[1][frame] = amplitude * sinf(2 * .pi * 441 * Float(frame) / Float(rate))
+            }
+            for _ in 0..<seconds { try file.write(from: second) }
+        }
+        let expectedRMS = amplitude / Float(2).squareRoot()
+        let expectedSamples = 16_000 * seconds
+
+        let plan = try XCTUnwrap(SpeechAudioReader.channelPlan(for: url))
+        XCTAssertEqual(plan, .single(1))
+
+        // Parakeet's long-form path.
+        let speech = directory.appendingPathComponent("long-speech.wav")
+        let sampler = FootprintSampler()
+        try SpeechAudioReader.writeSpeechFile(of: url, plan: plan, to: speech)
+        let growth = sampler.finish()
+        // The whole mix at the source's rate is 44 100 x 4 x 1 260 = 222 MB.
+        XCTAssertLessThan(growth, 64 * 1024 * 1024, "Memory stays bounded however long the recording is")
+        let size = try XCTUnwrap(FileManager.default.attributesOfItem(atPath: speech.path)[.size] as? Int)
+        // 16 kHz x 16 bits is 32 000 bytes a second, plus a header.
+        XCTAssertLessThanOrEqual(size, 32_000 * seconds + 65_536, "No larger than 16 kHz 16-bit audio")
+        XCTAssertGreaterThanOrEqual(size, 32_000 * (seconds - 1))
+        XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: directory.path).sorted(), ["long-speech.wav", "long.wav"])
+
+        let (source, _) = try AudioSourceFactory().makeDiskBackedSource(from: speech, targetSampleRate: 16_000)
+        defer { source.cleanup() }
+        XCTAssertLessThanOrEqual(abs(source.sampleCount - expectedSamples), 64)
+        var middle = [Float](repeating: 0, count: 160_000)
+        try middle.withUnsafeMutableBufferPointer {
+            try source.copySamples(into: $0.baseAddress!, offset: expectedSamples / 2, count: $0.count)
+        }
+        XCTAssertEqual(Self.rms(middle) / expectedRMS, 1, accuracy: 0.03, "The right channel is what the long-form path hears")
+
+        // Whisper converts straight from the recording.
+        let whisper = try await whisperSamples(url)
+        XCTAssertLessThanOrEqual(abs(whisper.count - expectedSamples), 1_024)
+        let whisperMiddle = Array(whisper[(whisper.count / 2)..<(whisper.count / 2 + 160_000)])
+        XCTAssertEqual(Self.rms(whisperMiddle) / expectedRMS, 1, accuracy: 0.03, "Whisper hears the right channel")
+        XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: directory.path).sorted(), ["long-speech.wav", "long.wav"])
     }
 
     func testMeasurementSeesEachChannelAndTheirSum() throws {
@@ -252,6 +309,46 @@ final class SpeechAudioReaderTests: XCTestCase {
         XCTAssertEqual(measurement.channelEnergy[0], measurement.channelEnergy[2], accuracy: measurement.channelEnergy[0] * 0.001)
         XCTAssertEqual(measurement.channelEnergy[1], 0)
         XCTAssertLessThan(measurement.sumEnergy, measurement.channelEnergy[0] * 0.001, "Opposite channels cancel in the sum")
+    }
+}
+
+/// Samples this process's memory footprint while a piece of work runs.
+final class FootprintSampler {
+    private let lock = NSLock()
+    private var peak: UInt64
+    private var running = true
+    private let baseline: UInt64
+    private let done = DispatchSemaphore(value: 0)
+
+    init() {
+        baseline = Self.footprint()
+        peak = baseline
+        Thread.detachNewThread { [self] in
+            while lock.withLock({ running }) {
+                let now = Self.footprint()
+                lock.withLock { peak = max(peak, now) }
+                Thread.sleep(forTimeInterval: 0.002)
+            }
+            done.signal()
+        }
+    }
+
+    /// The most the footprint grew over where it started, in bytes.
+    func finish() -> UInt64 {
+        lock.withLock { running = false }
+        done.wait()
+        return lock.withLock { max(peak, Self.footprint()) - min(baseline, peak) }
+    }
+
+    static func footprint() -> UInt64 {
+        var info = task_vm_info_data_t()
+        var count = mach_msg_type_number_t(MemoryLayout<task_vm_info_data_t>.size / MemoryLayout<integer_t>.size)
+        let result = withUnsafeMutablePointer(to: &info) {
+            $0.withMemoryRebound(to: integer_t.self, capacity: Int(count)) {
+                task_info(mach_task_self_, task_flavor_t(TASK_VM_INFO), $0, &count)
+            }
+        }
+        return result == KERN_SUCCESS ? info.phys_footprint : 0
     }
 }
 
@@ -302,5 +399,46 @@ final class MultichannelRecognitionTests: XCTestCase {
             XCTAssertTrue(text.contains("country"), "\(recording.name): \(text)")
             XCTAssertTrue(text.contains("do for you"), "\(recording.name): \(text)")
         }
+    }
+
+    /// Past the long-form limit, with the voice on the channel FluidAudio's
+    /// own reader drops.
+    func testCachedParakeetV3HearsAVoiceOnTheSecondInputOfALongRecording() async throws {
+        let modelDirectory = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("FluidAudio/Models/parakeet-tdt-0.6b-v3")
+        try XCTSkipUnless(FileManager.default.fileExists(atPath: modelDirectory.path), "The cached Parakeet v3 model is required")
+        let voice = try SpeechAudioReaderTests.voiceSamples()
+        let takes = Int(FluidAudioEngine.segmentedLimitSeconds * 16_000) / voice.count + 2
+        let url = directory.appendingPathComponent("long.wav")
+        do {
+            let file = try AVAudioFile(forWriting: url, settings: SpeechAudioReaderTests.recorderSettings(channels: 2))
+            let take = try XCTUnwrap(AVAudioPCMBuffer(pcmFormat: file.processingFormat, frameCapacity: AVAudioFrameCount(voice.count)))
+            take.frameLength = AVAudioFrameCount(voice.count)
+            let data = try XCTUnwrap(take.floatChannelData)
+            for frame in voice.indices {
+                data[0][frame] = 0
+                data[1][frame] = voice[frame]
+            }
+            for _ in 0..<takes { try file.write(from: take) }
+        }
+
+        let prefs = AppPreferences.shared
+        let originalVersion = prefs.fluidAudioModelVersion
+        let originalLanguage = prefs.whisperLanguage
+        defer {
+            prefs.fluidAudioModelVersion = originalVersion
+            prefs.whisperLanguage = originalLanguage
+        }
+        prefs.fluidAudioModelVersion = "v3"
+        prefs.whisperLanguage = "en"
+
+        let engine = FluidAudioEngine()
+        try await engine.initialize()
+        let text = try await engine.transcribeAudio(url: url, settings: Settings()).lowercased()
+        let heard = text.components(separatedBy: "country").count - 1
+        XCTAssertGreaterThanOrEqual(heard, takes * 9 / 10, "Heard \(heard) of \(takes) takes")
+        let leftovers = try FileManager.default.contentsOfDirectory(atPath: FileManager.default.temporaryDirectory.path)
+            .filter { $0.hasPrefix("workflow-speech-") }
+        XCTAssertEqual(leftovers, [], "The long-form mix is removed after recognition")
     }
 }

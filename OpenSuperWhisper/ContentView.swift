@@ -1228,8 +1228,7 @@ private struct DictationControls: View {
 
     private var status: DictationDockStatus {
         if meetingController.isSaving { return .savingMeeting }
-        // A meeting whose microphone is still connecting records nothing yet.
-        if meetingController.isRecording { return meetingController.isConnecting ? .connecting : .meeting(0) }
+        if meetingController.isRecording { return .startedMeeting(isConnecting: meetingController.isConnecting) }
         if viewModel.state == .decoding { return .transcribing }
         // Stopping dictation must remain available even when another service becomes busy.
         if viewModel.isRecording { return .recording(0) }
@@ -1282,8 +1281,16 @@ private struct DictationControls: View {
 
 enum DictationDockStatus: Equatable {
     case ready, connecting, transcribing, loadingModel, processingQueue, savingMeeting, noMicrophone
+    /// A meeting was started and its microphone has not delivered audio yet.
+    case meetingConnecting
     case recording(TimeInterval)
     case meeting(TimeInterval)
+
+    /// A meeting that was started and not stopped. While its microphone is
+    /// still connecting it records nothing yet, and can still be stopped.
+    static func startedMeeting(isConnecting: Bool) -> DictationDockStatus {
+        isConnecting ? .meetingConnecting : .meeting(0)
+    }
 
     var isRecording: Bool {
         if case .recording = self { return true }
@@ -1298,6 +1305,7 @@ enum DictationDockStatus: Equatable {
         case .ready: .ready
         case .recording: .listening
         case .meeting: .meeting
+        case .meetingConnecting: .meetingConnecting
         case .connecting: .connecting
         case .transcribing, .loadingModel, .processingQueue, .savingMeeting: .working
         case .noMicrophone: .unavailable
@@ -1308,7 +1316,7 @@ enum DictationDockStatus: Equatable {
         switch self {
         case .ready: return "Ready to dictate"
         case .recording: return "Listening"
-        case .connecting: return "Connecting microphone…"
+        case .connecting, .meetingConnecting: return "Connecting microphone…"
         case .transcribing: return "Transcribing your dictation…"
         case .loadingModel: return "Loading speech model…"
         case .processingQueue: return "Processing audio…"
@@ -1323,6 +1331,7 @@ enum DictationDockStatus: Equatable {
         case .meeting(let duration): return "\(WFTime.clock(duration)) · Stop to save it to History"
         case .ready: return shortcut.isEmpty ? "Click the microphone to start" : "Press \(shortcut) to dictate anywhere"
         case .connecting: return "Your microphone is getting ready"
+        case .meetingConnecting: return "The meeting starts when your microphone is ready"
         case .transcribing, .loadingModel, .processingQueue, .savingMeeting: return "You can keep browsing your history"
         case .noMicrophone: return "Connect a microphone to start dictating"
         }
@@ -1332,6 +1341,7 @@ enum DictationDockStatus: Equatable {
         switch self {
         case .recording: "Stop recording"
         case .meeting: "Stop & save meeting"
+        case .meetingConnecting: "Stop meeting"
         default: "Start recording"
         }
     }
@@ -1340,6 +1350,7 @@ enum DictationDockStatus: Equatable {
         switch self {
         case .recording: "Stops recording and begins transcription"
         case .meeting: "Stops the meeting recording and adds it to History"
+        case .meetingConnecting: "Stops the meeting; audio recorded by then is added to History"
         default: detail(shortcut: shortcut)
         }
     }

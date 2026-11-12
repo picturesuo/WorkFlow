@@ -945,6 +945,78 @@ final class MeetingLifecycleTests: XCTestCase {
         XCTAssertFalse(meeting.isConnecting)
     }
 
+    // MARK: The dock's record control
+
+    /// The window's own dock, wired to the meeting as the window wires it.
+    private func dock(_ status: DictationDockStatus) -> OffscreenHost<DictationDock> {
+        OffscreenHost(
+            DictationDock(status: status, shortcut: "fn", writingSelection: .constant(.builtIn(.everyday)),
+                          onRecord: { [meeting] in Task { await meeting?.stop() } }),
+            size: CGSize(width: 560, height: DictationDock.expectedHeight)
+        )
+    }
+
+    /// A Bluetooth microphone that never delivers audio: the dock's record
+    /// control still ends the meeting, and nothing is left behind.
+    func testTheDockStopsAMeetingWhoseMicrophoneNeverConnects() async throws {
+        hardware.requireConnection()
+        XCTAssertTrue(meeting.start(title: "Headset"))
+        await wait("the meeting to show connecting") { meeting.isConnecting }
+        await wait("the microphone to open") { hardware.captures.count == 1 }
+
+        let status = DictationDockStatus.startedMeeting(isConnecting: meeting.isConnecting)
+        XCTAssertEqual(status.title, "Connecting microphone…", "The dock does not claim to record")
+        let host = dock(status)
+        XCTAssertEqual(host.buttons.count, 1, "The record control is the dock's one button here")
+        let record = try XCTUnwrap(host.buttons.first)
+        XCTAssertTrue(record.isEnabled)
+        record.performClick(nil)
+
+        await wait("the meeting to end") { meeting.state == .idle && meeting.issue != nil }
+        XCTAssertTrue(meeting.issue?.message.hasPrefix("No usable audio was captured") == true)
+        XCTAssertFalse(meeting.isConnecting)
+        XCTAssertTrue(queued.isEmpty, "Nothing was recorded, so nothing is queued")
+        XCTAssertEqual(files(), [], "The empty recording is removed")
+        XCTAssertEqual(hardware.captures[0].finishCount, 1, "The microphone is released")
+
+        hardware.requireConnection(false)
+        XCTAssertTrue(meeting.start(title: "Next"), "The recorder is free for the next meeting")
+        meeting.cancel()
+    }
+
+    /// A slow microphone: the meeting waits, records once audio arrives, and
+    /// the same control then stops and saves it.
+    func testTheDockStopsAndSavesAMeetingOnceItsSlowMicrophoneDeliversAudio() async throws {
+        hardware.requireConnection()
+        XCTAssertTrue(meeting.start(title: "Slow headset"))
+        await wait("the meeting to show connecting") { meeting.isConnecting }
+        await wait("the microphone to open") { hardware.captures.count == 1 }
+        hardware.captures[0].feed(seconds: 2)
+        await wait("the meeting's clock to start") { meeting.startedAt != nil }
+
+        let status = DictationDockStatus.startedMeeting(isConnecting: meeting.isConnecting)
+        XCTAssertEqual(status, .meeting(0))
+        try XCTUnwrap(dock(status).buttons.first).performClick(nil)
+
+        await wait("the meeting to be saved") { meeting.state == .idle && queued.count == 1 }
+        XCTAssertNil(meeting.issue)
+        XCTAssertEqual(queued.first?.title, "Slow headset")
+        XCTAssertEqual(files(), [try XCTUnwrap(queued.first).url.lastPathComponent])
+    }
+
+    /// A dictation that is connecting has nothing to stop from the dock.
+    func testTheDockIgnoresAPressWhileADictationConnects() async throws {
+        XCTAssertTrue(meeting.start(title: "Untouched"))
+        await wait("the meeting's clock to start") { meeting.startedAt != nil }
+        let host = dock(.connecting)
+        let record = try XCTUnwrap(host.buttons.first)
+        XCTAssertFalse(record.isEnabled)
+        record.performClick(nil)
+        try? await Task.sleep(nanoseconds: 200_000_000)
+        XCTAssertTrue(meeting.isRecording, "A disabled control reaches nothing")
+        meeting.cancel()
+    }
+
     func testCancellingAMeetingDiscardsIt() async {
         XCTAssertTrue(meeting.start(title: "Cancelled"))
         await wait("the meeting's clock to start") { meeting.startedAt != nil }

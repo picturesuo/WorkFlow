@@ -30,6 +30,7 @@ final class MainWindowPolishTests: XCTestCase {
             (.recording(7), "0:07 · Stop when you’re finished"),
             (.meeting(3_725), "1:02:05 · Stop to save it to History"),
             (.connecting, "Your microphone is getting ready"),
+            (.meetingConnecting, "The meeting starts when your microphone is ready"),
             (.transcribing, "You can keep browsing your history"),
             (.loadingModel, "You can keep browsing your history"),
             (.processingQueue, "You can keep browsing your history"),

@@ -9,45 +9,24 @@ import Foundation
 /// file can be stereo or surround. A recognizer takes one channel, and Core
 /// Audio's own conversion to one channel keeps only the first channel of a
 /// stereo file (the center of a surround file) and turns three or more
-/// channels without a layout into silence. A file with one channel is
-/// returned as it is, so nothing changes for it. A file with more is measured
-/// once, `ChannelMixCore` decides which channels carry the sound, and that mix
-/// is written to a temporary one-channel file at the same sample rate, which
-/// the engines then read exactly as they read any one-channel recording.
+/// channels without a layout into silence. A file with one channel has no
+/// plan and is read exactly as before. A file with more is measured once,
+/// `ChannelMixCore` decides which channels carry the sound, and `convert`
+/// mixes each chunk it reads to one channel before resampling it, so the mix
+/// is never held or written at the source's rate.
 enum SpeechAudioReader {
-    /// The file a recognizer reads.
-    struct MonoSource {
-        let url: URL
-        /// Whether `url` is a temporary mix that `discard` removes.
-        let isTemporary: Bool
-
-        func discard() {
-            guard isTemporary else { return }
-            try? FileManager.default.removeItem(at: url)
-        }
-    }
-
     /// Buffers hold Float32 per channel, so a chunk is capped by bytes.
     private static let maximumChunkBytes = 4 * 1024 * 1024
 
-    /// `url` itself when it has one channel or no audio; otherwise a
-    /// temporary one-channel mix of it, which the caller discards after use.
-    static func monoSource(for url: URL) throws -> MonoSource {
+    /// What the recognizers take: 16 kHz, one channel, Float32.
+    static let speechFormat = AVAudioFormat(commonFormat: .pcmFormatFloat32, sampleRate: 16_000, channels: 1, interleaved: false)!
+
+    /// Which channels of `url` the recognizer hears, or nil when it has one
+    /// channel or no audio and is read as it is.
+    static func channelPlan(for url: URL) throws -> ChannelMixCore.Plan? {
         let file = try AVAudioFile(forReading: url)
-        guard file.processingFormat.channelCount > 1, file.length > 0 else {
-            return MonoSource(url: url, isTemporary: false)
-        }
-        let plan = ChannelMixCore.plan(try measure(file))
-        file.framePosition = 0
-        let mixURL = FileManager.default.temporaryDirectory
-            .appendingPathComponent("workflow-channel-mix-\(UUID().uuidString).caf")
-        do {
-            try writeMix(of: file, plan: plan, to: mixURL)
-        } catch {
-            try? FileManager.default.removeItem(at: mixURL)
-            throw error
-        }
-        return MonoSource(url: mixURL, isTemporary: true)
+        guard file.processingFormat.channelCount > 1, file.length > 0 else { return nil }
+        return ChannelMixCore.plan(try measure(file))
     }
 
     /// How loud each channel of the file is, and how loud their sum is.
@@ -82,37 +61,168 @@ enum SpeechAudioReader {
         return ChannelMixCore.Measurement(channelEnergy: channelEnergy, sumEnergy: sumEnergy, frames: frames)
     }
 
-    private static func writeMix(of file: AVAudioFile, plan: ChannelMixCore.Plan, to url: URL) throws {
-        let sampleRate = file.processingFormat.sampleRate
-        let settings: [String: Any] = [
-            AVFormatIDKey: Int(kAudioFormatLinearPCM),
-            AVSampleRateKey: sampleRate,
-            AVNumberOfChannelsKey: 1,
-            AVLinearPCMBitDepthKey: 32,
-            AVLinearPCMIsFloatKey: true
-        ]
-        let output = try AVAudioFile(forWriting: url, settings: settings, commonFormat: .pcmFormatFloat32, interleaved: false)
-        let picked = plan.channels
-        var scale = 1 / Float(max(picked.count, 1))
-        var mix: AVAudioPCMBuffer?
-        try forEachChunk(of: file) { channels, count in
-            if mix == nil || Int(mix?.frameCapacity ?? 0) < count {
-                mix = AVAudioPCMBuffer(pcmFormat: output.processingFormat, frameCapacity: AVAudioFrameCount(count))
-            }
-            guard let mix, let samples = mix.floatChannelData?[0] else {
+    /// Converts `frameCount` frames of the file from `startFrame` to
+    /// `targetFormat`, one chunk at a time, and hands over each converted
+    /// buffer. With a plan, every chunk is mixed to one channel first.
+    static func convert(
+        fileURL: URL,
+        sourceFormat: AVAudioFormat,
+        plan: ChannelMixCore.Plan?,
+        targetFormat: AVAudioFormat,
+        ratio: Double,
+        startFrame: AVAudioFramePosition,
+        frameCount: AVAudioFramePosition,
+        inputChunkSize: AVAudioFrameCount,
+        output: (AVAudioPCMBuffer) throws -> Void
+    ) throws {
+        let audioFile = try AVAudioFile(forReading: fileURL)
+        audioFile.framePosition = startFrame
+
+        // Buffers hold Float32 per channel, so cap the chunk by bytes: a chunk sized
+        // in frames alone balloons for multi-channel sources (8ch = 32 MB per buffer).
+        let maxChunkBytes = 8 * 1024 * 1024
+        let bytesPerFrame = Int(sourceFormat.channelCount) * MemoryLayout<Float>.size
+        let chunkFrames = min(inputChunkSize, AVAudioFrameCount(max(maxChunkBytes / bytesPerFrame, 65536)))
+
+        var mixBuffer: AVAudioPCMBuffer?
+        if plan != nil {
+            guard let mixFormat = AVAudioFormat(
+                commonFormat: .pcmFormatFloat32, sampleRate: sourceFormat.sampleRate, channels: 1, interleaved: false
+            ), let buffer = AVAudioPCMBuffer(pcmFormat: mixFormat, frameCapacity: chunkFrames) else {
                 throw TranscriptionError.audioConversionFailed
             }
-            let length = vDSP_Length(count)
-            vDSP_vclr(samples, 1, length)
-            for channel in picked {
-                vDSP_vadd(samples, 1, channels[channel], 1, samples, 1, length)
-            }
-            if picked.count > 1 {
-                vDSP_vsmul(samples, 1, &scale, samples, 1, length)
-            }
-            mix.frameLength = AVAudioFrameCount(count)
-            try output.write(from: mix)
+            mixBuffer = buffer
         }
+
+        guard let converter = AVAudioConverter(from: mixBuffer?.format ?? sourceFormat, to: targetFormat) else {
+            throw TranscriptionError.audioConversionFailed
+        }
+        converter.sampleRateConverterQuality = AVAudioQuality.max.rawValue
+
+        let outputChunkSize = AVAudioFrameCount(Double(chunkFrames) * ratio) + 256
+        guard let inputBuffer = AVAudioPCMBuffer(pcmFormat: sourceFormat, frameCapacity: chunkFrames),
+              let outputBuffer = AVAudioPCMBuffer(pcmFormat: targetFormat, frameCapacity: outputChunkSize) else {
+            throw TranscriptionError.audioConversionFailed
+        }
+
+        var framesRead: AVAudioFramePosition = 0
+
+        while framesRead < frameCount {
+            let framesToRead = min(AVAudioFrameCount(frameCount - framesRead), chunkFrames)
+            inputBuffer.frameLength = 0
+            try audioFile.read(into: inputBuffer, frameCount: framesToRead)
+
+            if inputBuffer.frameLength == 0 { break }
+            framesRead += AVAudioFramePosition(inputBuffer.frameLength)
+
+            let chunk: AVAudioPCMBuffer
+            if let plan, let mixBuffer {
+                try mix(inputBuffer, plan: plan, into: mixBuffer)
+                chunk = mixBuffer
+            } else {
+                chunk = inputBuffer
+            }
+
+            var inputConsumed = false
+            var convError: NSError?
+
+            outputBuffer.frameLength = 0
+            converter.convert(to: outputBuffer, error: &convError) { _, outStatus in
+                if inputConsumed {
+                    outStatus.pointee = .noDataNow
+                    return nil
+                }
+                inputConsumed = true
+                outStatus.pointee = .haveData
+                return chunk
+            }
+
+            if let convError = convError {
+                throw convError
+            }
+
+            try output(outputBuffer)
+        }
+
+        // Flush the resampler: without an .endOfStream pass its internal latency
+        // (the last few milliseconds of audio) is silently dropped.
+        var status = AVAudioConverterOutputStatus.haveData
+        while status == .haveData {
+            var convError: NSError?
+            outputBuffer.frameLength = 0
+            status = converter.convert(to: outputBuffer, error: &convError) { _, outStatus in
+                outStatus.pointee = .endOfStream
+                return nil
+            }
+            if convError != nil { break }
+            try output(outputBuffer)
+        }
+    }
+
+    /// The planned channels of `source` as one channel in `mono`.
+    private static func mix(_ source: AVAudioPCMBuffer, plan: ChannelMixCore.Plan, into mono: AVAudioPCMBuffer) throws {
+        let picked = plan.channels
+        guard let channels = source.floatChannelData, let samples = mono.floatChannelData?[0],
+              source.frameLength <= mono.frameCapacity,
+              picked.allSatisfy({ $0 < Int(source.format.channelCount) }) else {
+            throw TranscriptionError.audioConversionFailed
+        }
+        let length = vDSP_Length(source.frameLength)
+        vDSP_vclr(samples, 1, length)
+        for channel in picked {
+            vDSP_vadd(samples, 1, channels[channel], 1, samples, 1, length)
+        }
+        if picked.count > 1 {
+            var scale = 1 / Float(picked.count)
+            vDSP_vsmul(samples, 1, &scale, samples, 1, length)
+        }
+        mono.frameLength = source.frameLength
+    }
+
+    /// The whole of a recording with several channels as 16 kHz samples of
+    /// its mix.
+    static func speechSamples(of url: URL, plan: ChannelMixCore.Plan) throws -> [Float] {
+        var samples = [Float]()
+        try convertToSpeech(url, plan: plan) { buffer in
+            guard buffer.frameLength > 0, let data = buffer.floatChannelData else { return }
+            samples.append(contentsOf: UnsafeBufferPointer(start: data[0], count: Int(buffer.frameLength)))
+        }
+        return samples
+    }
+
+    /// Writes the mix of a recording with several channels to `destination`
+    /// as a 16 kHz, 16-bit, one-channel WAV: the one file FluidAudio's
+    /// long-form path reads in place instead of converting it to a temporary
+    /// file of its own.
+    static func writeSpeechFile(of url: URL, plan: ChannelMixCore.Plan, to destination: URL) throws {
+        let settings: [String: Any] = [
+            AVFormatIDKey: Int(kAudioFormatLinearPCM),
+            AVSampleRateKey: speechFormat.sampleRate,
+            AVNumberOfChannelsKey: 1,
+            AVLinearPCMBitDepthKey: 16,
+            AVLinearPCMIsFloatKey: false
+        ]
+        let file = try AVAudioFile(forWriting: destination, settings: settings, commonFormat: .pcmFormatFloat32, interleaved: false)
+        try convertToSpeech(url, plan: plan) { buffer in
+            guard buffer.frameLength > 0 else { return }
+            try file.write(from: buffer)
+        }
+    }
+
+    private static func convertToSpeech(_ url: URL, plan: ChannelMixCore.Plan, output: (AVAudioPCMBuffer) throws -> Void) throws {
+        let file = try AVAudioFile(forReading: url)
+        let sourceFormat = file.processingFormat
+        try convert(
+            fileURL: url,
+            sourceFormat: sourceFormat,
+            plan: plan,
+            targetFormat: speechFormat,
+            ratio: speechFormat.sampleRate / sourceFormat.sampleRate,
+            startFrame: 0,
+            frameCount: file.length,
+            inputChunkSize: 262_144,
+            output: output
+        )
     }
 
     /// Reads the file from its current position, one chunk at a time, and

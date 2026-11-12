@@ -53,17 +53,13 @@ class FluidAudioEngine: TranscriptionEngine {
             throw CancellationError()
         }
 
-        // A recording with several channels is recognized from one mix of
-        // them; a one-channel recording is read as it is.
-        let source = try SpeechAudioReader.monoSource(for: url)
-        defer { source.discard() }
-        let audioFile = try AVAudioFile(forReading: source.url)
+        let audioFile = try AVAudioFile(forReading: url)
         let seconds = Double(audioFile.length) / audioFile.processingFormat.sampleRate
         let text: String
         if seconds > Self.segmentedLimitSeconds {
-            text = try await transcribeLongForm(url: source.url, manager: asrManager, settings: settings)
+            text = try await transcribeLongForm(url: url, manager: asrManager, settings: settings)
         } else {
-            text = try await transcribeSegmented(AudioConverter().resampleAudioFile(source.url), settings: settings)
+            text = try await transcribeSegmented(Self.segmentedSamples(of: url), settings: settings)
         }
 
         guard !isCancelled else {
@@ -72,6 +68,15 @@ class FluidAudioEngine: TranscriptionEngine {
 
         onProgressUpdate?(1.0)
         return Self.postprocess(text, settings: settings)
+    }
+
+    /// The 16 kHz samples the segmented path recognizes: the mix of a
+    /// recording with several channels, and a one-channel recording as it is.
+    static func segmentedSamples(of url: URL) throws -> [Float] {
+        if let plan = try SpeechAudioReader.channelPlan(for: url) {
+            return try SpeechAudioReader.speechSamples(of: url, plan: plan)
+        }
+        return try AudioConverter().resampleAudioFile(url)
     }
 
     /// Starts recognizing a dictation that is still being recorded to `url`,
@@ -150,6 +155,20 @@ class FluidAudioEngine: TranscriptionEngine {
     }
 
     private func transcribeLongForm(url: URL, manager asrManager: AsrManager, settings: Settings) async throws -> String {
+        // FluidAudio's long-form path takes only a file and reads its first
+        // channel, so a recording with several channels reaches it as a
+        // 16 kHz mix, which it reads in place.
+        guard let plan = try SpeechAudioReader.channelPlan(for: url) else {
+            return try await transcribeLongFormFile(url, manager: asrManager, settings: settings)
+        }
+        let mixURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("workflow-speech-\(UUID().uuidString).wav")
+        defer { try? FileManager.default.removeItem(at: mixURL) }
+        try SpeechAudioReader.writeSpeechFile(of: url, plan: plan, to: mixURL)
+        return try await transcribeLongFormFile(mixURL, manager: asrManager, settings: settings)
+    }
+
+    private func transcribeLongFormFile(_ url: URL, manager asrManager: AsrManager, settings: Settings) async throws -> String {
         // Start progress monitoring task using FluidAudio's transcriptionProgressStream
         let onProgress = onProgressUpdate
         progressTask?.cancel()

@@ -1,6 +1,7 @@
 import Foundation
 import AVFoundation
 import CoreAudioTypes
+import DictationCore
 import os
 
 /// Shared with whisper's C progress callback, which runs on whisper's own
@@ -300,21 +301,19 @@ class WhisperEngine: TranscriptionEngine {
 
     nonisolated func convertAudioToPCM(fileURL: URL) async throws -> [Float]? {
         return try await Task.detached(priority: .userInitiated) {
-            let (containerURL, isTempFile) = try self.resolveFileURL(fileURL)
+            let (resolvedURL, isTempFile) = try self.resolveFileURL(fileURL)
             defer {
-                if isTempFile { try? FileManager.default.removeItem(at: containerURL) }
+                if isTempFile { try? FileManager.default.removeItem(at: resolvedURL) }
             }
             // A recording with several channels is converted from one mix of
             // them, so a surround layout or two channels that cancel never
             // reach the model as silence.
-            let source = try SpeechAudioReader.monoSource(for: containerURL)
-            defer { source.discard() }
-            let resolvedURL = source.url
+            let plan = try SpeechAudioReader.channelPlan(for: resolvedURL)
             let audioFile = try AVAudioFile(forReading: resolvedURL)
             let sourceFormat = audioFile.processingFormat
             let totalFrames = audioFile.length
             
-            guard let targetFormat = self.makeTargetFormat(channelCount: sourceFormat.channelCount) else {
+            guard let targetFormat = self.makeTargetFormat(channelCount: plan == nil ? sourceFormat.channelCount : 1) else {
                 return nil
             }
             
@@ -329,6 +328,7 @@ class WhisperEngine: TranscriptionEngine {
                 let result = try Self.convertSegment(
                     fileURL: resolvedURL,
                     sourceFormat: sourceFormat,
+                    plan: plan,
                     targetFormat: targetFormat,
                     ratio: ratio,
                     startFrame: 0,
@@ -359,6 +359,7 @@ class WhisperEngine: TranscriptionEngine {
                     let segment = try? Self.convertSegment(
                         fileURL: resolvedURL,
                         sourceFormat: sourceFormat,
+                        plan: plan,
                         targetFormat: targetFormat,
                         ratio: ratio,
                         startFrame: startFrame,
@@ -396,80 +397,25 @@ class WhisperEngine: TranscriptionEngine {
     nonisolated static func convertSegment(
         fileURL: URL,
         sourceFormat: AVAudioFormat,
+        plan: ChannelMixCore.Plan? = nil,
         targetFormat: AVAudioFormat,
         ratio: Double,
         startFrame: AVAudioFramePosition,
         frameCount: AVAudioFramePosition,
         inputChunkSize: AVAudioFrameCount
     ) throws -> [Float] {
-        let audioFile = try AVAudioFile(forReading: fileURL)
-        audioFile.framePosition = startFrame
-        
-        guard let converter = AVAudioConverter(from: sourceFormat, to: targetFormat) else {
-            throw TranscriptionError.audioConversionFailed
-        }
-        converter.sampleRateConverterQuality = AVAudioQuality.max.rawValue
-        
-        // Buffers hold Float32 per channel, so cap the chunk by bytes: a chunk sized
-        // in frames alone balloons for multi-channel sources (8ch = 32 MB per buffer).
-        let maxChunkBytes = 8 * 1024 * 1024
-        let bytesPerFrame = Int(sourceFormat.channelCount) * MemoryLayout<Float>.size
-        let chunkFrames = min(inputChunkSize, AVAudioFrameCount(max(maxChunkBytes / bytesPerFrame, 65536)))
-        
-        let outputChunkSize = AVAudioFrameCount(Double(chunkFrames) * ratio) + 256
-        guard let inputBuffer = AVAudioPCMBuffer(pcmFormat: sourceFormat, frameCapacity: chunkFrames),
-              let outputBuffer = AVAudioPCMBuffer(pcmFormat: targetFormat, frameCapacity: outputChunkSize) else {
-            throw TranscriptionError.audioConversionFailed
-        }
-        
         var result = [Float]()
         result.reserveCapacity(Int(Double(frameCount) * ratio) + 256)
-        
-        var framesRead: AVAudioFramePosition = 0
-        
-        while framesRead < frameCount {
-            let framesToRead = min(AVAudioFrameCount(frameCount - framesRead), chunkFrames)
-            inputBuffer.frameLength = 0
-            try audioFile.read(into: inputBuffer, frameCount: framesToRead)
-            
-            if inputBuffer.frameLength == 0 { break }
-            framesRead += AVAudioFramePosition(inputBuffer.frameLength)
-            
-            var inputConsumed = false
-            var convError: NSError?
-            
-            outputBuffer.frameLength = 0
-            converter.convert(to: outputBuffer, error: &convError) { _, outStatus in
-                if inputConsumed {
-                    outStatus.pointee = .noDataNow
-                    return nil
-                }
-                inputConsumed = true
-                outStatus.pointee = .haveData
-                return inputBuffer
-            }
-            
-            if let convError = convError {
-                throw convError
-            }
-            
-            appendMixedSamples(from: outputBuffer, to: &result)
-        }
-        
-        // Flush the resampler: without an .endOfStream pass its internal latency
-        // (the last few milliseconds of audio) is silently dropped.
-        var status = AVAudioConverterOutputStatus.haveData
-        while status == .haveData {
-            var convError: NSError?
-            outputBuffer.frameLength = 0
-            status = converter.convert(to: outputBuffer, error: &convError) { _, outStatus in
-                outStatus.pointee = .endOfStream
-                return nil
-            }
-            if convError != nil { break }
-            appendMixedSamples(from: outputBuffer, to: &result)
-        }
-        
+        try SpeechAudioReader.convert(
+            fileURL: fileURL,
+            sourceFormat: sourceFormat,
+            plan: plan,
+            targetFormat: targetFormat,
+            ratio: ratio,
+            startFrame: startFrame,
+            frameCount: frameCount,
+            inputChunkSize: inputChunkSize
+        ) { appendMixedSamples(from: $0, to: &result) }
         return result
     }
     

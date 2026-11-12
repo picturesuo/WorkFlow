@@ -67,8 +67,10 @@ final class BrandPaletteTests: XCTestCase {
             XCTAssertEqual(chrome, content, "The toolbar and the History are one surface \(scheme)")
             XCTAssertEqual(ink, resolved(scheme == .dark ? BrandPalette.ivory : BrandPalette.charcoal, scheme), "Ink is the mark's own color \(scheme)")
             // Quiet links and the success color are still text.
-            let quietLink = blend(ink, over: content, alpha: 0.62)
-            XCTAssertGreaterThanOrEqual(contrast(quietLink, content), 4.5, "quiet link on History \(scheme)")
+            XCTAssertGreaterThanOrEqual(contrastOfTranslucent(ThemePalette.quietLink(scheme), on: content, scheme), 4.5,
+                                        "quiet link on History \(scheme)")
+            XCTAssertLessThan(contrastOfTranslucent(ThemePalette.ink(scheme).opacity(0.3), on: content, scheme), 4.5,
+                              "A fainter link would be caught \(scheme)")
             let success = resolved(ThemePalette.success(scheme), scheme)
             for (name, surface) in [("card", card), ("window", window), ("content", content)] {
                 XCTAssertGreaterThanOrEqual(contrast(success, surface), 4.5, "success text on \(name) \(scheme)")
@@ -272,6 +274,14 @@ private func resolved(_ color: Color, _ scheme: ColorScheme) -> NSColor {
         result = NSColor(color).usingColorSpace(.sRGB) ?? .clear
     }
     return result
+}
+
+/// The contrast of a see-through token as it is drawn on `surface`: its own
+/// resolved color at its own resolved alpha.
+@MainActor
+private func contrastOfTranslucent(_ token: Color, on surface: NSColor, _ scheme: ColorScheme) -> CGFloat {
+    let color = resolved(token, scheme)
+    return contrast(blend(color, over: surface, alpha: color.alphaComponent), surface)
 }
 
 /// One color at `alpha` over another, as the eye sees it.
