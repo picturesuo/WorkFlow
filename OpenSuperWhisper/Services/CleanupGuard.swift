@@ -402,23 +402,13 @@ enum CleanupGuard {
 
     /// "fifteen percent" is not "15", and "negative four" is not "4": each
     /// percent or sign the speaker attached to a number survives on that same
-    /// number, as the symbol or the word, unless the speaker corrected it or
-    /// said the percent again in a restart ("up 15%, uh, 15% this quarter").
-    /// A repeated sign is never a restart: "ten minus two, minus two"
-    /// subtracts twice.
+    /// number, as the symbol or the word, unless the speaker corrected it.
+    /// One said twice is required twice, even after a pause: "5%, 5%, and
+    /// 10%" lists three values and "ten minus two, minus two" subtracts
+    /// twice, which the words alone cannot tell from a restart.
     private static func keepsEveryValueSymbol(_ cleaned: String, source: String) -> Bool {
         var written = valueSymbols(in: cleaned)
-        let saidSymbols = valueSymbols(in: source)
-        let takes = repeatedTakes(in: source)
-        for said in saidSymbols where !isCorrected(said.range, in: source) {
-            // Repeated only when the first take said the same percent on the same number.
-            let isRepeat = said.symbol == .percent && takes.contains { take in
-                take.second.contains(said.range.lowerBound) && saidSymbols.contains {
-                    take.first.contains($0.range.lowerBound) && !isCorrected($0.range, in: source)
-                        && $0.symbol == said.symbol && !$0.values.isDisjoint(with: said.values)
-                }
-            }
-            if isRepeat { continue }
+        for said in valueSymbols(in: source) where !isCorrected(said.range, in: source) {
             guard let index = written.firstIndex(where: {
                 $0.symbol == said.symbol && !$0.values.isDisjoint(with: said.values)
             }) else { return false }
@@ -664,8 +654,9 @@ enum CleanupGuard {
     /// it, with a pause between: punctuation or a hesitation sound, and no
     /// other word. Runs said without a pause ("not this one not this one
     /// either") are not a restart. A rewrite that keeps one take still says
-    /// what the speaker said, so a negation, question, or percent the first
-    /// take already counted is not required again in the second. Like a word
+    /// what the speaker said, so a negation or question the first take
+    /// already counted is not required again in the second; a repeated
+    /// percent or sign still is (see `keepsEveryValueSymbol`). Like a word
     /// repeated at once ("don't don't"), a repeated sentence counts once too
     /// ("It's not. It's not tested."), and these count checks cannot tell
     /// which take a moved negation came from.

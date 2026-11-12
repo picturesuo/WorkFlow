@@ -6,12 +6,12 @@ import XCTest
 /// A speaker who restarts says the same words twice: "I can't. I can't make
 /// it on Friday, um, sorry." Parakeet writes the restart with a comma or a
 /// period, and the sources below are its own output for synthetic speech. A
-/// cleanup that keeps one take used to read as a dropped negation, question,
-/// or percent, so the whole dictation fell back to the recognizer's words,
+/// cleanup that keeps one take used to read as a dropped negation or
+/// question, so the whole dictation fell back to the recognizer's words,
 /// every "um" and "uh" included. One take is now enough, and every other
 /// check still applies. A restart has a pause, written as punctuation or a
-/// hesitation sound, and a repeated sign is never one: "ten minus two, minus
-/// two" subtracts twice.
+/// hesitation sound. A percent or sign said twice is never one: "5%, 5%, and
+/// 10%" lists three values and "ten minus two, minus two" subtracts twice.
 final class RepeatedTakeGuardTests: XCTestCase {
     private func accepts(
         _ cleaned: String,
@@ -64,18 +64,18 @@ final class RepeatedTakeGuardTests: XCTestCase {
             "How do we roll this back if the migration fails?"
         ),
         ("Should we? Should we ship it today?", "Should we ship it today?", "Should we ship it today?"),
-        ("Revenue is up 15%, uh, 15% this quarter.", "Revenue is up 15% this quarter.", "Revenue is up 15% this quarter."),
+        // A percent said once still comes through a restart.
+        ("We don't, um, we don't expect 15% growth this quarter.", "We don't expect 15% growth this quarter.", "We don't expect 15% growth this quarter."),
         (
-            "Revenue is up fifteen percent, uh, fifteen percent this quarter.",
-            "Revenue is up fifteen percent this quarter.",
-            "Revenue is up 15% this quarter."
+            "Why is, uh, why is revenue up fifteen percent?",
+            "Why is revenue up fifteen percent?",
+            "Why is revenue up 15%?"
         ),
         // Said three times, the restart still counts once.
         ("I don't, I don't, I don't know about the second server.", "I don't know about the second server.", "I don't know about the second server."),
         ("We can't, um, we can't, we can't ship it today.", "We can't ship it today.", "We can't ship it today."),
         ("What's the, what's the, what's the status of the deploy?", "What's the status of the deploy?", "What's the status of the deploy?"),
         ("Should we? Should we, uh, should we ship it today?", "Should we ship it today?", "Should we ship it today?"),
-        ("Revenue is up 15%, uh, 15%, uh, 15% this quarter.", "Revenue is up 15% this quarter.", "Revenue is up 15% this quarter."),
         // The middle take follows a comma and the last a hesitation sound.
         (
             "Who is, who is, um, who is covering the on-call shift?",
@@ -85,9 +85,20 @@ final class RepeatedTakeGuardTests: XCTestCase {
         ("Should we, should we, um, should we ship it today?", "Should we ship it today?", "Should we ship it today?"),
     ]
 
-    /// Arithmetic that repeats a signed term, and the reply that drops one.
-    /// The dictation keeps the recognizer's words.
-    static let repeatedSigns: [(source: String, cleaned: String)] = [
+    /// A percent or signed term said twice, and the reply that keeps it once.
+    /// The dictation keeps the recognizer's words, because a list, a sum, or
+    /// a pair of coordinates says the same words as a restart.
+    static let repeatedValues: [(source: String, cleaned: String)] = [
+        // A list that repeats a value.
+        ("Growth was 5%, 5%, and 10%.", "Growth was 5% and 10%."),
+        ("Growth was 5%, uh, 5%, and 10%.", "Growth was 5% and 10%."),
+        ("Growth was five percent, five percent, and ten percent.", "Growth was five percent and ten percent."),
+        ("Growth was five percent, um, five percent, and ten percent.", "Growth was five percent and ten percent."),
+        // A restart of a percent, kept as said rather than guessed at.
+        ("Revenue is up 15%, uh, 15% this quarter.", "Revenue is up 15% this quarter."),
+        ("Revenue is up fifteen percent, uh, fifteen percent this quarter.", "Revenue is up fifteen percent this quarter."),
+        ("Revenue is up 15%, uh, 15%, uh, 15% this quarter.", "Revenue is up 15% this quarter."),
+        // Arithmetic that repeats a signed term.
         ("ten minus two minus two", "ten minus two"),
         ("ten minus two minus two", "10 - 2"),
         ("ten minus two, minus two", "10 - 2"),
@@ -162,12 +173,14 @@ final class RepeatedTakeGuardTests: XCTestCase {
         }
     }
 
-    func testARepeatedSignIsNeverARestart() {
+    func testARepeatedPercentOrSignIsNeverARestart() {
         for mode in CleanupMode.allCases {
-            for repeated in Self.repeatedSigns {
+            for repeated in Self.repeatedValues {
                 rejects(repeated.cleaned, source: repeated.source, mode: mode)
             }
-            // Every signed term kept is still a faithful cleanup.
+            // Every percent and signed term kept is still a faithful cleanup.
+            accepts("Growth was 5%, 5%, and 10%.", source: "Growth was 5%, uh, 5%, and 10%.", mode: mode)
+            accepts("Revenue is up 15%, 15% this quarter.", source: "Revenue is up 15%, uh, 15% this quarter.", mode: mode)
             accepts("ten minus two minus two", source: "ten minus two, uh, minus two", mode: mode)
             accepts("x minus 2 minus 2", source: "x minus 2, um, minus 2", mode: mode)
         }
@@ -352,10 +365,10 @@ final class RepeatedTakeDictationTests: XCTestCase {
         }
     }
 
-    func testRepeatedArithmeticKeepsTheRecognizerWordsInEveryMode() async throws {
+    func testRepeatedPercentsAndArithmeticKeepTheRecognizerWordsInEveryMode() async throws {
         for mode in CleanupMode.allCases {
             self.mode = mode
-            for repeated in RepeatedTakeGuardTests.repeatedSigns {
+            for repeated in RepeatedTakeGuardTests.repeatedValues {
                 failures = []
                 reply = { _ in (200, repeated.cleaned) }
                 let (pasted, row) = try await dictate(repeated.source)

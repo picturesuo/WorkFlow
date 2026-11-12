@@ -125,7 +125,7 @@ Cleanup rewrites what you said. It doesn't answer it. A question you dictate com
 
 If the reply drops a question you asked, or is made of material you didn't say, like an answer, advice, a poem, or a joke, WorkFlow uses your original transcript. A missing question mark alone is fine. These checks catch clear answers, not every subtle change of meaning.
 
-When you restart by saying the same words again, as in "I can't, I can't make it" or "what's the, um, what's the status", cleanup may keep just one take. The question, negation, or percent in it still has to come through, and a reply that drops it gets your original transcript.
+When you restart by saying the same words again, as in "I can't, I can't make it" or "what's the, um, what's the status", cleanup may keep just one take. The question or negation in it still has to come through, and a reply that drops it gets your original transcript. A percent or a minus you say twice, as in "5%, 5%, and 10%" or "ten minus two, minus two", has to stay twice, even when you meant a restart.
 
 ## Music while you dictate
 
