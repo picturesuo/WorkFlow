@@ -520,11 +520,14 @@ enum CleanupGuard {
         // question only when its first take already asked it, so a third
         // take repeats the second.
         var said: [(question: String, position: String.Index)] = []
-        func asksAnew(_ question: String, at position: String.Index) -> Bool {
-            let isRepeated = takes.contains { take in
+        func repeats(_ question: String, at position: String.Index) -> Bool {
+            takes.contains { take in
                 take.second.contains(position)
                     && said.contains { $0.question == question && take.first.contains($0.position) }
             }
+        }
+        func asksAnew(_ question: String, at position: String.Index) -> Bool {
+            let isRepeated = repeats(question, at: position)
             said.append((question, position))
             return !isRepeated
         }
@@ -538,14 +541,24 @@ enum CleanupGuard {
                 let previous = index > 0 ? words[index - 1].text : ""
                 let isEmbedded = askingWords.contains(previous)
                     || (previous == "me" && index > 1 && ["tell", "show"].contains(words[index - 2].text))
-                if (isDirect || isEmbedded) && !wasReplaced(index) && asksAnew(question, at: word.range.lowerBound) {
-                    asked[question, default: 0] += 1
+                if (isDirect || isEmbedded) && !wasReplaced(index) {
+                    if asksAnew(question, at: word.range.lowerBound) { asked[question, default: 0] += 1 }
+                } else if repeats(question, at: word.range.lowerBound) {
+                    // A middle take after a comma does not ask on its own,
+                    // and the take after it still repeats it: "who is, who
+                    // is, um, who is covering".
+                    said.append((question, word.range.lowerBound))
                 }
             } else if opensYesNoQuestion(index, in: words, text: text),
                       !(index > 0 && ["so", "neither", "nor"].contains(words[index - 1].text)),
                       !(["can", "could", "would", "will"].contains(word.text) && words[index + 1].text == "you"),
                       !wasReplaced(index), asksAnew(word.text, at: word.range.lowerBound) {
                 yesNo += 1
+            } else if !questionWords.contains(question), repeats(word.text, at: word.range.lowerBound) {
+                // A middle take after a comma does not open a clause, and
+                // the take after it still repeats it: "should we, should
+                // we, um, should we ship it".
+                said.append((word.text, word.range.lowerBound))
             }
         }
         return (asked, yesNo)

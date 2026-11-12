@@ -76,6 +76,13 @@ final class RepeatedTakeGuardTests: XCTestCase {
         ("What's the, what's the, what's the status of the deploy?", "What's the status of the deploy?", "What's the status of the deploy?"),
         ("Should we? Should we, uh, should we ship it today?", "Should we ship it today?", "Should we ship it today?"),
         ("Revenue is up 15%, uh, 15%, uh, 15% this quarter.", "Revenue is up 15% this quarter.", "Revenue is up 15% this quarter."),
+        // The middle take follows a comma and the last a hesitation sound.
+        (
+            "Who is, who is, um, who is covering the on-call shift?",
+            "Who is covering the on-call shift?",
+            "Who is covering the on-call shift?"
+        ),
+        ("Should we, should we, um, should we ship it today?", "Should we ship it today?", "Should we ship it today?"),
     ]
 
     /// Arithmetic that repeats a signed term, and the reply that drops one.
@@ -141,6 +148,8 @@ final class RepeatedTakeGuardTests: XCTestCase {
             // Three takes are one question, and the next clause asks another.
             rejects("The status of the deploy is green.", source: "What's the, what's the, what's the status of the deploy?", mode: mode)
             rejects("What's the status, and is the owner here?", source: "What's the, what's the, what's the status, and what's the owner?", mode: mode)
+            rejects("Who is covering, and is anyone on backup?", source: "Who is, who is, um, who is covering, and who is on backup?", mode: mode)
+            rejects("We should ship it today.", source: "Should we, should we, um, should we ship it today?", mode: mode)
         }
     }
 
