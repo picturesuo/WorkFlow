@@ -52,6 +52,20 @@ All times are milliseconds on a monotonic clock. p95 is nearest-rank, so with 11
 - **Cold launch.** The disk cache is warm after the first launch, so "cold" means a new process, not a cold disk. The launch is currently blocked: `applicationDidFinishLaunching` always runs the legacy credential migration, whose Keychain service names are fixed to `com.picturesuo.WorkFlow.*` whatever the bundle id, so even a perf build would query the owner's real WorkFlow Keychain items. `cold-launch.sh` refuses to launch unless `WF_PERF_ALLOW_STANDALONE_LAUNCH=1`, to be set only once that read is gone. A standalone launch also puts a status item in the menu bar while it runs.
 - **Load.** Numbers depend heavily on what else the Mac is doing; `environment.json` records the load average before and after.
 
+## Recording meter cost
+
+`RecordingMeterCostBenchmarkTests` measures what the main thread pays while a recording's level meter ticks: main-thread CPU per second, run-loop wake-ups per second and SwiftUI layout passes per second, for the main window, the dictation bar alone and the indicator capsule. It skips unless `TEST_RUNNER_WF_METER_COST_OUT` names a JSON-lines file, so the normal test command is unaffected:
+
+```bash
+TEST_RUNNER_WF_METER_COST_OUT=<file> xcodebuild test <the README's options> \
+  -only-testing:OpenSuperWhisperTests/RecordingMeterCostBenchmarkTests
+```
+
+- **Substituted.** The recording state is scripted and the levels are synthetic: silence, a steady tone, and a speech-like level that changes on every reading, pushed 20 times a second from a background queue the way the recorder pushes real ones. No microphone is opened.
+- **Windows.** No window is ordered in, and the suite fails if one of its windows is on screen. `off_screen` rows let the window answer for itself. `drawn_as_on_screen` rows tell the surface its window is on screen, which is what following the meter costs before any pixel reaches a display. What a window that really is on screen costs, compositor included, is not measured.
+- **Layout passes** are counted, not timed, so they do not move with load: SwiftUI lays its hosting view out once for every frame it draws. `RecordingMeterCostTests`, in the normal suite, asserts on that count.
+- `TEST_RUNNER_WF_METER_COST_SECONDS` sets the measured stretch (default 4 s). `TEST_RUNNER_WF_METER_COST_SAMPLE_DIR` adds a second stretch per row under `/usr/bin/sample`, on the test host only, and saves the reports there.
+
 ## Field numbers from the installed app
 
 macOS does not keep these signposts in the stored log, so either run `Scripts/perf/field-report.sh --watch 600` while dictating (it streams the live log for that many seconds, then reports), or launch the app with `WF_PERF_OUT=<file>` in its environment and read the JSON lines.

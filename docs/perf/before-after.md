@@ -58,6 +58,33 @@ Status: merged in PR #14.
 
 Eight crash reports on 2026-11-09 shared one signature (see `docs/state-machines.md`). The crash did not reproduce on demand (0 of 45 runs). Draining the detectors inside `exit` was tried and rejected: one of 35 runs crashed. The shipped design closes the gate before exit begins. With up to four detectors in flight, 10 of 10 runs drained with no crash report.
 
+## Recording while the window is not on screen
+
+Measured on 2026-11-12, after PR #21, on the same MacBook Air M1 (macOS 26.6.2, external display at 120 Hz).
+
+During a recording of almost an hour the installed app's main thread read 82 to 92 percent of a core in most samples (`ps` and `top` on the installed app; it was not profiled). None of its windows was on screen at the time: the main window existed but was closed, hidden or on another Space (which of these is not known), and the record control in it kept following the level meter. SwiftUI keeps animating a window that is not on screen, so the window was laid out and committed at the display's rate for nobody. In a silent room it was still redrawn 20 times a second, because the meter published readings that changed nothing.
+
+Two changes:
+
+- The meter publishes a reading only when it changes the level or its history.
+- The dictation bar tracks whether its window is on screen. The record control follows the meter, and its arc turns, only while it is. The halo rests while the window is closed, hidden, minimized, covered or on another Space, and follows the voice again when the window is seen.
+
+`RecordingMeterCostBenchmarkTests` (see `Scripts/perf/README.md`), same session, load average 5 to 10, 4 s per row. The main window is recording, in a window that is never shown. "Before" is the same tree with the three old behaviors restored. Main-thread CPU in milliseconds per second, then SwiftUI layout passes per second:
+
+| Main window, recording | Before | After (two runs) |
+|---|---|---|
+| Off screen, speech-like level | 385.0, 120 passes | 16.7 and 19.5, 1 pass |
+| Off screen, silence | 101.7, 46 passes | 15.3 and 19.4, 1 pass |
+| Drawn as on screen, silence | 110.4, 46 passes | 15.2 and 20.4, 1 pass |
+| Drawn as on screen, speech-like level | 399.3, 119 passes | 240.4 and 346.7, 120 passes |
+| Dictation bar alone, transcribing arc, off screen | 84.9, 60 passes | 0.1, 0 passes |
+
+- The pass that remains off screen is the bar's clock, once a second.
+- "Drawn as on screen" tells the bar its window is on screen without showing one. The speech-like row is what following a voice costs before any pixel reaches a display. Its passes are unchanged by design, because that halo is meant to be seen; its CPU moved from run to run, and no claim is made for it.
+- The redesign in PR #21 did not cause this. The commit before it, measured the same way, cost 439.8 ms per s off screen with a speech-like level, against 286.9 to 390.4 on PR #21.
+- These are Debug builds in a test host. The installed app showed more (82 to 92 percent of a core) than the test host reproduces (29 to 39 percent). The reason for the difference was not established.
+- `RecordingMeterCostTests` pins both changes by counting layout passes. With the old behaviors restored, 4 of its 5 tests fail.
+
 ## Not measured, and why
 
 - **Trigger key down to microphone live, and cancel right after start.** Test builds have no microphone permission. The signposts exist. They can be read from the installed app with `Scripts/perf/field-report.sh --watch` during a real dictation.
@@ -65,6 +92,8 @@ Eight crash reports on 2026-11-09 shared one signature (see `docs/state-machines
 - **A real cloud provider round trip.** The benchmark uses an in-process stub that answers at once.
 - **Scroll hitch ratio in the final runs.** The display reported no frames.
 - **Idle CPU after a real dictation on the installed app.** This needs a spoken dictation. To check: dictate once, wait 30 s, then run `ps -o %cpu= -p $(pgrep -x WorkFlow)`. It should read near 0.
+- **A recording with the window closed, on the installed app.** This needs a real recording. To check: start a meeting from the menu bar, close the main window, talk for a minute, then run `ps -M -p $(pgrep -x WorkFlow)`. The first thread listed is the main thread; it should read near 0.
+- **What the level halo costs while the window is on screen.** The benchmark never shows a window, so the compositor's share and the real display's frame rate are not in its numbers.
 
 ## Only suspected
 
