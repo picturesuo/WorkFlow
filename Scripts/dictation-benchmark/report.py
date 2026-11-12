@@ -44,6 +44,9 @@ for cell, rows in sorted(cells.items()):
     times = [t for _, _, t in rows if t is not None]
     timing = (f"latency p50 {1000 * percentile(times, 0.5):.0f} ms p95 {1000 * percentile(times, 0.95):.0f} ms"
               if times else "")
+    wer = "n/a" if s["wer"] is None else f"{100 * s['wer']:.2f}%"
+    interval = "n/a" if s["wer95"] is None else f"{100 * s['wer95'][0]:.2f}-{100 * s['wer95'][1]:.2f}%"
     print(f"{cell:28} n {s['utts']:4} words {s['words']:6} S {s['S']:4} D {s['D']:4} I {s['I']:4} "
-          f"WER {100 * s['wer']:.2f}% (95% {100 * s['wer95'][0]:.2f}-{100 * s['wer95'][1]:.2f}%) "
-          f"first {s['first_ok']}/{s['utts']} last {s['last_ok']}/{s['utts']} {timing}")
+          f"WER {wer} (95% {interval}) "
+          f"first {s['first_ok']}/{s['edge_utts']} last {s['last_ok']}/{s['edge_utts']} "
+          f"silence words {s['empty_ref_words']} in {s['empty_refs']} {timing}")
