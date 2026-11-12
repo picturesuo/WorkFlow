@@ -127,6 +127,16 @@ If the reply drops a question you asked, or is made of material you didn't say, 
 
 When you restart by saying the same words again, as in "I can't, I can't make it" or "what's the, um, what's the status", cleanup may keep just one take. The question or negation in it still has to come through, and a reply that drops it gets your original transcript. A percent or a minus you say twice, as in "5%, 5%, and 10%" or "ten minus two, minus two", has to stay twice, even when you meant a restart.
 
+## If the microphone stops while you record
+
+When the microphone goes away in the middle of a recording, for example a device is unplugged, a headset disconnects, or the recorder fails, WorkFlow keeps what it recorded until then:
+
+- A dictation ends there, is transcribed and delivered as usual, and the indicator shows **Recording cut short**.
+- A meeting is saved to History with the audio so far, and WorkFlow tells you it stopped early.
+- Esc still discards the recording.
+
+Starting a recording also stops a History recording that is playing, so the microphone doesn't record it.
+
 ## Microphones with several inputs
 
 WorkFlow records every input channel of the microphone you pick, and a file you drop in can be stereo or surround. The speech model takes one channel, so WorkFlow mixes the channels that carry sound into one before it transcribes:

@@ -753,9 +753,9 @@ struct ContentView: View {
             Text("\(AppIdentity.productName) records locally until you stop it. Meeting mode never pastes into another app.")
         }
         .alert(
-            "Meeting recording failed",
+            meetingController.issue?.title ?? "Meeting recording failed",
             isPresented: Binding(
-                get: { meetingController.errorMessage != nil },
+                get: { meetingController.issue != nil },
                 set: { if !$0 { meetingController.clearError() } }
             )
         ) {
@@ -1154,7 +1154,8 @@ private struct DictationControls: View {
 
     private var status: DictationDockStatus {
         if meetingController.isSaving { return .savingMeeting }
-        if meetingController.isRecording { return .meeting(0) }
+        // A meeting whose microphone is still connecting records nothing yet.
+        if meetingController.isRecording { return meetingController.isConnecting ? .connecting : .meeting(0) }
         if viewModel.state == .decoding { return .transcribing }
         // Stopping dictation must remain available even when another service becomes busy.
         if viewModel.isRecording { return .recording(0) }

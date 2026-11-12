@@ -285,7 +285,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
             .sink { [weak self] _ in
                 self?.updateStatusBarMenu()
             }
-        meetingErrorObserver = MeetingSessionController.shared.$errorMessage
+        meetingErrorObserver = MeetingSessionController.shared.$issue
             .sink { [weak self] _ in
                 self?.updateStatusBarMenu()
             }
