@@ -34,13 +34,19 @@ final class InputLevelMeter: ObservableObject {
         return rms > 0 ? 20 * log10(rms) : -160
     }
 
-    /// Takes one reading: rises fast, falls slower.
+    /// Takes one reading: rises fast, falls slower. A reading that changes
+    /// nothing is not published: every published value redraws whatever
+    /// watches the meter, changed or not, so a silent microphone would
+    /// otherwise redraw the record control 20 times a second.
     func push(_ sample: CGFloat) {
         let target = min(max(sample.isFinite ? sample : 0, 0), 1)
-        level += (target - level) * (target > level ? 0.65 : 0.3)
-        if level < 0.005 { level = 0 }
-        history.removeFirst()
-        history.append(level)
+        var next = level + (target - level) * (target > level ? 0.65 : 0.3)
+        if next < 0.005 { next = 0 }
+        if next != level { level = next }
+        var recent = history
+        recent.removeFirst()
+        recent.append(next)
+        if recent != history { history = recent }
     }
 
     /// Back to silence when no recording is open.
@@ -48,6 +54,46 @@ final class InputLevelMeter: ObservableObject {
         guard level != 0 || history.contains(where: { $0 != 0 }) else { return }
         level = 0
         history = Array(repeating: 0, count: Self.historyLength)
+    }
+}
+
+/// The meter's level for one view, which can be switched off. A view that
+/// watches the meter itself is redrawn at the meter's rate whether or not
+/// anyone can see it; a view that watches its feed is redrawn only while the
+/// feed is on.
+@MainActor
+final class InputLevelFeed: ObservableObject {
+    /// The meter's level while the feed is on, 0 while it is off.
+    @Published private(set) var level: CGFloat = 0
+
+    private let meter: InputLevelMeter
+    private var subscription: AnyCancellable?
+
+    /// Nil follows the app's shared meter.
+    init(meter: InputLevelMeter? = nil) {
+        self.meter = meter ?? .shared
+    }
+
+    /// Whether the feed follows the meter. Turning it on takes the meter's
+    /// current level at once; turning it off returns the level to 0.
+    var isOn: Bool {
+        get { subscription != nil }
+        set {
+            guard newValue != isOn else { return }
+            if newValue {
+                // The meter publishes on the main actor, where it is pushed.
+                subscription = meter.$level.sink { [weak self] level in
+                    MainActor.assumeIsolated { self?.take(level) }
+                }
+            } else {
+                subscription = nil
+                take(0)
+            }
+        }
+    }
+
+    private func take(_ value: CGFloat) {
+        if level != value { level = value }
     }
 }
 

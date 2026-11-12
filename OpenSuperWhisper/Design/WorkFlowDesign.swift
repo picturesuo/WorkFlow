@@ -98,6 +98,115 @@ extension EnvironmentValues {
     }
 }
 
+private struct WindowOnScreenKey: EnvironmentKey {
+    static let defaultValue = true
+}
+
+private struct WindowOnScreenOverrideKey: EnvironmentKey {
+    static let defaultValue: Bool? = nil
+}
+
+extension EnvironmentValues {
+    /// Whether the window that holds a view is on screen, for views that
+    /// move continuously: SwiftUI keeps an animation running, and the main
+    /// thread busy at the display's rate, in a window nobody can see. True
+    /// unless an ancestor tracks its window with `tracksWindowOnScreen()`.
+    var isWindowOnScreen: Bool {
+        get { self[WindowOnScreenKey.self] }
+        set { self[WindowOnScreenKey.self] = newValue }
+    }
+
+    /// Says a subtree's window is on screen or not, whatever the window
+    /// itself reports; nil asks the window. Renders use it to draw a live
+    /// state in a window that is never shown.
+    var windowOnScreenOverride: Bool? {
+        get { self[WindowOnScreenOverrideKey.self] }
+        set { self[WindowOnScreenOverrideKey.self] = newValue }
+    }
+}
+
+/// Tells its content whether their window is on screen: ordered in and not
+/// minimized, covered completely, or on another Space.
+private struct WindowOnScreenTracking: ViewModifier {
+    /// On screen until the window says otherwise, so content never waits
+    /// for the answer to start moving.
+    @State private var isOnScreen = true
+    @Environment(\.windowOnScreenOverride) private var override
+
+    func body(content: Content) -> some View {
+        content
+            .environment(\.isWindowOnScreen, override ?? isOnScreen)
+            .background {
+                WindowOnScreenProbe(isOnScreen: $isOnScreen)
+                    .frame(width: 0, height: 0)
+                    .allowsHitTesting(false)
+                    .accessibilityHidden(true)
+            }
+    }
+}
+
+/// An empty view that reports its window's occlusion as AppKit announces it.
+private struct WindowOnScreenProbe: NSViewRepresentable {
+    @Binding var isOnScreen: Bool
+
+    func makeNSView(context: Context) -> ProbeView {
+        let view = ProbeView()
+        view.onChange = { isOnScreen = $0 }
+        return view
+    }
+
+    func updateNSView(_ view: ProbeView, context: Context) {}
+
+    final class ProbeView: NSView {
+        var onChange: ((Bool) -> Void)?
+        private var observer: NSObjectProtocol?
+        private var reported: Bool?
+
+        deinit {
+            if let observer { NotificationCenter.default.removeObserver(observer) }
+        }
+
+        override func viewDidMoveToWindow() {
+            super.viewDidMoveToWindow()
+            stopObserving()
+            guard let window else { return }
+            observer = NotificationCenter.default.addObserver(
+                forName: NSWindow.didChangeOcclusionStateNotification, object: window, queue: .main
+            ) { [weak self] _ in
+                MainActor.assumeIsolated { self?.report() }
+            }
+            // SwiftUI is still placing this view; its state may change once it has.
+            DispatchQueue.main.async { [weak self] in self?.report() }
+        }
+
+        override func viewWillMove(toWindow newWindow: NSWindow?) {
+            super.viewWillMove(toWindow: newWindow)
+            if newWindow == nil { stopObserving() }
+        }
+
+        private func stopObserving() {
+            if let observer { NotificationCenter.default.removeObserver(observer) }
+            observer = nil
+        }
+
+        private func report() {
+            guard let window else { return }
+            let isOnScreen = window.occlusionState.contains(.visible)
+            guard isOnScreen != reported else { return }
+            reported = isOnScreen
+            onChange?(isOnScreen)
+        }
+    }
+}
+
+extension View {
+    /// Gives this view and everything in it `isWindowOnScreen` as their
+    /// window really stands.
+    func tracksWindowOnScreen() -> some View {
+        modifier(WindowOnScreenTracking())
+    }
+}
+
 // MARK: - Palette
 
 /// Charcoal ink on clean white in light mode and ivory ink on near black in

@@ -1406,6 +1406,9 @@ struct DictationDock: View {
         .padding(.horizontal, Self.margin)
         .padding(.top, WFSpace.sm)
         .padding(.bottom, Self.margin)
+        // The record control follows the meter, and its arc turns, only
+        // while this bar's window can be seen.
+        .tracksWindowOnScreen()
     }
 
     /// Built-in modes alone are segments; custom filters or Auto make the
