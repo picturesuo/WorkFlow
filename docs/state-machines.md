@@ -134,6 +134,7 @@ Explicit model (one session):
 Illegal today:
 - (window dock "Ready to dictate", hotkey dictation capturing): two owners of one fact (finding 5).
 - (`isConfirmingCancel`, state not recording) and (`isFinalizing`, state not decoding) are representable; nothing prevents them.
+- Fixed: (`isConfirmingCancel`, confirmation window already over). Only a main-run-loop timer ended the window, so while the main thread was busy past it, or the timer was delivered late, a second Esc still cancelled the recording. `handleCancelRequest` now judges the window by a continuous clock at the press and arms again when it has passed; the timer only clears what the capsule shows. Reproduced by keeping the main thread busy for 17 s inside the old test's wait, which failed with the three errors a loaded combined run had shown, and pinned by `EscapeCancelConfirmationTests`, whose expiry tests move the clock by hand instead of waiting in real time.
 - (state recording, no recorder session): reachable after the recorder failure in finding 2.
 
 Finding 6, the three timing windows after a stop. A new press:

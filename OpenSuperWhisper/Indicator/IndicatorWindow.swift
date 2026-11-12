@@ -33,6 +33,13 @@ class IndicatorViewModel: ObservableObject {
     @Published var recorder: AudioRecorder = .shared
     
     var recordingStartedAt: Date?
+    /// How long a first Esc stays armed. Tests shorten it.
+    var cancelConfirmationWindow = IndicatorViewModel.cancelConfirmationWindow
+    /// The clock the confirmation window is judged by. It keeps running
+    /// while the Mac sleeps. Tests move it by hand.
+    var confirmationClock: () -> ContinuousClock.Instant = { .now }
+    /// When the first Esc armed the confirmation.
+    private var confirmationArmedAt: ContinuousClock.Instant?
     
     var delegate: IndicatorViewDelegate?
     private var hideTimer: Timer?
@@ -187,6 +194,16 @@ class IndicatorViewModel: ObservableObject {
             return false
         }
 
+        // The window is judged by the clock at this press, not by whether
+        // its timer has run yet. The timer runs on the main run loop, so a
+        // busy main thread, or a Mac that slept, can deliver it long after
+        // the window closed; a second Esc that arrives first would otherwise
+        // cancel a recording the first Esc no longer covers.
+        if isConfirmingCancel, let armedAt = confirmationArmedAt,
+           armedAt.duration(to: confirmationClock()) >= .seconds(cancelConfirmationWindow) {
+            resetCancelConfirmation()
+        }
+
         guard state == .recording,
               !AppPreferences.shared.escCancelWithoutConfirmation,
               !isConfirmingCancel,
@@ -197,9 +214,12 @@ class IndicatorViewModel: ObservableObject {
         }
         
         isConfirmingCancel = true
+        confirmationArmedAt = confirmationClock()
         confirmCancelTimer?.invalidate()
-        confirmCancelTimer = Timer.scheduledTimer(withTimeInterval: Self.cancelConfirmationWindow, repeats: false) { [weak self] _ in
-            Task { @MainActor in
+        // The timer only clears what the capsule shows. It is scheduled on
+        // the main run loop, so it fires on the main actor.
+        confirmCancelTimer = Timer.scheduledTimer(withTimeInterval: cancelConfirmationWindow, repeats: false) { [weak self] _ in
+            MainActor.assumeIsolated {
                 self?.resetCancelConfirmation()
             }
         }
@@ -209,6 +229,7 @@ class IndicatorViewModel: ObservableObject {
     private func resetCancelConfirmation() {
         confirmCancelTimer?.invalidate()
         confirmCancelTimer = nil
+        confirmationArmedAt = nil
         isConfirmingCancel = false
     }
     

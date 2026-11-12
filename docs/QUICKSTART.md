@@ -80,6 +80,8 @@ Cleanup never answers what you dictate: a question or request comes back rewritt
 
 WorkFlow launches at login and stays available in the menu bar by default. Dictation works entirely locally before any API is configured.
 
+Escape cancels a dictation. Once a recording has run for 10 seconds, the first Escape only asks you to confirm, and a second Escape within 5 seconds cancels; after those 5 seconds the next Escape asks again, even if WorkFlow was briefly too busy to clear the prompt. **Cancel without confirmation** under More options skips the second Escape.
+
 If you sometimes press Escape accidentally, enable **Settings → Dictation → More options → Ignore Esc while recording**. Escape will then leave active dictations recording; use the configured recording shortcut to finish normally. Escape while a stopped dictation is still transcribing cancels its paste either way; the text stays in History.
 
 ## Custom filters

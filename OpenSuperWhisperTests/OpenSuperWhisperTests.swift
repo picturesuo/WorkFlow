@@ -7,6 +7,7 @@
 
 import XCTest
 import Carbon
+import Combine
 import ApplicationServices
 import AVFoundation
 @testable import OpenSuperWhisper
@@ -1766,22 +1767,84 @@ final class EscapeCancelConfirmationTests: XCTestCase {
         viewModel.cleanup()
     }
 
+    /// The window is judged by the clock at the next Esc. Nothing here waits
+    /// in real time: the clock is moved by hand, so the result cannot depend
+    /// on how busy the machine is.
     func testConfirmationWindowExpiry_resetsConfirmation() {
         let viewModel = makeRecordingViewModel(elapsed: 15)
+        var now = ContinuousClock.now
+        viewModel.confirmationClock = { now }
 
         XCTAssertFalse(viewModel.handleCancelRequest())
         XCTAssertTrue(viewModel.isConfirmingCancel)
 
-        let expectation = expectation(description: "confirmation window expired")
-        DispatchQueue.main.asyncAfter(deadline: .now() + IndicatorViewModel.cancelConfirmationWindow + 0.5) {
-            expectation.fulfill()
-        }
-        wait(for: [expectation], timeout: IndicatorViewModel.cancelConfirmationWindow + 2)
+        now = now.advanced(by: .seconds(IndicatorViewModel.cancelConfirmationWindow))
+        XCTAssertFalse(viewModel.handleCancelRequest(),
+                       "After expiry the next Esc must arm the confirmation again")
+        XCTAssertTrue(viewModel.isConfirmingCancel, "It is armed for a new window")
+        XCTAssertTrue(viewModel.handleCancelRequest(),
+                      "A second Esc inside the new window cancels")
+
+        viewModel.cleanup()
+    }
+
+    func testSecondEscJustInsideTheWindow_stillCancels() {
+        let viewModel = makeRecordingViewModel(elapsed: 15)
+        var now = ContinuousClock.now
+        viewModel.confirmationClock = { now }
+
+        XCTAssertFalse(viewModel.handleCancelRequest())
+        now = now.advanced(by: .seconds(IndicatorViewModel.cancelConfirmationWindow - 0.01))
+        XCTAssertTrue(viewModel.handleCancelRequest(),
+                      "The confirmation stays armed for the whole window")
+
+        viewModel.cleanup()
+    }
+
+    /// The timer clears what the capsule shows once the window has passed.
+    /// The test waits for that change itself, with a window short enough to
+    /// keep it quick. The timeout only bounds a timer that never fires: a
+    /// busy main thread delays the change, it does not fail the test.
+    func testConfirmationWindowTimer_clearsTheVisibleConfirmation() {
+        let viewModel = makeRecordingViewModel(elapsed: 15)
+        viewModel.cancelConfirmationWindow = 0.05
+
+        XCTAssertFalse(viewModel.handleCancelRequest())
+        XCTAssertTrue(viewModel.isConfirmingCancel)
+
+        let cleared = expectation(description: "the visible confirmation cleared")
+        let observation = viewModel.$isConfirmingCancel
+            .dropFirst()
+            .filter { !$0 }
+            .first()
+            .sink { _ in cleared.fulfill() }
+        wait(for: [cleared], timeout: 60)
+        observation.cancel()
 
         XCTAssertFalse(viewModel.isConfirmingCancel,
                        "Confirmation must reset after the window expires")
         XCTAssertFalse(viewModel.handleCancelRequest(),
                        "After expiry the next Esc must arm the confirmation again")
+
+        viewModel.cleanup()
+    }
+
+    /// The main thread is busy past the window, so the timer has had no
+    /// chance to run when the next Esc arrives. That Esc must still arm
+    /// again; before the window was judged by the clock it cancelled the
+    /// recording.
+    func testABusyMainThreadPastTheWindow_doesNotLetALateEscCancel() {
+        let viewModel = makeRecordingViewModel(elapsed: 15)
+        viewModel.cancelConfirmationWindow = 0.2
+
+        XCTAssertFalse(viewModel.handleCancelRequest())
+        // The run loop does not turn while the thread sleeps.
+        Thread.sleep(forTimeInterval: 0.5)
+        XCTAssertTrue(viewModel.isConfirmingCancel, "The timer has not run yet")
+
+        XCTAssertFalse(viewModel.handleCancelRequest(),
+                       "The window has passed, so this Esc arms the confirmation again")
+        XCTAssertTrue(viewModel.isConfirmingCancel)
 
         viewModel.cleanup()
     }
